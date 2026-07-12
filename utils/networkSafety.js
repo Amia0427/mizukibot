@@ -28,8 +28,7 @@ function isPrivateIpv6(host) {
   const h = normalizeHost(host);
   if (!h) return true;
   if (h === '::1' || h === '::') return true;
-  const mappedIpv4 = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-  if (mappedIpv4) return isPrivateIpv4(mappedIpv4[1]);
+  if (h.startsWith('::ffff:')) return true;
   // Unique local fc00::/7 and link-local fe80::/10.
   if (/^f[cd][0-9a-f]*:/i.test(h)) return true;
   if (/^fe[89ab][0-9a-f]*:/i.test(h)) return true;
@@ -217,6 +216,7 @@ async function resolveSafeModelEndpoint(rawUrl = '', options = {}) {
 module.exports = {
   assertSafeHttpUrl,
   assertSafeModelEndpoint,
+  createPinnedLookup,
   requestSafeHttpUrl,
   resolveSafeHttpUrl,
   resolveSafeModelEndpoint,

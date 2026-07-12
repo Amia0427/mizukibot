@@ -95,6 +95,46 @@ function inspectTokenPosture(config = {}) {
   };
 }
 
+function inspectNapCatReverseAuth(config = {}) {
+  const enabled = config.NAPCAT_HTTP_REVERSE_ENABLED !== false;
+  const secretConfigured = isConfigured(config.NAPCAT_HTTP_REVERSE_SECRET);
+  const legacyBearerEnabled = config.NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER !== false;
+  const findings = [];
+
+  if (enabled && !secretConfigured) {
+    findings.push(makeFinding(
+      'napcat-reverse-secret-missing',
+      'error',
+      'NapCat HTTP reverse secret is missing',
+      'The HTTP reverse ingress cannot start without NAPCAT_HTTP_REVERSE_SECRET.',
+      'Set a strong random NAPCAT_HTTP_REVERSE_SECRET before enabling HTTP reverse ingress.'
+    ));
+  } else if (enabled && legacyBearerEnabled) {
+    findings.push(makeFinding(
+      'napcat-reverse-legacy-auth-enabled',
+      'warn',
+      'NapCat HTTP reverse compatibility authentication is enabled',
+      'Static Bearer/X-NapCat-Token authentication remains enabled for native NapCat HTTP clients and does not provide replay protection.',
+      'Keep the ingress bound to a trusted network, or disable NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER after all callers support signed requests.'
+    ));
+  } else {
+    findings.push(makeFinding(
+      'napcat-reverse-auth-strong',
+      'ok',
+      'NapCat HTTP reverse signed authentication is enforced',
+      enabled ? 'Legacy static-token authentication is disabled.' : 'HTTP reverse ingress is disabled.'
+    ));
+  }
+
+  return {
+    status: summarizeLevel(findings),
+    enabled,
+    secret: secretConfigured ? 'configured' : 'missing',
+    mode: legacyBearerEnabled ? 'signed-with-legacy-compatibility' : 'signed-only',
+    findings
+  };
+}
+
 function inspectApiBaseUrls(config = {}) {
   const items = [];
   const findings = [];
@@ -178,9 +218,10 @@ function inspectSourceSecrets(rootDir = PROJECT_ROOT) {
 
 function collectSecurityDiagnostics(config = require('../config'), options = {}) {
   const tokenPosture = inspectTokenPosture(config);
+  const napCatReverseAuth = inspectNapCatReverseAuth(config);
   const apiBaseUrls = inspectApiBaseUrls(config);
   const sourceSecrets = inspectSourceSecrets(options.rootDir || PROJECT_ROOT);
-  const sections = { tokenPosture, apiBaseUrls, sourceSecrets };
+  const sections = { tokenPosture, napCatReverseAuth, apiBaseUrls, sourceSecrets };
   const findings = Object.values(sections).flatMap((section) => section.findings || []);
   return {
     status: summarizeLevel(findings),
@@ -213,6 +254,7 @@ module.exports = {
   collectSecurityDiagnostics,
   formatSecurityWarning,
   inspectApiBaseUrls,
+  inspectNapCatReverseAuth,
   inspectSourceSecrets,
   inspectTokenPosture,
   logStartupSecurityWarnings,

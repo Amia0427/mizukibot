@@ -3,6 +3,9 @@ const path = require('path');
 const cheerio = require('cheerio');
 const axios = require('axios');
 const config = require('../../config');
+const { requestSafeHttpUrl } = require('../../utils/networkSafety');
+
+const MAX_REMOTE_BYTES = 2 * 1024 * 1024;
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -15,20 +18,31 @@ function summarizePlainText(text = '', length = 'short') {
   return normalized.slice(0, maxChars) + (normalized.length > maxChars ? '...' : '');
 }
 
-async function summarizeInput({ input = '', length = 'short' } = {}, dataDir) {
+async function summarizeInput({ input = '', length = 'short' } = {}, dataDir, options = {}) {
   const target = normalizeText(input);
   if (!target) return '请提供 input（URL 或文件路径）。';
 
   if (/^https?:\/\//i.test(target)) {
     try {
-      const response = await axios.get(target, {
-        timeout: 15000,
-        proxy: false,
-        headers: {
-          'User-Agent': config.HTTP_USER_AGENT
+      const response = await requestSafeHttpUrl(target, {
+        lookup: options.lookup,
+        maxRedirects: 5,
+        request: options.request || axios.get,
+        requestOptions: {
+          timeout: 15000,
+          maxContentLength: MAX_REMOTE_BYTES,
+          maxBodyLength: MAX_REMOTE_BYTES,
+          responseType: 'text',
+          proxy: false,
+          headers: {
+            'User-Agent': config.HTTP_USER_AGENT
+          }
         }
       });
       const html = String(response.data || '');
+      if (Buffer.byteLength(html, 'utf8') > MAX_REMOTE_BYTES) {
+        throw new Error(`response exceeds ${MAX_REMOTE_BYTES} byte limit`);
+      }
       const $ = cheerio.load(html);
       $('script,style,noscript,iframe,svg').remove();
       const title = normalizeText($('title').first().text());

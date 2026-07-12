@@ -30,6 +30,9 @@ async function assertRejectsUnsafe(url, lookupAddress) {
   assert.strictEqual(isUnsafeHttpUrl('http://10.0.0.1/x'), true);
   assert.strictEqual(isUnsafeHttpUrl('http://172.16.0.1/x'), true);
   assert.strictEqual(isUnsafeHttpUrl('http://192.168.1.1/x'), true);
+  assert.strictEqual(isUnsafeHttpUrl('http://[::ffff:127.0.0.1]/x'), true);
+  assert.strictEqual(isUnsafeHttpUrl('http://[::ffff:7f00:1]/x'), true);
+  assert.strictEqual(isUnsafeHttpUrl('http://[fe80::1]/x'), true);
   assert.strictEqual(isUnsafeHttpUrl('https://example.com/image.png'), false);
 
   assert.strictEqual(await assertRejectsUnsafe('http://127.0.0.1:3000/x'), false);

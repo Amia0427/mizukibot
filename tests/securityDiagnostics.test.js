@@ -4,6 +4,7 @@ const {
   collectSecurityDiagnostics,
   formatSecurityWarning,
   inspectApiBaseUrls,
+  inspectNapCatReverseAuth,
   inspectSourceSecrets,
   inspectTokenPosture
 } = require('../utils/securityDiagnostics');
@@ -13,6 +14,8 @@ const baseConfig = {
   WEB_TOKEN: '',
   LOCAL_COMMAND_BRIDGE_ENABLED: true,
   LOCAL_COMMAND_BRIDGE_TOKEN: '',
+  NAPCAT_HTTP_REVERSE_SECRET: 'reverse-secret',
+  NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER: true,
   API_BASE_URL: 'https://api.example.com/v1'
 };
 
@@ -32,6 +35,23 @@ assert.strictEqual(configuredTokens.localCommandBridgeExecution, 'available');
 
 const publicBind = inspectTokenPosture({ ...baseConfig, WEB_BIND_HOST: '0.0.0.0' });
 assert.ok(publicBind.findings.some((finding) => finding.id === 'web-token-missing-public-bind'));
+
+const compatibleNapCatAuth = inspectNapCatReverseAuth({
+  NAPCAT_HTTP_REVERSE_ENABLED: true,
+  NAPCAT_HTTP_REVERSE_SECRET: 'reverse-secret',
+  NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER: true
+});
+assert.strictEqual(compatibleNapCatAuth.status, 'warn');
+assert.strictEqual(compatibleNapCatAuth.mode, 'signed-with-legacy-compatibility');
+assert.ok(compatibleNapCatAuth.findings.some((finding) => finding.id === 'napcat-reverse-legacy-auth-enabled'));
+
+const signedOnlyNapCatAuth = inspectNapCatReverseAuth({
+  NAPCAT_HTTP_REVERSE_ENABLED: true,
+  NAPCAT_HTTP_REVERSE_SECRET: 'reverse-secret',
+  NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER: false
+});
+assert.strictEqual(signedOnlyNapCatAuth.status, 'ok');
+assert.strictEqual(signedOnlyNapCatAuth.mode, 'signed-only');
 
 const apiUrls = inspectApiBaseUrls({
   API_BASE_URL: 'https://api.example.com/v1',

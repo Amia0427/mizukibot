@@ -16,18 +16,22 @@ function printTextReport(report) {
   }
 }
 
-function main() {
-  const json = process.argv.includes('--json');
-  const report = collectSecurityDiagnostics();
+function main(options = {}) {
+  const argv = options.argv || process.argv;
+  const stdout = options.stdout || process.stdout;
+  const collectDiagnostics = options.collectDiagnostics || collectSecurityDiagnostics;
+  const json = argv.includes('--json');
+  const report = collectDiagnostics();
   if (json) {
-    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
-    return;
+    stdout.write(JSON.stringify(report, null, 2) + '\n');
+  } else {
+    printTextReport(report);
   }
-  printTextReport(report);
+  return report.status === 'error' ? 1 : 0;
 }
 
 if (require.main === module) {
-  main();
+  process.exitCode = main();
 }
 
-module.exports = { printTextReport };
+module.exports = { main, printTextReport };

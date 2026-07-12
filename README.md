@@ -161,6 +161,17 @@ npm run console           # 交互控制台
 npm run start:post-reply-worker   # 单独跑后台学习 worker
 ```
 
+### NapCat HTTP reverse 鉴权
+
+HTTP reverse 入口必须配置 `NAPCAT_HTTP_REVERSE_SECRET`。原生 NapCat HTTP client 可在受控 loopback 网络内使用同一 token 的兼容模式；反向代理或自定义客户端应发送 `X-NapCat-Timestamp`、`X-NapCat-Nonce` 和 `X-NapCat-Signature: sha256=<hex>`，签名正文为 `timestamp.nonce.rawBody`。签名请求会校验时间窗并拒绝 nonce 重放，静态 Bearer 兼容模式不具备防重放能力。
+
+```bash
+npm run smoke:napcat-ingress
+node scripts/run-tests.js tests/napcatHttpReverseServer.test.js
+```
+
+Compose 默认只把 3002 发布到宿主 loopback；跨主机接入必须经过受控代理，并在所有调用方支持签名后关闭 `NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER`。
+
 ## 常用命令
 
 ```bash
@@ -220,7 +231,7 @@ Docker 部署说明见 [`deploy/docker/README.md`](deploy/docker/README.md)；�
 
 更新 2026-06-25 13:00 +08:00：`amia/dev` 的 Docker 构建只复制运行白名单；真实 `.env`、运行数据、密钥文件、本地 MCP 配置和私有 prompt 不进入镜像，私有 prompt 由 Compose 运行时只读挂载。
 
-更新 2026-06-26 01:52 +08:00：本地 WSL/Docker 链路已用国内镜像源完成真实 smoke：DaoCloud 拉取基础镜像，Dockerfile 依赖安装默认走 `registry.npmmirror.com`，临时端口 `49105/49106` 下 `docker-compose build`、`docker-compose up -d`、Web security status 200、NapCat reverse 204 和容器内 Node 语法检查均通过。
+更新 2026-06-26 01:52 +08:00：本地 WSL/Docker 链路已用国内镜像源完成真实 smoke：DaoCloud 拉取基础镜像，Dockerfile 依赖安装默认走 `registry.npmmirror.com`，临时端口 `49105/49106` 下 `docker-compose build`、`docker-compose up -d`、Web security status 200、NapCat reverse 鉴权请求 204 和容器内 Node 语法检查均通过；当前探针必须携带兼容 token 或签名头，空对象 POST 不再是有效探针。
 
 更新 2026-06-26 02:30 +08:00：复查 Git、忽略规则和 `mizukibot:local` 镜像，未发现真实 `.env`、密钥文件、本地 MCP 配置、私有 prompt 或运行数据进入仓库/镜像；新增初学者容器化部署文档。
 
@@ -320,3 +331,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-07-12 14:25 +08:00，新增最小 /healthz 探针，Compose 主服务配置 healthcheck，post-reply worker 等待 service_healthy；处理器和 YAML 验收通过，真实容器门控等待 Docker daemon。
 维护记录：2026-07-12 14:40 +08:00，本地私有 admin prompt 已移除异常双响应指令并恢复 QQ 当前消息契约；过期的 120000 token 测试断言同步为现行 9200，四组 prompt 回归通过。
 维护记录：2026-07-12 15:20 +08:00，lint 已覆盖 727 个 JS 与全部 71 个 chunk，完整 npm test 在 307.5 秒内全部通过，依赖审计 0 漏洞且安全/密钥诊断通过；Docker daemon 已启动，但真实镜像构建仍阻塞于基础镜像获取。
+维护记录：2026-07-12 16:51 +08:00，已建立 32 项仓库改进总路线与第一阶段安全边界执行计划，并将 README、Docker 部署文档中的 NapCat reverse 说明更新为签名/显式兼容模式；本轮只改文档，验收为计划文件存在、旧空对象/Bearer-only 探针已明确标注失效且 `git diff --check` 通过。

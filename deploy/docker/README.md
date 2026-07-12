@@ -98,4 +98,23 @@ NapCat HTTP reverse 默认入口：
 http://127.0.0.1:3002/
 ```
 
-NapCat 必须为反向 HTTP 请求携带 `Authorization: Bearer <NAPCAT_HTTP_REVERSE_SECRET>`；也兼容 `X-NapCat-Token` 请求头。Compose 只把该端口发布到宿主机 loopback，确需跨主机接入时应通过受控反向代理转发并保留鉴权头。
+原生 NapCat HTTP client 可在宿主 loopback 上使用 `NAPCAT_HTTP_REVERSE_SECRET` token 的兼容模式。跨主机代理或自定义客户端应使用 HMAC 签名请求；签名字符串为 `timestamp.nonce.rawBody`，请求头为 `X-NapCat-Timestamp`、`X-NapCat-Nonce` 和 `X-NapCat-Signature: sha256=<hex>`。签名模式会校验时间窗并拒绝 nonce 重放，静态 Bearer / `X-NapCat-Token` 仅为兼容模式，不提供防重放能力。
+
+Linux/WSL 签名探针：
+
+```bash
+body='{"post_type":"meta_event","meta_event_type":"heartbeat","status":{}}'
+timestamp=$(date +%s%3N)
+nonce=$(openssl rand -hex 16)
+signature=$(printf '%s.%s.%s' "$timestamp" "$nonce" "$body" | openssl dgst -sha256 -hmac "$NAPCAT_HTTP_REVERSE_SECRET" -hex | awk '{print $2}')
+curl -i http://127.0.0.1:3002/ \
+  -H 'Content-Type: application/json' \
+  -H "X-NapCat-Timestamp: $timestamp" \
+  -H "X-NapCat-Nonce: $nonce" \
+  -H "X-NapCat-Signature: sha256=$signature" \
+  --data "$body"
+```
+
+期望返回 `204`。匿名空对象 POST、错误签名、过期时间戳或重复 nonce 都不是有效健康探针。Compose 只把该端口发布到宿主机 loopback；所有调用方支持签名后，应设置 `NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER=false`。
+
+更新 2026-07-12 16:51 +08:00：NapCat reverse 验证说明已从 Bearer-only/空对象探针更新为 HMAC 签名和显式兼容模式；本轮仅更新文档，未声称容器运行态已重新验收。

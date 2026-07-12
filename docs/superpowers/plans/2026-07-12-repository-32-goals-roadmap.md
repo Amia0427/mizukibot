@@ -1,0 +1,129 @@
+# Repository 32 Goals Roadmap Implementation Plan
+
+> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 按风险、依赖和可验收性完成仓库审计提出的 32 个改进目标，并为每一项保留当前代码、测试、命令输出或运行态探针作为完成证据。
+
+**Architecture:** 将跨安全、质量、运行时架构、数据运维和供应链的目标拆成五个可独立验收的阶段。先关闭外部攻击面和数据泄露风险，再建立质量门禁，随后处理模块边界和依赖，最后完成存储运维与供应链治理；已有实现只复核和补齐，不重复重写。
+
+**Tech Stack:** Node.js 20、CommonJS、Express、Axios、SQLite、Docker Compose、PowerShell、项目自定义测试运行器。
+
+---
+
+## 当前证据快照
+
+更新时间：2026-07-12 16:51 +08:00。
+
+- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 15 个提交。
+- 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
+- 已确认的完整基线：`npm run lint` 覆盖 727 个 JS 文件和 71 个 chunk；完整 `npm test` 最近一次自然结束用时 307.5 秒。
+- 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
+
+## 32 项状态
+
+- [ ] **1. NapCat HTTP 入口认证与防重放** — 实施中。工作区已有 HMAC、时间戳、nonce、重放缓存、事件类型校验、请求体限制和限流改动；仍需完成兼容模式说明、定向测试和提交验收。
+- [ ] **2. 图片缓存 SSRF** — 实施中。`utils/imageInputCache.js` 正在接入逐跳安全请求边界；未提交、未完成全套验收。
+- [ ] **3. `skill_summarize` SSRF** — 实施中。`api/skills_native/summarize.js` 正在复用 `requestSafeHttpUrl` 并限制响应大小；未提交、未完成全套验收。
+- [ ] **4. `.env` 与 `data` ACL** — 未完成。当前 ACL 仍对普通认证用户开放修改或读取。
+- [ ] **5. 取消源码拼接式模块加载** — 未完成。`src/shared/chunkedModule.js` 仍通过 `new Function` 执行共享作用域 chunk，至少 6 个入口依赖。
+- [ ] **6. 消除生产依赖环** — 未完成。必须在 chunk 模块化后重新生成权威依赖图并将循环数降为 0。
+- [ ] **7. 拆除 `legacy/aiHost` 上帝模块** — 未完成。`api/legacy/aiHost.js` 仍约 2096 行，并被 planning、image generation 和测试引用。
+- [ ] **8. 建立最小 CI 门禁** — 未完成。仓库不存在 `.github/workflows`。
+- [ ] **9. 使用 ESLint 取代语法解析器** — 未完成。`scripts/lint.js` 仍以解析和组合入口加载为主。
+- [ ] **10. 核心边界类型检查** — 未完成。无 `typecheck` 脚本或项目级 `checkJs`/TypeScript 配置。
+- [x] **11. 删除未使用的 Runtime V1** — 已完成。`api/legacy/agentGraphV1Runtime.js` 已删除，依赖与失效检查已清理。
+- [ ] **12. 拆分高扇出编排器** — 未完成。Runtime host、router、prepare 仍分别约 1447、1325、1313 行。
+- [ ] **13. 按领域拆分配置并集中校验环境变量** — 未完成。`config/index.js` 约 1258 行，生产域仍有约 186 处 `process.env` 读取。
+- [ ] **14. 统一正常停机与远程重启** — 部分完成。JSON 热存储已移交信号所有权，仍需统一 server、worker、数据库和远程重启的 lifecycle coordinator。
+- [ ] **15. 重构 Web 控制台认证** — 未完成。仍使用静态 token 普通字符串比较，前端仍从 `localStorage` 读取长期 token。
+- [ ] **16. 增加 Web 安全响应头** — 未完成。尚无集中 CSP、HSTS、`frame-ancestors`、nosniff 和 Referrer Policy 门禁。
+- [ ] **17. 容器最小权限运行** — 部分完成。已切换非 root 并收缩端口，仍缺只读根文件系统、能力收缩、`no-new-privileges`、资源限制和真实容器验收。
+- [x] **18. 收缩 Compose 网络暴露面** — 已完成默认 loopback 绑定；跨主机部署仍需受控代理和鉴权说明。
+- [ ] **19. 日志脱敏、保留和容量限制** — 未完成。`LOG_ROTATE_MAX_FILES` 默认仍为 0，缺少统一 TTL、目录配额和磁盘水位告警。
+- [ ] **20. 限制请求追踪日志内容** — 未完成。`appendRequestTraceEvent` 仍展开调用方 payload，缺少字段白名单和统一敏感值清洗。
+- [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
+- [ ] **22. 测试运行器并发和超时** — 部分完成。已有默认单文件 60 秒超时，仍为串行执行且 307.5 秒未达到两分钟目标。
+- [ ] **23. 减少源码文本断言测试** — 未完成。多个 `*Source.test.js` 仍依赖 `includes/indexOf` 和源码顺序。
+- [ ] **24. 强化提示词清单检查** — 未完成。需将未引用资产和冲突标签例外显式 allowlist，并让新增警告失败。
+- [ ] **25. SQLite 多进程并发与完整性检查** — 未完成。缺少统一连接工厂、`busy_timeout`、checkpoint、`quick_check` 和多进程压测门禁。
+- [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。
+- [ ] **27. 健康、就绪和优雅退出** — 部分完成。已有 `/healthz` 与 `service_healthy`，仍缺 `/live`、`/ready`、排空和完整资源关闭。
+- [ ] **28. 扩展安全诊断** — 实施中。工作区正增加 NapCat 鉴权诊断；仍需覆盖 ACL、监听地址、日志容量、容器基线并在 error 时非零退出。
+- [ ] **29. 供应链安全门禁** — 未完成。无固定镜像 digest、SBOM、gitleaks、OSV/Trivy/Grype 和许可证门禁。
+- [ ] **30. 会话研究缓存全局容量限制** — 未完成。`utils/sessionResearchCache.js` 只限制单会话 8 条，未限制总会话数。
+- [ ] **31. 统一 Node 版本** — 未完成。以 `package.json` 的 Node 20 为基准，仍需核对并统一全部部署文档、脚本和 CI。
+- [ ] **32. 建立依赖升级节奏** — 未完成。无自动补丁升级、月度窗口和大版本 smoke 流程。
+
+## 阶段与计划文件
+
+### Phase 1: 安全边界与数据保护
+
+计划：`docs/superpowers/plans/2026-07-12-security-boundaries-data-protection.md`
+
+- [ ] 完成目标 1、2、3、4、15、16、20、28。
+- [ ] 复核目标 18 的跨主机接入文档和签名探针。
+- [ ] 每个安全边界使用行为测试和真实配置探针验收。
+
+### Phase 2: 质量门禁
+
+建议计划：`docs/superpowers/plans/2026-07-12-quality-gates.md`
+
+- [ ] 先统一 Node 20，再建立执行现有 lint、测试、prompt、audit 的最小 CI。
+- [ ] 将测试运行器改为有限并发和慢测统计，再接覆盖率门禁。
+- [ ] 用行为测试替换妨碍重构的源码文本断言。
+- [ ] 分阶段引入 ESLint 和核心边界类型检查，避免一次性制造不可审查的大 diff。
+- [ ] 完成目标 8、9、10、21、22、23、24、31。
+
+### Phase 3: 运行时模块化
+
+建议计划：`docs/superpowers/plans/2026-07-12-runtime-modularization.md`
+
+- [ ] 按 message、runtime context、memory vector、passive awareness、meme、daily share 六个入口逐个替换共享作用域 chunk。
+- [ ] 共享作用域消失后生成依赖图，逐个消除生产循环。
+- [ ] 抽取 planning、image generation、model request 和 memory 接口，再删除 `legacy/aiHost`。
+- [ ] 在稳定接口上拆分 host、router、prepare 和领域配置。
+- [ ] 用单一 lifecycle coordinator 收口退出、重启和资源关闭。
+- [ ] 完成目标 5、6、7、12、13、14。
+
+### Phase 4: 数据与运行运维
+
+建议计划：`docs/superpowers/plans/2026-07-12-storage-operations.md`
+
+- [ ] 统一日志保留、脱敏、容量和水位告警。
+- [ ] 先建立 SQLite 连接工厂与完整性检查，再实现一致性快照和恢复演练。
+- [ ] 完成 readiness、排空、数据库关闭和容器真实验收。
+- [ ] 为研究缓存增加全局容量、主动过期和 eviction 指标。
+- [ ] 完成目标 17、19、25、26、27、30。
+
+### Phase 5: 供应链与依赖维护
+
+建议计划：`docs/superpowers/plans/2026-07-12-supply-chain-maintenance.md`
+
+- [ ] 在 CI 稳定后固定基础镜像 digest，加入 secrets、漏洞、SBOM 和许可证检查。
+- [ ] 建立补丁自动验证、月度升级窗口和大版本独立 smoke。
+- [ ] 完成目标 29、32。
+
+## 关键依赖与冲突
+
+- [ ] 目标 23 应在目标 5、7、12 前完成；否则源码断言会把正常拆分误报为失败。
+- [ ] 目标 5 是目标 6、9 全覆盖、10 和 12 的强前置；共享作用域 chunk 会让静态依赖和类型结果失真。
+- [ ] 目标 7 与 12 必须在同一架构边界下推进，不能直接删除 `aiHost` 后把职责重新堆入另一个大文件。
+- [ ] 目标 22 应先于 21；测试进程模型稳定后再建立覆盖率基线。
+- [ ] 目标 8 可先执行当前门禁，随后逐步加入 ESLint、typecheck、coverage 和供应链检查。
+- [ ] 目标 25 应先于 26；没有统一 SQLite 连接与 checkpoint 策略，备份一致性无法证明。
+- [ ] 目标 14 与 27 共用 lifecycle coordinator，必须一起设计退出顺序和 readiness 状态。
+- [ ] 目标 29 依赖目标 8，目标 32 依赖稳定 CI 和可靠 smoke。
+- [ ] 目标 4 会改变共享工作区访问权，必须在阶段末执行：先识别真实服务账号、保存 ACL 快照、完成代码和文档提交，再应用 ACL。
+- [ ] 目标 15 会同时影响服务端鉴权、内嵌管理页和现有测试，相关文件必须原子修改，不能拆到互相不可用的提交。
+
+## 总体验收
+
+- [ ] `npm run lint`
+- [ ] `npm run check:prompts`
+- [ ] `npm run check:secrets`
+- [ ] `npm audit --omit=dev`
+- [ ] `npm run diag:security -- --json`
+- [ ] `npm test`
+- [ ] `git diff --check`
+- [ ] 每个目标在 `docs/maintenance-log.md` 保留命令、退出码、时间戳和未完成项。
+- [ ] 仅在 32 项均有权威完成证据后，将本计划全部勾选。
