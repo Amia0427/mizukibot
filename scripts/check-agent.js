@@ -30,7 +30,7 @@ async function main() {
     return 1;
   }
 
-  for (const d of ['@langchain/core', '@langchain/langgraph', '@langchain/openai', 'zod']) {
+  for (const d of ['@langchain/core', '@langchain/langgraph', 'zod']) {
     try {
       require.resolve(d);
       ok(`依赖已安装: ${d}`);

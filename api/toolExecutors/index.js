@@ -751,8 +751,7 @@ const TOOL_EXECUTORS = {
     return [
       checkNodeRuntimeCapability('axios'),
       checkNodeRuntimeCapability('cheerio'),
-      checkNodeRuntimeCapability('@langchain/core'),
-      checkNodeRuntimeCapability('@langchain/openai')
+      checkNodeRuntimeCapability('@langchain/core')
     ].join('\n');
   },
 
