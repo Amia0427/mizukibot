@@ -1474,3 +1474,4 @@
 - 根因：`NAPCAT_HTTP_REVERSE_SECRET` 安全必填项已上线，但本机 `.env` 没有同步 `D:\napcat\config\onebot11_3326471600.json` 中现有 HTTP Client token，主进程在 `startNapCatTransport` 阶段退出。
 - 修复：通过仓库现有 `scripts/configure-napcat-onebot.js` 同步 NapCat HTTP Server/Client token 到 `.env`，随后执行 `restart-bot.cmd restart confirm`；业务代码未改动。
 - 验收：主进程 PID 10040 持续运行；NapCat `get_status` 返回 `online=true`、`good=true`；3000/3002 端口分别由 NapCat/Bot 监听；反向入口正确 token 通过鉴权并对无效载荷返回 400；`npm run smoke:napcat-ingress` 全部通过。
+- 提交后记录：修复与验收记录提交 `73f2a86` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
