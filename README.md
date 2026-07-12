@@ -16,6 +16,13 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - **回复出口拦截**：群聊和普通用户私聊发送前使用本地政治敏感词库快照，并要求命中现实政治语境后才替换；管理员私聊豁免，角色扮演标记不作为豁免。
 - **运维诊断**：重启、健康检查、请求 trace、token 预算、NapCat 状态、记忆质量、运行热点一应俱全。
 
+## 运行维护 2026-07-12 12:25
+
+- 小目标：清理仓库内已确认零调用的 P0 遗留代码，不触碰动态 chunk、Telegram 和可能对外兼容的 facade。
+- 最小修复：删除 `api/legacy/agentGraphV1Runtime.js`、`api/skills.js`、`api/systemCommandProxy.js`、`api/toolAdapter.js`，共移除 2158 行遗留模块代码；同步移除 `@langchain/anthropic`、`@langchain/openai`、`dayjs` 直接依赖、131 行依赖锁内容及两处失效依赖检查。
+- 验收：运行代码 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、28 个 LangGraph/native skills/tool/runtime 相关测试、关键模块 require smoke、`npm ls`、`npm pack --dry-run` 和 `git diff --check` 均通过；全量 482 个测试在 10 分钟命令上限内未结束，未记为通过。
+- 小目标已完成：P0 死代码和独占依赖已移除，V2 LangGraph、native skills 与 npm 发布清单保持可用。
+
 ## 并发与后台线程
 
 更新 2026-07-09 17:48 +08:00：修复主回复 prepare 软超时 fallback 在非召回 `chat/default/direct_chat` 下构造 ambient memory context 并注入 `retrieved_memory_lite/daily_journal` 的问题；非召回普通主回复不再构造 fallback memory context，显式召回保持原记忆 fallback。验收结果：`node scripts/run-tests.js tests/runtimeV2PromptTimeoutMemoryFallback.test.js tests/chatDefaultMemoryLeakDiagnostics.test.js tests/geminiSamplingDegradationPromptGate.test.js` 通过；真实 24h 诊断仍显示修复前日志中 `candidateChatDefaultRequests=49`、`violationRequests=15`。小目标已完成。
@@ -305,3 +312,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-07-12 12:25 +08:00，主进程陈旧锁替换已增加原子获取门闩，退出时直接删除自有锁；双进程竞争连续 20 轮均仅一个实例成功启动。
 维护记录：2026-07-12 12:40 +08:00，NapCat HTTP 反向入口已强制使用 timing-safe 共享密钥鉴权，缺少密钥拒绝启动；Docker 端口 3002 默认仅发布到宿主 loopback，匿名管理员伪造回归测试通过。
 维护记录：2026-07-12 13:00 +08:00，`web_fetch` 与 RSS 已统一使用逐跳 DNS/重定向安全校验并固定连接到已验证公网 IP；私网 DNS 和 302 跳内网回归测试通过。
+维护记录：2026-07-12 13:15 +08:00，NapCat 动作重试已按送达确定性分类：仅明确的连接前失败可重试，超时或响应丢失不再重发非幂等消息；相关 4 组定向测试通过。

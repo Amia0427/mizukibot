@@ -34,6 +34,7 @@ const { createMessageIngressDispatcher } = require('./core/messageIngressDispatc
 const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
 const { maybeSendRestartResultFeedback } = require('./utils/restartResultFeedback');
 const { flushAllHotStoresSync } = require('./utils/jsonHotStore');
+const { sendNapCatActionWithRetry } = require('./utils/napcatActionRetry');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE
@@ -416,17 +417,12 @@ function askAIByGraph(...args) {
 }
 
 async function sendWithRetry(payload, retries = 1, waitMs = 500) {
-  const maxRetry = Math.max(0, Number(retries) || 0);
-  for (let i = 0; i <= maxRetry; i++) {
-    try {
-      await napcatActionClient.callAction(payload.action, payload.params);
-      return true;
-    } catch (error) {
-      console.error(`[HTTP action] ${payload.action} failed (attempt ${i + 1}/${maxRetry + 1}):`, error.message);
-      if (i < maxRetry) await new Promise((r) => setTimeout(r, waitMs));
-    }
-  }
-  return false;
+  return sendNapCatActionWithRetry({
+    actionClient: napcatActionClient,
+    payload,
+    retries,
+    waitMs
+  });
 }
 
 const { handleIncomingMessage } = createMessageHandler({

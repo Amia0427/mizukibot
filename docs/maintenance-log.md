@@ -1,3 +1,10 @@
+## 运行维护 2026-07-12 12:25
+
+- 小目标：清理仓库内已确认零调用的 P0 遗留代码，不触碰动态 chunk、Telegram 和可能对外兼容的 facade。
+- 最小修复：删除 `api/legacy/agentGraphV1Runtime.js`、`api/skills.js`、`api/systemCommandProxy.js`、`api/toolAdapter.js`，共移除 2158 行遗留模块代码；同步移除 `@langchain/anthropic`、`@langchain/openai`、`dayjs` 直接依赖、131 行依赖锁内容及两处失效依赖检查。
+- 验收：运行代码 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、28 个 LangGraph/native skills/tool/runtime 相关测试、关键模块 require smoke、`npm ls`、`npm pack --dry-run`、`git diff --check` 均通过；`npm test` 的 482 个测试在 10 分钟命令上限内未结束，因此未记录为全量通过。
+- 小目标已完成：P0 死代码和独占依赖已移除，V2 LangGraph、native skills 与 npm 发布清单保持可用。
+
 ## 运行维护 2026-07-09 19:09
 
 - 小目标：把“瑞希瑞幸”做成相对独立的 QQ 命令功能，只在明确 `瑞希瑞幸` 命令触发，不影响普通聊天、Qzone、定时任务和 MCP lazy discovery。
@@ -1332,3 +1339,10 @@
 - 最小修复：新增统一安全请求边界，每一跳都解析并拒绝私网/混合地址，Axios 自动重定向固定为 0；实际连接使用已验证地址的 pinned lookup，避免校验后再次解析到其他地址。
 - 验收：覆盖公网域名解析到 `127.0.0.1`、公网首跳 302 到 `10.0.0.8`、已验证公网 IP 固定连接三类场景；`networkSafety`、`httpClientSecurity`、`nativeSkills` 定向测试和三个目标文件语法检查全部通过。
 - 小目标已完成：两个聊天抓取入口无法再通过 DNS 或重定向访问本机、内网或元数据地址。
+
+## 运行维护 2026-07-12 13:15 +08:00
+
+- 目标：避免 NapCat 已执行发送但响应超时后，主进程盲目重试造成重复消息。
+- 最小修复：发送重试收口为独立策略，只在连接拒绝、DNS 暂时失败、网络/主机不可达等明确的送达前错误上重试；超时、连接重置等结果不确定错误仍标记离线，但 `retryable=false`。
+- 验收：新增结果不确定错误只调用一次、连接拒绝首次失败后允许第二次成功的回归；NapCat 连接状态、消息回复新鲜度和群回复队列共 4 组定向测试全部通过。
+- 小目标已完成：HTTP 响应丢失或超时不会再次发送同一条非幂等消息。
