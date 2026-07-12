@@ -148,8 +148,11 @@ docker compose run --rm --entrypoint node mizukibot --check scripts/post-reply-w
 检查 Web 面板安全状态：
 
 ```bash
-curl -H "Authorization: Bearer 你的WEB_TOKEN" http://127.0.0.1:3005/api/security-status
+curl -c .web-session-cookie -H "Origin: http://127.0.0.1:3005" -H "Content-Type: application/json" -d '{"token":"你的WEB_TOKEN"}' http://127.0.0.1:3005/api/session
+curl -b .web-session-cookie http://127.0.0.1:3005/api/security-status
 ```
+
+完成后删除本地 `.web-session-cookie`；管理 API 不接受 Bearer 或 query token。（更新：2026-07-12 20:10 +08:00）
 
 检查 NapCat HTTP reverse 入口是否能收到空事件探针：
 
@@ -216,10 +219,11 @@ docker compose up -d
 
 ### Web 面板 401
 
-确认请求带了正确 token：
+在浏览器重新打开 `/login`，或为命令行重新创建短期会话：
 
 ```bash
-curl -H "Authorization: Bearer 你的WEB_TOKEN" http://127.0.0.1:3005/api/security-status
+curl -c .web-session-cookie -H "Origin: http://127.0.0.1:3005" -H "Content-Type: application/json" -d '{"token":"你的WEB_TOKEN"}' http://127.0.0.1:3005/api/session
+curl -b .web-session-cookie http://127.0.0.1:3005/api/security-status
 ```
 
 ### 不小心想清空数据

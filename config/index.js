@@ -153,6 +153,12 @@ module.exports = {
   // Minimal auth token. If empty, panel is restricted to localhost only.
   WEB_TOKEN: pick('WEB_TOKEN', ''),
   WEB_LOCAL_ONLY_WITHOUT_TOKEN: pickBool('WEB_LOCAL_ONLY_WITHOUT_TOKEN', true),
+  WEB_TRUST_PROXY_HOPS: Math.max(0, Math.floor(pickNum('WEB_TRUST_PROXY_HOPS', 0))),
+  WEB_SESSION_TTL_MS: Math.max(60000, pickNum('WEB_SESSION_TTL_MS', 15 * 60 * 1000)),
+  WEB_SESSION_MAX_ACTIVE: Math.max(1, Math.floor(pickNum('WEB_SESSION_MAX_ACTIVE', 128))),
+  WEB_LOGIN_RATE_LIMIT_WINDOW_MS: Math.max(1000, pickNum('WEB_LOGIN_RATE_LIMIT_WINDOW_MS', 5 * 60 * 1000)),
+  WEB_LOGIN_RATE_LIMIT_MAX_ATTEMPTS: Math.max(1, Math.floor(pickNum('WEB_LOGIN_RATE_LIMIT_MAX_ATTEMPTS', 5))),
+  WEB_LOGIN_RATE_LIMIT_MAX_CLIENTS: Math.max(1, Math.floor(pickNum('WEB_LOGIN_RATE_LIMIT_MAX_CLIENTS', 1000))),
 
   // ===== Network =====
   // Clear-by-default to avoid startup failures when no local proxy is running.

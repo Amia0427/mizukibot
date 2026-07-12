@@ -89,8 +89,10 @@ docker compose run --rm --entrypoint sh mizukibot -c 'id -u && touch /app/data/.
 Web 面板默认访问：
 
 ```text
-http://127.0.0.1:3005/?token=<WEB_TOKEN>
+http://127.0.0.1:3005/login
 ```
+
+在登录页输入 `WEB_TOKEN` 后使用短期 `HttpOnly` 会话；Bearer、`x-web-token` 和 query token 不再用于管理 API。（更新：2026-07-12 20:10 +08:00）
 
 NapCat HTTP reverse 默认入口：
 
