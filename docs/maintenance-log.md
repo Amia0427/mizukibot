@@ -1382,3 +1382,10 @@
 - 最小修复：新增不经过管理鉴权、只返回 ok 布尔值的 /healthz；Compose 主服务增加 Node fetch 健康检查，worker 的 depends_on 改为 service_healthy。
 - 已验收：健康处理器响应结构、Web 鉴权不受影响、Docker 安全配置测试通过；PyYAML 确认 healthcheck 和依赖条件结构正确。
 - 待验收：Docker daemon 不可用，主服务故障时 worker 的真实容器门控需在 daemon 可用后复跑。
+
+## 运行维护 2026-07-12 14:40 +08:00
+
+- 目标：恢复 admin prompt 的 QQ 当前消息输出契约和提示词测试基线。
+- 最小修复：本地 Git 忽略的私有 admin.txt 删除预演占位与双响应指令，恢复“只输出当前消息、避免第三人称叙述、遵守系统边界”的明确约束；测试中的短期记忆默认值同步到 2026-06-26 已生效并有文档记录的 9200。
+- 验收：configPersonaPrompt、promptSecurity、promptStageContracts、promptGoldenSnapshots 共 4 组测试全部通过。
+- 小目标已完成：本地私有 prompt 不再要求双响应，提示词契约测试恢复绿色；私有 prompt 继续保持 Git 忽略。

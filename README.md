@@ -318,3 +318,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-07-12 14:00 +08:00，profile journal 诊断 GET 已固定为只读并忽略 auto_clean 参数；数据清洗仅保留在鉴权 POST，路由及鉴权回归测试通过。
 维护记录：2026-07-12 14:15 +08:00，Docker 运行阶段已切换为 node 非 root 用户，3002/3005 均默认只发布到宿主 loopback；静态回归和 Compose YAML 解析通过，真实容器 UID/卷写入验收等待 Docker daemon。
 维护记录：2026-07-12 14:25 +08:00，新增最小 /healthz 探针，Compose 主服务配置 healthcheck，post-reply worker 等待 service_healthy；处理器和 YAML 验收通过，真实容器门控等待 Docker daemon。
+维护记录：2026-07-12 14:40 +08:00，本地私有 admin prompt 已移除异常双响应指令并恢复 QQ 当前消息契约；过期的 120000 token 测试断言同步为现行 9200，四组 prompt 回归通过。

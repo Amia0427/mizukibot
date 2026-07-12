@@ -106,7 +106,7 @@ function estimatePromptTokens(value) {
     assert.ok(personaStyle.includes('客服式表达'), 'persona style must preserve anti-assistant style rules');
 
     assert.strictEqual(config.CONTEXT_WINDOW_MAX_TOKENS, 400000);
-    assert.strictEqual(config.SHORT_TERM_MEMORY_MAX_TOKENS, 120000);
+    assert.strictEqual(config.SHORT_TERM_MEMORY_MAX_TOKENS, 9200);
     assert.strictEqual(config.SHORT_TERM_MEMORY_RECENT_MESSAGES, 240);
     assert.strictEqual(config.SHORT_TERM_MEMORY_RECENT_TURNS, 48);
     assert.strictEqual(config.SHORT_TERM_SCENE_RECENT_TURNS, 24);
