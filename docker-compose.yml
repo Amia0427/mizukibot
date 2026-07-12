@@ -15,7 +15,7 @@ services:
       POST_REPLY_WORKER_INLINE: "false"
       POST_REPLY_WORKER_SUPERVISOR_ENABLED: "false"
     ports:
-      - "${NAPCAT_HTTP_REVERSE_PORT:-3002}:${NAPCAT_HTTP_REVERSE_PORT:-3002}"
+      - "127.0.0.1:${NAPCAT_HTTP_REVERSE_PORT:-3002}:${NAPCAT_HTTP_REVERSE_PORT:-3002}"
       - "${WEB_PORT:-3005}:${WEB_PORT:-3005}"
     volumes:
       - mizukibot-data:/app/data

@@ -27,6 +27,7 @@ NAPCAT_HTTP_API_BASE_URL=http://host.docker.internal:3000
 NAPCAT_HTTP_ACTION_SECRET=your_secret
 NAPCAT_HTTP_REVERSE_PORT=3002
 NAPCAT_HTTP_REVERSE_BIND_HOST=0.0.0.0
+NAPCAT_HTTP_REVERSE_SECRET=your_long_random_reverse_secret
 
 WEB_PORT=3005
 WEB_BIND_HOST=0.0.0.0
@@ -91,3 +92,5 @@ NapCat HTTP reverse 默认入口：
 ```text
 http://127.0.0.1:3002/
 ```
+
+NapCat 必须为反向 HTTP 请求携带 `Authorization: Bearer <NAPCAT_HTTP_REVERSE_SECRET>`；也兼容 `X-NapCat-Token` 请求头。Compose 只把该端口发布到宿主机 loopback，确需跨主机接入时应通过受控反向代理转发并保留鉴权头。

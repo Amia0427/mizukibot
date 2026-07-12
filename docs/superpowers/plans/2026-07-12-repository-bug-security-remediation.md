@@ -45,11 +45,11 @@
 - Modify: `docker-compose.yml`
 - Test: `tests/napcatHttpReverseServer.test.js`
 
-- [ ] 增加匿名、错误密钥、正确密钥和伪造管理员事件测试。
-- [ ] 使用 timing-safe 共享密钥校验，非 loopback 监听时缺少密钥直接拒绝启动。
-- [ ] Compose 默认不公开 3002，示例配置说明反向代理接入方式。
-- [ ] 验证未授权请求不会进入消息处理器。
-- [ ] 更新文档并提交。
+- [x] 增加匿名、错误密钥、正确密钥和伪造管理员事件测试。
+- [x] 使用 timing-safe 共享密钥校验，缺少密钥直接拒绝启动。
+- [x] Compose 默认只向宿主 loopback 发布 3002，示例配置说明受控转发方式。
+- [x] 验证未授权请求不会进入消息处理器。
+- [x] 更新文档并提交。
 
 ### Task 4: 修复 Web Fetch 与 RSS SSRF
 

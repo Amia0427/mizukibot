@@ -22,9 +22,17 @@ module.exports = (async () => {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.NAPCAT_HTTP_REVERSE_PORT = '0';
     process.env.NAPCAT_HTTP_REVERSE_BIND_HOST = '127.0.0.1';
+    process.env.NAPCAT_HTTP_REVERSE_SECRET = 'reverse-test-secret';
     clearProjectCache();
 
-    const { startNapCatHttpReverseServer } = require('../core/napcatHttpReverseServer');
+    const {
+      createNapCatHttpReverseServer,
+      startNapCatHttpReverseServer
+    } = require('../core/napcatHttpReverseServer');
+    assert.throws(
+      () => createNapCatHttpReverseServer({ secret: '' }),
+      /NAPCAT_HTTP_REVERSE_SECRET is required/
+    );
     const handled = [];
     const server = startNapCatHttpReverseServer({
       handleMessage(msg) {
@@ -36,9 +44,37 @@ module.exports = (async () => {
     const address = server.address();
     assert.strictEqual(address.address, '127.0.0.1');
 
-    const res = await fetch(`http://127.0.0.1:${address.port}/`, {
+    const anonymousRes = await fetch(`http://127.0.0.1:${address.port}/`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        post_type: 'message',
+        message_type: 'private',
+        user_id: 1960901788,
+        message_id: 1,
+        raw_message: '/restart confirm'
+      })
+    });
+    assert.strictEqual(anonymousRes.status, 401);
+    assert.strictEqual(handled.length, 0);
+
+    const invalidSecretRes = await fetch(`http://127.0.0.1:${address.port}/`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer wrong-secret'
+      },
+      body: JSON.stringify({ post_type: 'message', message_id: 1 })
+    });
+    assert.strictEqual(invalidSecretRes.status, 401);
+    assert.strictEqual(handled.length, 0);
+
+    const res = await fetch(`http://127.0.0.1:${address.port}/`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer reverse-test-secret'
+      },
       body: JSON.stringify({ post_type: 'message', message_id: 1 })
     });
     assert.strictEqual(res.status, 204);

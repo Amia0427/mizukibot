@@ -106,6 +106,7 @@ module.exports = {
   // HTTP reverse ingress port (NapCat posts events to bot)
   NAPCAT_HTTP_REVERSE_PORT: pickNum('NAPCAT_HTTP_REVERSE_PORT', 3002),
   NAPCAT_HTTP_REVERSE_BIND_HOST: pick('NAPCAT_HTTP_REVERSE_BIND_HOST', '127.0.0.1'),
+  NAPCAT_HTTP_REVERSE_SECRET: pick('NAPCAT_HTTP_REVERSE_SECRET', ''),
   LUCKIN_MCP_ENDPOINT: pick('LUCKIN_MCP_ENDPOINT', 'https://gwmcp.lkcoffee.com/order/user/mcp'),
   LUCKIN_MCP_GLOBAL_TOKEN: pick('LUCKIN_MCP_GLOBAL_TOKEN', pick('LUCKIN_MCP_TOKEN', '')),
   LUCKIN_MCP_TOKEN: pick('LUCKIN_MCP_TOKEN', ''),
