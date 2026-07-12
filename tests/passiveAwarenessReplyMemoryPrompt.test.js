@@ -162,7 +162,7 @@ module.exports = (async () => {
     assert.strictEqual(streamedBodies[0].__provider, 'openai_compatible');
 
     const normalSystemMessages = streamedBodies[0]?.messages?.filter((message) => message?.role === 'system') || [];
-    assert.ok(!normalSystemMessages.some((message) => String(message.content || '').includes(normalUserDefaultText)));
+    assert.ok(normalSystemMessages.some((message) => String(message.content || '').includes(normalUserDefaultText)));
 
     const userPrompt = String(streamedBodies[0]?.messages?.find((message) => message?.role === 'user')?.content || '');
     assert.ok(!userPrompt.includes(normalUserDefaultText));

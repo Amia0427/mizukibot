@@ -1389,3 +1389,11 @@
 - 最小修复：本地 Git 忽略的私有 admin.txt 删除预演占位与双响应指令，恢复“只输出当前消息、避免第三人称叙述、遵守系统边界”的明确约束；测试中的短期记忆默认值同步到 2026-06-26 已生效并有文档记录的 9200。
 - 验收：configPersonaPrompt、promptSecurity、promptStageContracts、promptGoldenSnapshots 共 4 组测试全部通过。
 - 小目标已完成：本地私有 prompt 不再要求双响应，提示词契约测试恢复绿色；私有 prompt 继续保持 Git 忽略。
+
+## 运行维护 2026-07-12 15:20 +08:00
+
+- 目标：扩大 chunk 静态检查覆盖并恢复完整测试基线。
+- 最小修复：lint 不再跳过 71 个 chunk；拼接型 chunk 通过 8 个真实入口组合加载校验，独立 CommonJS chunk 单独解析，未被任何入口覆盖且不能独立解析时直接失败。测试运行器增加默认 60 秒单文件超时，避免句柄泄漏无限阻塞全套。
+- 全量测试修复：跨线程 materialize 前先刷父进程事件缓冲；过期的图片超时与被动感知 prompt 断言同步现行配置；request trace 测试改走无外部模型的确定路径；web fetch fallback 改为模拟 403，移除公网波动。
+- 验收：npm run lint 通过，覆盖 727 个 JS 文件和全部 71 个 chunk；npm audit --omit=dev 为 0 漏洞；npm run diag:security 与 npm run check:secrets 通过；第三次完整 npm test 用时 307.5 秒并输出 [test] all tests passed。
+- Docker 验收：已成功启动 WSL Docker daemon 29.4.0，但镜像构建在基础镜像获取阶段 10 分钟无进展且未生成镜像；非 root UID、命名卷写入和真实 service_healthy 门控仍保留为待验收，不以静态检查替代。

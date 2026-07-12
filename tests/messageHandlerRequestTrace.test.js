@@ -35,8 +35,8 @@ function buildPrivateMessage() {
     self_id: 'bot_trace',
     user_id: 'trace_user',
     message_id: 'trace_msg_1',
-    raw_message: 'hello',
-    message: 'hello',
+    raw_message: '/create trace-only',
+    message: '/create trace-only',
     time: Math.floor(Date.now() / 1000),
     sender: {
       user_id: 'trace_user',

@@ -160,8 +160,8 @@
 - Modify: `docs/maintenance-log.md`
 - Modify: `README.md`
 
-- [ ] 统计 chunk 文件并将真实运行代码纳入语法检查。
-- [ ] 运行 `npm run lint`、`npm audit --omit=dev`、`npm run diag:security`。
-- [ ] 运行全部定向测试和完整 `npm test`，保留退出码与时间戳。
-- [ ] 检查 git diff 仅包含 12 项修复相关改动。
-- [ ] 更新 README 与维护日志并提交最终验收记录。
+- [x] 统计 chunk 文件并将真实运行代码纳入语法检查。
+- [x] 运行 npm run lint、npm audit --omit=dev、npm run diag:security。
+- [x] 运行全部定向测试和完整 npm test，保留退出码与时间戳。
+- [x] 检查 git diff 仅包含 12 项修复相关改动。
+- [x] 更新 README 与维护日志并提交最终验收记录。

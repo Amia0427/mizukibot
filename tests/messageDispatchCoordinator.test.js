@@ -158,7 +158,10 @@ module.exports = (async () => {
   assert.strictEqual(workerSuccessImageSummary.reply, 'ai reply');
   assert.ok(workerSuccessImageSummary.replyOptions.modelConfig, 'worker-success image_summary should still use image model config');
   assert.strictEqual(workerSuccessImageSummary.replyOptions.modelConfig.promptTokenHardLimit, 20000);
-  assert.strictEqual(workerSuccessImageSummary.replyOptions.modelConfig.timeoutMs, 18000);
+  assert.strictEqual(
+    workerSuccessImageSummary.replyOptions.modelConfig.timeoutMs,
+    require('../config').IMAGE_MODEL_TIMEOUT_MS
+  );
 
   const unavailableToolChat = await coordinator.dispatchByRoutePlan({
     route: { meta: {} },

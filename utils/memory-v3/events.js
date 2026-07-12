@@ -317,6 +317,7 @@ function inspectMemoryEventReadSet(options = {}) {
 module.exports = {
   EVENT_TYPES,
   appendMemoryEvent,
+  flushPendingMemoryEventWrites,
   normalizeMemoryEvent,
   loadMemoryEvents,
   loadMemoryEventsWithDiagnostics,

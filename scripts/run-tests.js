@@ -242,6 +242,8 @@ function applyDefaultTestEnv(env = process.env) {
 
 function runTestFile(file) {
   return new Promise((resolve) => {
+    let settled = false;
+    const timeoutMs = Math.max(1000, Number(process.env.TEST_FILE_TIMEOUT_MS || 60000) || 60000);
     const child = spawn(process.execPath, ['--unhandled-rejections=strict', file], {
       cwd: path.resolve(__dirname, '..'),
       env: applyDefaultTestEnv({ ...process.env }),
@@ -249,11 +251,22 @@ function runTestFile(file) {
       windowsHide: true
     });
 
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish({ ok: false, timedOut: true, timeoutMs });
+    }, timeoutMs);
+
     child.on('error', (error) => {
-      resolve({ ok: false, error });
+      finish({ ok: false, error });
     });
     child.on('exit', (code, signal) => {
-      resolve({ ok: code === 0, code, signal });
+      finish({ ok: code === 0, code, signal });
     });
   });
 }
@@ -297,6 +310,8 @@ async function runAllTests() {
     console.error(`[test] fail ${path.basename(file)}`);
     if (result.error) {
       console.error('       ' + (result.error.stack || String(result.error)));
+    } else if (result.timedOut) {
+      console.error(`       timed out after ${result.timeoutMs}ms`);
     } else {
       console.error(`       exited with code ${result.code}${result.signal ? ` signal ${result.signal}` : ''}`);
     }

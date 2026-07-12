@@ -3,13 +3,15 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const TARGET_DIRS = ['api', 'core', 'src', 'utils', 'web'];
-const CHUNK_ENTRYPOINTS = [
-  'src/features/daily-share',
-  'src/features/meme',
-  'src/features/passive-awareness',
-  'src/memory/vector',
-  'src/message/handler',
-  'src/runtime-v2/context'
+const CHUNK_GROUPS = [
+  { entrypoint: 'src/features/daily-share', chunkDir: 'core' },
+  { entrypoint: 'src/features/meme', chunkDir: 'core' },
+  { entrypoint: 'src/features/passive-awareness', chunkDir: 'core' },
+  { entrypoint: 'src/memory/vector', chunkDir: 'src/memory/vector' },
+  { entrypoint: 'src/message/handler', chunkDir: 'core' },
+  { entrypoint: 'src/model/http', chunkDir: 'src/model/http' },
+  { entrypoint: 'src/runtime-v2/context', chunkDir: 'api/runtimeV2/context' },
+  { entrypoint: 'src/runtime-v2/planning', chunkDir: 'src/runtime-v2/planning' }
 ];
 
 function collectJsFiles(dir) {
@@ -33,10 +35,11 @@ const files = [
 ].filter((f, i, arr) => arr.indexOf(f) === i);
 
 let hasError = false;
+const chunkFiles = new Set();
 for (const file of files) {
   const rel = path.relative(ROOT, file);
   if (/\.chunk\.js$/i.test(file)) {
-    console.log(`[lint] skip ${rel}`);
+    chunkFiles.add(path.resolve(file));
     continue;
   }
   try {
@@ -50,15 +53,41 @@ for (const file of files) {
   }
 }
 
-for (const entrypoint of CHUNK_ENTRYPOINTS) {
+const coveredChunkFiles = new Map();
+for (const group of CHUNK_GROUPS) {
   try {
-    require(path.join(ROOT, entrypoint));
-    console.log(`[lint] ok   ${entrypoint}`);
+    const entrypointFile = require.resolve(path.join(ROOT, group.entrypoint));
+    const entrypointSource = fs.readFileSync(entrypointFile, 'utf8');
+    const listedChunks = Array.from(entrypointSource.matchAll(/['"]([^'"]+\.chunk(?:\.js)?)['"]/g))
+      .map((match) => path.resolve(ROOT, group.chunkDir, match[1].endsWith('.js') ? match[1] : `${match[1]}.js`));
+    require(entrypointFile);
+    for (const chunkFile of listedChunks) {
+      coveredChunkFiles.set(chunkFile, group.entrypoint);
+    }
+    console.log(`[lint] ok   ${group.entrypoint}`);
   } catch (e) {
     hasError = true;
-    console.error(`[lint] fail ${entrypoint}`);
+    console.error(`[lint] fail ${group.entrypoint}`);
     console.error('       ' + (e && e.message ? e.message : String(e)));
   }
+}
+
+for (const chunkFile of chunkFiles) {
+  const rel = path.relative(ROOT, chunkFile);
+  const entrypoint = coveredChunkFiles.get(chunkFile);
+  if (!entrypoint) {
+    try {
+      new Function(fs.readFileSync(chunkFile, 'utf8'));
+      console.log(`[lint] ok   ${rel} (standalone chunk)`);
+    } catch (e) {
+      hasError = true;
+      console.error(`[lint] fail ${rel}`);
+      console.error('       chunk is neither standalone-valid nor covered by a validated entrypoint');
+      console.error('       ' + (e && e.message ? e.message : String(e)));
+    }
+    continue;
+  }
+  console.log(`[lint] ok   ${rel} (via ${entrypoint})`);
 }
 
 if (hasError) {

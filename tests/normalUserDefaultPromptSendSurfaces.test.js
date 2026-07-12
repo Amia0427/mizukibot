@@ -106,8 +106,12 @@ module.exports = (async () => {
     assert.ok(!adminText.includes(defaultPrompt));
 
     const passiveMessages = passiveAwareness.buildPassiveReplySystemMessages('normal-default-surface');
-    assert.deepStrictEqual(passiveMessages.map((message) => message.role), ['system']);
-    assert.ok(!passiveMessages.map((message) => message.content).join('\n').includes(defaultPrompt));
+    assert.deepStrictEqual(passiveMessages.map((message) => message.role), ['system', 'system']);
+    assertContainsCurrentDefaultPrompt(
+      passiveMessages.map((message) => message.content).join('\n'),
+      defaultPrompt,
+      'normal passive awareness prompt'
+    );
 
     const passiveAdminMessages = passiveAwareness.buildPassiveReplySystemMessages('admin-default-surface');
     assert.deepStrictEqual(passiveAdminMessages.map((message) => message.role), ['system']);
