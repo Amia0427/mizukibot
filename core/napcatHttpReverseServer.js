@@ -32,6 +32,13 @@ function readSignature(value) {
     : null;
 }
 
+function readOneBotSignature(value) {
+  const normalized = value.replace(/^sha1=/i, '');
+  return /^[a-f0-9]{40}$/i.test(normalized)
+    ? Buffer.from(normalized, 'hex')
+    : null;
+}
+
 function readLegacyToken(req) {
   const directToken = readHeader(req, 'x-napcat-token');
   if (directToken) return directToken;
@@ -47,6 +54,13 @@ function createAuthenticator({ secret, maxAgeMs, now, nonceCache, allowLegacyBea
     const nonce = readHeader(req, 'x-napcat-nonce');
     const signatureHeader = readHeader(req, 'x-napcat-signature');
     if (!timestampHeader && !nonce && !signatureHeader) {
+      const oneBotSignature = readOneBotSignature(readHeader(req, 'x-signature'));
+      if (allowLegacyBearer && Buffer.isBuffer(req.rawBody) && oneBotSignature) {
+        const expectedSignature = crypto.createHmac('sha1', secret).update(req.rawBody).digest();
+        return secureEqual(oneBotSignature, expectedSignature)
+          ? { ok: true, legacy: true }
+          : { ok: false, status: 401, error: 'Unauthorized' };
+      }
       const legacyToken = readLegacyToken(req);
       return allowLegacyBearer && secureEqualText(legacyToken, secret)
         ? { ok: true, legacy: true }

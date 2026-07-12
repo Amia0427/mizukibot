@@ -154,6 +154,31 @@ module.exports = (async () => {
     });
     assert.strictEqual(legacyRes.status, 204);
 
+    const oneBotBody = JSON.stringify({ post_type: 'notice', notice_type: 'onebot-signature' });
+    const oneBotSignature = crypto
+      .createHmac('sha1', generatedReverseToken)
+      .update(oneBotBody)
+      .digest('hex');
+    const oneBotRes = await fetch(`http://127.0.0.1:${address.port}/`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-signature': `sha1=${oneBotSignature}`
+      },
+      body: oneBotBody
+    });
+    assert.strictEqual(oneBotRes.status, 204);
+
+    const invalidOneBotRes = await fetch(`http://127.0.0.1:${address.port}/`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-signature': `sha1=${'0'.repeat(40)}`
+      },
+      body: oneBotBody
+    });
+    assert.strictEqual(invalidOneBotRes.status, 401);
+
     const limitedApp = createNapCatHttpReverseServer({
       secret: 'reverse-test-secret',
       rateLimitMax: 1,
