@@ -1499,3 +1499,11 @@
 - 最小修复：仅在现有原生兼容模式开启时校验 OneBot SHA1 签名；错误签名继续返回 401，不改变 signed HMAC-SHA256、防重放、限流和载荷校验路径。
 - 验收：`node scripts/run-tests.js tests/napcatHttpReverseServer.test.js tests/napcatWsIngressSmoke.test.js`、相关 `node --check`、`npm run lint` 通过；重启后使用 NapCat 同格式签名请求 3002 返回 204，主进程持续运行。
 - 提交后记录：实现提交 `18015e1` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
+
+## 运行维护 2026-07-13 00:09 +08:00
+
+- 实现提交 `d44d051`：测试运行器优先通过Git tracked列表发现测试，无Git/npm包环境确定性回退文件系统；默认并发2，串行测试按barrier保持相对语义，失败/超时终止进程树并等待退出，输出按发现顺序汇总并显示慢测Top N。
+- clean CI修复：memory recall与post-reply评估样本迁入tracked tests/fixtures，不再依赖gitignored artifacts；显式CLI仍允许运行任意存在测试文件，自动发现不会执行本地未跟踪测试。
+- prompt治理：主检查器与完整config解耦，支持Git tracked、clean CI与package模式；私有required prompt由exact allowlist声明，本地存在时仍校验。39个worldbook、7个runtime模板和4组conflict tag纳入review_by门禁，unknown/stale/expired/drift均非零失败，基线0 warning。
+- 验收：runner/prompt/fixture定向测试、`npm run check:prompts`、`npm run lint`、`npm run check:secrets:all`、`npm audit --omit=dev`、`git diff --check`通过；TEST_CONCURRENCY=4全量测试146.7秒自然退出且退出码0。
+- 路线图状态：目标24完成；目标22功能完成但性能未达标，默认2约184秒、并发4约147.9秒，慢测集中在NapCat follower、QQ action、stock summarize、vision budget和prompt snapshots，保持部分完成。
