@@ -2,6 +2,13 @@
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+const DEFAULT_TEST_TEMP_ROOT = path.resolve(
+  PROJECT_ROOT,
+  '..',
+  `${path.basename(PROJECT_ROOT)}-test-temp`
+);
+
 function listTestFiles(rootDir) {
   const discovered = [];
   const stack = [rootDir];
@@ -225,6 +232,13 @@ const testFiles = [
 ];
 
 function applyDefaultTestEnv(env = process.env) {
+  const configuredTempRoot = String(env.TEST_TEMP_ROOT || '').trim();
+  const testTempRoot = path.resolve(configuredTempRoot || DEFAULT_TEST_TEMP_ROOT);
+  fs.mkdirSync(testTempRoot, { recursive: true });
+  env.TEST_TEMP_ROOT = testTempRoot;
+  env.TEMP = testTempRoot;
+  env.TMP = testTempRoot;
+  env.TMPDIR = testTempRoot;
   if (env.RESOURCE_PRESSURE_ENABLED === undefined || env.RESOURCE_PRESSURE_ENABLED === '') {
     env.RESOURCE_PRESSURE_ENABLED = 'false';
   }
@@ -522,6 +536,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_TEST_TEMP_ROOT,
   MAX_TEST_CONCURRENCY,
   SERIAL_TEST_FILES,
   SERIAL_TEST_REASONS,

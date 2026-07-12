@@ -4,8 +4,10 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const {
+  DEFAULT_TEST_TEMP_ROOT,
   MAX_TEST_CONCURRENCY,
   SERIAL_TEST_REASONS,
+  applyDefaultTestEnv,
   discoverDefaultTestFiles,
   executeTestFiles,
   isSerialTestFile,
@@ -38,6 +40,15 @@ async function runAssertions(tempDir) {
   assert.strictEqual(resolveTestConcurrency('500'), 8);
   assert.strictEqual(resolveTestConcurrency('4'), 4);
   assert.strictEqual(resolveTestConcurrency(''), 2);
+  const blankTempEnv = applyDefaultTestEnv({ TEST_TEMP_ROOT: '   ' });
+  assert.strictEqual(blankTempEnv.TEST_TEMP_ROOT, DEFAULT_TEST_TEMP_ROOT);
+  assert.strictEqual(blankTempEnv.TEMP, DEFAULT_TEST_TEMP_ROOT);
+  const customTempRoot = path.join(tempDir, 'custom-test-temp');
+  const customTempEnv = applyDefaultTestEnv({ TEST_TEMP_ROOT: customTempRoot });
+  assert.strictEqual(customTempEnv.TEST_TEMP_ROOT, customTempRoot);
+  assert.strictEqual(customTempEnv.TEMP, customTempRoot);
+  assert.strictEqual(customTempEnv.TMP, customTempRoot);
+  assert.strictEqual(customTempEnv.TMPDIR, customTempRoot);
   for (const [file, reason] of Object.entries(SERIAL_TEST_REASONS)) {
     assert.ok(reason.length > 0, `${file} should document its serialization reason`);
     assert.ok(fs.existsSync(path.join(rootDir, 'tests', file)), `${file} should exist`);
