@@ -27,7 +27,7 @@ module.exports = (async () => {
   const groupResult = await sendReasoningForwardMessage({
     chatType: 'group',
     groupId: 'g1',
-    reasoningForwardText: 'group forward note'
+    reasoningText: '  <think>raw group reasoning</think>  '
   }, {
     actionClient: {
       async callAction(action, params) {
@@ -40,12 +40,12 @@ module.exports = (async () => {
   assert.strictEqual(groupResult.success, true);
   assert.strictEqual(calls[0].action, 'send_group_forward_msg');
   assert.strictEqual(calls[0].params.group_id, 'g1');
-  assert.strictEqual(calls[0].params.messages[0].data.content, 'group forward note');
+  assert.strictEqual(calls[0].params.messages[0].data.content, '  <think>raw group reasoning</think>  ');
 
   const privateResult = await sendReasoningForwardMessage({
     chatType: 'private',
     userId: 'u1',
-    reasoningForwardText: 'private forward note'
+    reasoningText: 'private raw reasoning'
   }, {
     actionClient: {
       async callAction(action, params) {
@@ -57,10 +57,10 @@ module.exports = (async () => {
   assert.strictEqual(calls[1].action, 'send_private_forward_msg');
   assert.strictEqual(calls[1].params.user_id, 'u1');
 
-  const rawOnly = await sendReasoningForwardMessage({
+  const emptyReasoning = await sendReasoningForwardMessage({
     chatType: 'group',
     groupId: 'g1',
-    reasoningText: 'raw reasoning must not be forwarded'
+    reasoningText: '   '
   }, {
     actionClient: {
       async callAction(action, params) {
@@ -68,15 +68,15 @@ module.exports = (async () => {
       }
     }
   });
-  assert.strictEqual(rawOnly.success, false);
-  assert.strictEqual(rawOnly.skipped, true);
-  assert.strictEqual(rawOnly.reason, 'empty_reasoning_forward_text');
-  assert.strictEqual(calls.length, 2, 'raw reasoning without forward text should not call NapCat');
+  assert.strictEqual(emptyReasoning.success, false);
+  assert.strictEqual(emptyReasoning.skipped, true);
+  assert.strictEqual(emptyReasoning.reason, 'empty_reasoning_text');
+  assert.strictEqual(calls.length, 2, 'blank raw reasoning should not call NapCat');
 
   const failed = await sendReasoningForwardMessage({
     chatType: 'group',
     groupId: 'g1',
-    reasoningForwardText: 'will fail'
+    reasoningText: 'will fail'
   }, {
     actionClient: {
       async callAction(action) {

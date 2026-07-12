@@ -5,12 +5,14 @@ const path = require('path');
 module.exports = (() => {
   const imports = fs.readFileSync(path.join(__dirname, '..', 'core', 'messageHandler.imports.chunk.js'), 'utf8');
   const runtime02 = fs.readFileSync(path.join(__dirname, '..', 'core', 'messageHandler.runtime-02.chunk.js'), 'utf8');
+  const runtime05 = fs.readFileSync(path.join(__dirname, '..', 'core', 'messageHandler.runtime-05.chunk.js'), 'utf8');
   const runtime06 = fs.readFileSync(path.join(__dirname, '..', 'core', 'messageHandler.runtime-06.chunk.js'), 'utf8');
 
   assert.ok(imports.includes('sendReasoningForwardMessage'), 'message handler should import reasoning forward sender');
   assert.ok(runtime02.includes('async function maybeSendReasoningForward'), 'message handler should wrap reasoning forward sending');
-  assert.ok(runtime02.includes('replyEnvelope?.reasoningForwardText'), 'reasoning forward wrapper should read only forwarded reasoning text');
-  assert.ok(!runtime02.includes('replyEnvelope?.reasoningText'), 'reasoning forward wrapper should not read raw reasoning text');
+  assert.ok(runtime02.includes('replyEnvelope?.reasoningText'), 'reasoning forward wrapper should read raw provider reasoning text');
+  assert.ok(!runtime02.includes('replyEnvelope?.reasoningForwardText'), 'reasoning forward wrapper should not read cleaned reasoning text');
+  assert.ok(runtime05.includes('normalFastReplyResult?.reasoningText'), 'fast reply path should forward raw provider reasoning text');
   assert.ok(runtime06.includes('await maybeSendReasoningForward(replyEnvelope'), 'final send path should trigger reasoning forward after normal reply');
   assert.ok(
     runtime06.indexOf('const sent = await sendGroupReply') < runtime06.indexOf('await maybeSendReasoningForward(replyEnvelope'),

@@ -207,7 +207,7 @@
             );
             const persistedFastReplyText = String(normalFastReplyResult?.persistedReplyText || fastReplyText).trim() || fastReplyText;
             await maybeSendReasoningForward({
-              reasoningForwardText: String(normalFastReplyResult?.reasoningForwardText || '').trim()
+              reasoningText: String(normalFastReplyResult?.reasoningText || '')
             }, {
               chatType,
               groupId: fastGroupId,

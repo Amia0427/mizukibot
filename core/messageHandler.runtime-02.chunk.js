@@ -353,13 +353,13 @@
   // source-compat anchor: return replyRuntime.sendGroupReply({
 
   async function maybeSendReasoningForward(replyEnvelope = {}, context = {}) {
-    const reasoningForwardText = String(replyEnvelope?.reasoningForwardText || '').trim();
-    if (!reasoningForwardText) return false;
+    const reasoningText = String(replyEnvelope?.reasoningText || '');
+    if (!reasoningText.trim()) return false;
     return Boolean((await sendReasoningForwardMessage({
       chatType: context.chatType,
       groupId: context.groupId,
       userId: context.userId || context.senderId,
-      reasoningForwardText
+      reasoningText
     }, {
       actionClient: globalNapCatActionClient
     }))?.success);

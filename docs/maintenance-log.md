@@ -1426,3 +1426,11 @@
 - 安全头：所有页面、401、健康检查和 API 均通过集中中间件设置逐响应 nonce CSP、frame-ancestors、nosniff、Referrer Policy 与 no-store；HSTS 仅在可信 HTTPS 链路启用。
 - 验收：6 组 Web 定向测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev` 和 `git diff --check` 通过；全量 `npm test` 326.7 秒自然退出且退出码为 0；应用内浏览器完成登录、主控制台渲染和注销，未发现页面控制台错误。
 - 路线图状态：目标 15、16 已完成；目标 4、20、28 等第一阶段剩余项继续执行。
+
+## 运行维护 2026-07-12 19:07 +08:00
+
+- 小目标：按当前要求取消 QQ reasoning 外发清洗，直接发送 provider 返回的原始思维链。
+- 最小修复：`maybeSendReasoningForward` 改为只读取 `replyEnvelope.reasoningText`；普通快速回复同步传递原始字段；`sendReasoningForwardMessage` 接口改用 `reasoningText`，保留原始空白和标签，仅对全空白内容跳过并按 3500 字符拆分合并转发节点。
+- 边界：正文仍先发送，reasoning 转发失败仍不影响正文；记忆、画像、recall 和 post-reply 持久化仍不读取 reasoning；现有清洗模块未删除，因删除文件需要单独确认。
+- 验收：`node scripts/run-tests.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js tests/messageHandlerCotSource.test.js tests/messageRouteFlowGroupStreaming.test.js tests/runtimeStreamingCoordinator.test.js tests/runtimeV2DirectReplyFailureTelemetry.test.js tests/modelServiceReasoning.test.js tests/parserModelResponseFormats.test.js tests/normalFastReplyRuntime.test.js`、`npm run lint`、`node -e "require('./core/messageHandler')"` 和 `git diff --check` 通过。
+- 小目标已完成：QQ 群聊和私聊在主回复后直接转发 provider 原始 reasoning，不再转发角色化清洗结果。

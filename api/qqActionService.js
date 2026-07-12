@@ -210,8 +210,8 @@ function splitTextIntoFixedChunks(text = '', maxChars = REASONING_FORWARD_NODE_M
 }
 
 function buildReasoningForwardNodes(reasoningText = '', options = {}) {
-  const text = String(reasoningText || '').trim();
-  if (!text) return [];
+  const text = String(reasoningText || '');
+  if (!text.trim()) return [];
   const name = normalizeText(options.name || options.botName || '瑞希') || '瑞希';
   const uin = normalizeText(options.uin || options.botUin || config.BOT_QQ || '0') || '0';
   return splitTextIntoFixedChunks(text, options.maxNodeChars).map((content) => ({
@@ -258,9 +258,9 @@ async function sendPrivateForwardMessage(userId = '', messages = [], options = {
 
 async function sendReasoningForwardMessage(input = {}, options = {}) {
   const chatType = normalizeText(input.chatType || input.chat_type).toLowerCase() === 'private' ? 'private' : 'group';
-  const reasoningForwardText = String(input.reasoningForwardText || '').trim();
-  if (!reasoningForwardText) return { success: false, skipped: true, reason: 'empty_reasoning_forward_text' };
-  const messages = buildReasoningForwardNodes(reasoningForwardText, {
+  const reasoningText = String(input.reasoningText || '');
+  if (!reasoningText.trim()) return { success: false, skipped: true, reason: 'empty_reasoning_text' };
+  const messages = buildReasoningForwardNodes(reasoningText, {
     botName: input.botName || options.botName,
     botUin: input.botUin || options.botUin,
     maxNodeChars: input.maxNodeChars || options.maxNodeChars
