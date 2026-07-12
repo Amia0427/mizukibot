@@ -1588,3 +1588,10 @@
 - 生产修复：真实 `/dailyshare status` 行为暴露 `MAX_AUTO_SENDS_PER_WINDOW` 未定义，状态命令会抛 `ReferenceError`；现改用既有 `getMaxAutoSendsPerWindow(target)`，并分别断言群组上限 `/1`、QZone 上限 `/2`。
 - 副作用控制：writer、状态存储与配置均在测试内注入并于 finally 恢复；最终复审实测 `data/request-trace.ndjson` 在测试前后长度和修改时间完全不变，无测试日志或状态文件写盘。
 - 验收：独立只读审查 Approve；7 项邻接测试、lint、typecheck、prompt、secrets、production audit、diff check 全部通过；并发4全量96.4秒通过。目标23继续部分完成，日志保留调用点守卫已行为化，restart/daemon 大型策略守卫仍待拆分。
+
+## 运行维护 2026-07-13 05:44 +08:00
+
+- 实现提交 `289035a`：`qualityToolingPolicy.test.js` 不再读取或正则匹配 `eslint.config.js`，改用 ESLint 9 API 验证实际加载的仓库 flat config、最终文件规则、chunk/data/node_modules 忽略结果及 `lintText` 真实诊断。
+- 边界验证：普通生产文件确认 correctness 规则为 error 且 no-unused 关闭；10 个 typecheck include 文件逐一确认 no-unused 为 error、保留 `@ts-check` 且不存在 ignore/nocheck/JSDoc any；实际 unused probe 必须报错。
+- 验收：两次独立只读审查 Approve；quality/chunk 定向测试、lint、typecheck、prompt、secrets、production audit 和 diff check 全部通过；并发4全量105.2秒通过。
+- 路线图状态：目标23继续部分完成，质量工具配置源码断言已迁移；剩余主要是 restart/daemon 大型脚本策略守卫，需要先结合目标14/27抽取安全生命周期边界。
