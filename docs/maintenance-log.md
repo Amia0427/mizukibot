@@ -1560,3 +1560,17 @@
 - PowerShell：新增 tracked-only AST 语法门禁，通过 `Parser::ParseFile` 一次解析 `scripts` 下全部15个`.ps1/.psm1`，返回结构化错误位置且不dot-source、不执行任何脚本；非Windows缺少pwsh时明确跳过，Windows质量任务强制执行。
 - 验收：3项定向结构测试、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 97.2秒自然通过。
 - 路线图状态：目标23继续部分完成。结构测试不替代真实 GitHub Actions、Docker容器UID/只读根/SIGTERM与宿主监听验收，因此目标8、17、18状态不变；`.env:/app/runtime.env:rw` 仍是容器秘密回写风险，等待配置域拆分后收口。
+
+## 运行维护 2026-07-13 04:23 +08:00
+
+- 实现提交 `c973fe2`：`scripts/lint.js --report-json` 输出稳定版本、状态、汇总、完整 chunk/入口记录和错误集合；chunk lint 测试按磁盘实际发现集验证全部 chunk 均由入口或独立解析覆盖，不再依赖控制台字符串。
+- Facade 契约：消息、HTTP、Runtime、Memory 与 Planning 测试不再要求旧/新入口函数引用恒等，改为验证公开导出、canonical 内部接线及消息路由、入站上下文、cache-control、Runtime 输出和 planner classifier 等代表性纯行为；`executablePlan` 测试改用 canonical `src/runtime-v2/planning.sanitizePlan` 的真实返回契约。
+- 验收：独立只读审查 Approve；4 项定向测试、`npm run lint`（724 个文件）、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`（0 漏洞）和 `git diff --check` 全部通过；C 盘无空间时将临时目录切到 D 盘仓库外，`TEST_CONCURRENCY=1 node scripts/run-tests.js` 全量 264 秒通过。
+- 未完成项：`TEST_CONCURRENCY=4` 下既有 `runTestsRunner.test.js` 时序断言在全仓资源竞争时失败，但该测试单独运行通过；本轮未修改该无关调度测试。目标23继续部分完成，chunk lint 映射与主要 facade identity 测试已迁移，剩余危险重启/daemon 策略守卫仍待行为化。
+
+## 运行维护 2026-07-13 04:44 +08:00
+
+- 实现提交 `cc5cccb`：测试运行器默认将 `TEST_TEMP_ROOT`、`TEMP`、`TMP`、`TMPDIR` 统一指向工作树外的同盘目录 `D:\waifu-test-temp`，避免系统盘耗尽，同时保留显式 `TEST_TEMP_ROOT` 覆盖能力。
+- 契约修复：空白覆盖回退默认路径，自定义覆盖同步传播四个变量；临时夹具不再继承父 Git 工作树，tracked-only 与 Git 不可用时的文件系统 fallback 均保留原语义，runner 仍通过环境副本启动子进程。
+- 验收：独立只读审查 Approve；默认与自定义路径下两项定向测试、`npm run lint`、`npm run typecheck`、prompt/secrets/audit 门禁和 `git diff --check` 全部退出0；并发4全量首次退出1但截断日志不足以归因，立即复跑93秒全部通过，日志中的 LanceDB/lock 临时路径均位于 `D:\waifu-test-temp`。
+- 边界：本提交只阻止测试继续写入系统临时盘，不删除任何既有临时文件，也不等同于完成日志目录事务级总配额；目标19保持部分完成，目标22保持已完成。
