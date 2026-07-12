@@ -7,7 +7,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const config = require('../config');
-const { isUnsafeHttpUrl } = require('../utils/networkSafety');
+const { isUnsafeHttpUrl, requestSafeHttpUrl } = require('../utils/networkSafety');
 
 function createHttpClient() {
   return axios.create({
@@ -120,7 +120,10 @@ async function read_rss_feed(url, limit = 5) {
   }
 
   try {
-    const resp = await http.get(u);
+    const resp = await requestSafeHttpUrl(u, {
+      request: (targetUrl, requestOptions) => http.get(targetUrl, requestOptions),
+      maxRedirects: 5
+    });
     const xml = String(resp.data || '');
 
     const titleMatches = [...xml.matchAll(/<title><!\[CDATA\[(.*?)\]\]><\/title>|<title[^>]*>(.*?)<\/title>/gis)];

@@ -18,7 +18,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
-const { isUnsafeHttpUrl } = require('../../utils/networkSafety');
+const { isUnsafeHttpUrl, requestSafeHttpUrl } = require('../../utils/networkSafety');
 const { formatContextStats } = require('../../utils/contextInspector');
 const { searchRecipes } = require('../../utils/howtocookLocalSearch');
 const {
@@ -163,19 +163,21 @@ async function runFreeUrlExtract(args = {}) {
   };
 
   try {
-    const resp = await axios.get(url, {
-      timeout: 12000,
+    const resp = await requestSafeHttpUrl(url, {
+      request: (targetUrl, requestOptions) => axios.get(targetUrl, requestOptions),
       maxRedirects: 5,
-      proxy: false,
-      validateStatus: (status) => status >= 200 && status < 400,
-      headers: requestHeaders
+      requestOptions: {
+        timeout: 12000,
+        proxy: false,
+        headers: requestHeaders
+      }
     });
 
     const html = String(resp?.data || '');
     if (!html.trim()) {
       return `链接可访问，但没有可提取的页面内容：${url}`;
     }
-    return extractReadableText(resp.request?.res?.responseUrl || url, html);
+    return extractReadableText(resp.config?.url || url, html);
   } catch (e) {
     const status = Number(e?.response?.status || 0);
     const body = String(e?.response?.data || '');

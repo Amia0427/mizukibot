@@ -128,6 +128,59 @@ async function assertSafeHttpUrl(rawUrl = '', options = {}) {
   return result.url;
 }
 
+function createPinnedLookup(addresses = []) {
+  const entries = addresses.map(normalizeResolvedAddressEntry).filter(Boolean);
+  return (_hostname, options, callback) => {
+    const lookupOptions = typeof options === 'object' && options ? options : {};
+    const done = typeof options === 'function' ? options : callback;
+    const requestedFamily = Number(lookupOptions.family || 0);
+    const candidates = requestedFamily
+      ? entries.filter((entry) => entry.family === requestedFamily)
+      : entries;
+    if (!candidates.length) {
+      const error = new Error('No validated address matches the requested family');
+      error.code = 'ENOTFOUND';
+      done(error);
+      return;
+    }
+    if (lookupOptions.all) {
+      done(null, candidates.map((entry) => ({ ...entry })));
+      return;
+    }
+    done(null, candidates[0].address, candidates[0].family);
+  };
+}
+
+async function requestSafeHttpUrl(rawUrl = '', options = {}) {
+  if (typeof options.request !== 'function') {
+    throw new TypeError('requestSafeHttpUrl requires a request function');
+  }
+
+  const maxRedirects = Math.max(0, Number(options.maxRedirects ?? 5) || 0);
+  let currentUrl = String(rawUrl || '').trim();
+
+  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+    const resolved = await resolveSafeHttpUrl(currentUrl, { lookup: options.lookup });
+    const response = await options.request(resolved.url.href, {
+      ...(options.requestOptions || {}),
+      maxRedirects: 0,
+      lookup: createPinnedLookup(resolved.safeAddresses),
+      validateStatus: (status) => status >= 200 && status < 400
+    });
+    const status = Number(response?.status || 0);
+    const location = String(response?.headers?.location || '').trim();
+    if (status < 300 || status >= 400 || !location) {
+      return response;
+    }
+    if (redirectCount >= maxRedirects) {
+      throw new Error('Too many redirects');
+    }
+    currentUrl = new URL(location, resolved.url).href;
+  }
+
+  throw new Error('Too many redirects');
+}
+
 function isLoopbackHost(hostname = '') {
   const host = normalizeHost(hostname);
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
@@ -164,6 +217,7 @@ async function resolveSafeModelEndpoint(rawUrl = '', options = {}) {
 module.exports = {
   assertSafeHttpUrl,
   assertSafeModelEndpoint,
+  requestSafeHttpUrl,
   resolveSafeHttpUrl,
   resolveSafeModelEndpoint,
   isUnsafeHost,
