@@ -114,10 +114,10 @@
 - Modify: `web/memoryV3NocturneRoute.js`
 - Test: `tests/memoryV3NocturneRoute.test.js`
 
-- [ ] 增加 GET 前后状态不变测试。
-- [ ] GET 固定 `autoClean: false`，清洗仅允许鉴权 POST。
-- [ ] 验证跨站 GET 无法改变数据。
-- [ ] 更新维护日志并提交。
+- [x] 增加 GET 强制只读测试。
+- [x] GET 固定 autoClean false，清洗仅允许鉴权 POST。
+- [x] 验证查询参数无法重新开启 GET 清洗。
+- [x] 更新维护日志并提交。
 
 ### Task 9: Docker 非 root 与最小暴露
 

@@ -40,7 +40,10 @@ function contextFromReq(req) {
   };
 }
 
-function registerMemoryV3NocturneRoutes(app) {
+function registerMemoryV3NocturneRoutes(app, options = {}) {
+  const diagnoseProfileJournalDb = options.getProfileJournalDbDiagnostics || getProfileJournalDbDiagnostics;
+  const cleanProfiles = options.cleanProfileFacts || cleanProfileFacts;
+  const cleanJournal = options.cleanJournalEntries || cleanJournalEntries;
   app.get('/api/memory-v3/uri-tree', (req, res) => {
     try {
       return res.json(buildMemoryUriTree(contextFromReq(req), {
@@ -198,9 +201,9 @@ function registerMemoryV3NocturneRoutes(app) {
 
   app.get('/api/profile-journal-db/diagnostics', (req, res) => {
     try {
-      return res.json(getProfileJournalDbDiagnostics({
+      return res.json(diagnoseProfileJournalDb({
         limit: Number(req.query.limit || 10),
-        autoClean: req.query.auto_clean !== 'false'
+        autoClean: false
       }));
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || 'Failed to diagnose profile journal db' });
@@ -209,13 +212,13 @@ function registerMemoryV3NocturneRoutes(app) {
 
   app.post('/api/profile-journal-db/clean', (req, res) => {
     try {
-      const profile = cleanProfileFacts({ userId: text(req.body?.user_id || req.body?.userId) });
-      const journal = cleanJournalEntries({ userId: text(req.body?.user_id || req.body?.userId) });
+      const profile = cleanProfiles({ userId: text(req.body?.user_id || req.body?.userId) });
+      const journal = cleanJournal({ userId: text(req.body?.user_id || req.body?.userId) });
       return res.json({
         ok: profile.ok !== false && journal.ok !== false,
         profile,
         journal,
-        diagnostics: getProfileJournalDbDiagnostics({ limit: 10 })
+        diagnostics: diagnoseProfileJournalDb({ limit: 10, autoClean: false })
       });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message || 'Failed to clean profile journal db' });

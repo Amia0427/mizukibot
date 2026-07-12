@@ -1361,3 +1361,10 @@
 - 取舍：在外部系统不支持幂等键的前提下采用 at-most-once 恢复策略，宁可把崩溃窗口任务标为结果未知，也不自动重发可能已经成功的消息或空间动态。
 - 验收：新增真实文件存储测试，模拟发送成功后 markRunResult 崩溃；磁盘状态保持 executing，重启恢复后 once 不再发送，cron 的 nextRunAt 推进到下一周期；相关 3 组调度测试通过。
 - 小目标已完成：进程崩溃不会自动重复同一调度周期的不可逆副作用。
+
+## 运行维护 2026-07-12 14:00 +08:00
+
+- 目标：移除 profile journal 诊断 GET 的自动清洗副作用，阻止本机免令牌模式下的跨站数据改写。
+- 最小修复：诊断 GET 无条件传入 autoClean=false，忽略客户端 auto_clean 参数；显式 clean POST 完成清洗后的诊断读取也保持只读。
+- 验收：新增路由级依赖注入测试，使用 auto_clean=true 请求仍只收到 autoClean=false；Web 鉴权与 memory ops 诊断回归共 3 组测试通过。
+- 小目标已完成：GET diagnostics 只读取状态，清洗只能通过已有鉴权 POST 入口触发。
