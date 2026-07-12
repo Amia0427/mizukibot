@@ -1544,3 +1544,11 @@
 - 管理员重启：消息入口增加可选 restart trigger seam，真实发送 `/restart` 与 `/restart confirm` 验证确认门槛、回复、800ms 延迟和完整来源元数据。行为测试同时发现并修复原路径引用不存在的 `inboundRequestId`，改用当前入站锁的 requestId。
 - 验收：5项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 92.2秒自然通过。
 - 路线图状态：目标23继续部分完成，三个高价值源码守卫已迁移；剩余 CI、Docker 和 PowerShell 安全/部署守卫需继续改为行为测试或结构化解析。
+
+## 运行维护 2026-07-13 03:19 +08:00
+
+- 实现提交 `269078f`：主进程早退诊断不再扫描 `index.js` 文本，改为真实启动/停止 heartbeat、调用 beforeExit/exit 处理器、读取结构化状态与退出观察文件，并验证 fatal/signal 监听器和 Node report 配置已实际注册。
+- 重启诊断：远程重启元数据整理为可测试的纯 marker builder，默认 drain 路径仍写同一 expected-shutdown 文件；进程事件处理器由匿名函数改为具名函数，注册事件、退出码和生产行为不变。
+- 热路径：主进程 embedding backfill 通过可调用边界验证关闭时不加载、开启时按原延迟参数调度；行为测试发现旧源码断言是假绿，`queryDiagnostics`、`semanticDedup` 改为需要时加载 embeddingIndex，`queryRanking` 直接依赖 LanceDB rows 叶子模块，查询入口不再加载完整 store。
+- 验收：6项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 98.7秒自然通过。
+- 路线图状态：目标23继续部分完成；下一批优先将 CI/Compose 改为 YAML 结构解析，并用 PowerShell AST/安全 ValidateOnly 替代部署脚本字符串断言。
