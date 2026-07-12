@@ -1521,3 +1521,10 @@
 - 性能：`trimTextByTokenBudget`在原32字符裁剪网格上使用二分查找，并以旧线性算法作多字符集/多budget等价验证；prompt golden保留真实block组装、planner选择与Gemini body，只注入稳定persona候选避免重复收集。
 - Source迁移：DirectAnchor、ReasoningForward、NormalFastReplyHandler三个测试不再读取源码/includes/indexOf，改为真实handler行为与模块契约，覆盖acceptedBy、formal/fast raw reasoning、发送顺序、失败回退、安全元数据、emoji与history顺序。
 - 最终验收：10项定向测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`通过；全量连续三轮100.6/97.6/103.6秒自然通过。目标22完成，目标23保持部分完成。
+
+## 运行维护 2026-07-13 01:57 +08:00
+
+- 实现提交 `6692ced`：plannerRichContext测试改为`directChatPlannerContext`模块契约与真实supplement行为，三处生产调用复用同一字段优先级；runtimeHostCot测试改为`applyRuntimeReplyOutput`输出行为，保留display/final/draft、持久化、reasoning、stream、安全与fallback语义。
+- 消息入口：`messageIngressAsyncEntrypointSource`改为仅在`MIZUKIBOT_INDEX_TEST_MODE=1`导出的测试入口和dispatcher enqueue行为，packet预处理可注入无副作用实现，生产路径无新增外部绕过。
+- NapCat配置：configure测试直接调用`patchOnebotConfig`，覆盖新增端点、已有action/reverse端点旧token更新、独立secret/fallback及无关端点保留，不再依赖函数名或源码顺序。
+- 验收：9项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`通过；并发4全量测试111.4秒自然通过。目标23继续部分完成，剩余安全/部署源码守卫按优先级迁移。

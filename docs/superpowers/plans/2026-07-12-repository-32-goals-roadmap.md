@@ -43,7 +43,7 @@
 - [ ] **20. 限制请求追踪日志内容** — 部分完成。提交 `d20208b` 已使用真实消费者契约收口字段，正文、headers、未知嵌套和 URL 凭据不再落盘；`userId/groupId/messageId` 的 keyed hash 迁移仍未完成。
 - [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
 - [x] **22. 测试运行器并发和超时** — 已完成。提交 `d44d051`、`be32669` 完成tracked-only发现、有限并发、串行barrier、进程树终止、慢测榜和慢测网络/生产等待治理；视觉文本预算裁剪改为等价二分查找，`TEST_CONCURRENCY=4`全量连续三轮100.6/97.6/103.6秒自然通过。
-- [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669` 已将DirectAnchor、ReasoningForward、NormalFastReplyHandler三个高价值Source测试迁为真实handler行为/模块契约，保留路由、raw reasoning、发送失败回退、安全emoji和历史顺序守卫；plannerRichContext、runtimeHostCot、messageIngress、noExternalProcessSkills、configureNapcat等仍待迁移。
+- [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced` 已迁移DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress和configureNapcat七个高价值测试，并通过模块契约消除planner参数重复；noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands及部分CI/Docker/PowerShell安全守卫仍待行为化或结构化解析。
 - [x] **24. 强化提示词清单检查** — 已完成。提交 `d44d051` 已建立版本化exact allowlist，覆盖tracked/package/private边界、39个worldbook、7个runtime模板和4组冲突标签；新增、删除、过期、未知字段或标签成员漂移均失败，默认warning为0。
 - [ ] **25. SQLite 多进程并发与完整性检查** — 未完成。缺少统一连接工厂、`busy_timeout`、checkpoint、`quick_check` 和多进程压测门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。
