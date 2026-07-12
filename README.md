@@ -4,6 +4,12 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-12 22:03 +08:00
+
+- 新增 Windows Node 20 全量 CI 与 Ubuntu Node 20 Linux 策略门禁，执行版本、lint、prompt、tracked secrets、production audit 和测试；工作流使用最小权限、隔离数据目录且不注入项目 secrets。
+- Node 运行边界统一为 20.x，`.nvmrc`、package engines、Linux 安装脚本和部署文档使用同一主版本；本机 Node 20 下载超时、远端 Actions 尚未运行，因此 CI/版本目标仍待真实环境验收。
+- 会话研究缓存增加每进程全局容量、LRU、主动/惰性 TTL、淘汰指标和可停止的 unref 定时器；10,000 会话测试稳定收敛至配置上限。实现提交：`5e7e168`。
+
 ## 运行维护 2026-07-12 21:25 +08:00
 
 - 小目标：恢复 NapCat HTTP reverse 与 Bot 连接。
@@ -158,7 +164,7 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 | 层 | 选型 |
 | --- | --- |
-| Runtime | Node.js 20+、CommonJS、LangGraph |
+| Runtime | Node.js 20.x、CommonJS、LangGraph |
 | 模型适配 | Anthropic Messages、OpenAI 兼容、Gemini 风格 provider |
 | QQ 接入 | NapCat、OneBot WebSocket / HTTP action |
 | 存储 | JSONL、SQLite、LanceDB、本地分片文件 |
@@ -184,7 +190,7 @@ NapCat / OneBot
 
 ### 环境要求
 
-- Node.js `>= 20`
+- Node.js 20.x（以项目根目录 `.nvmrc` 为准）
 - npm
 - NapCat / OneBot
 - 可用的模型 API Key

@@ -28,7 +28,7 @@
 - [ ] **5. 取消源码拼接式模块加载** — 未完成。`src/shared/chunkedModule.js` 仍通过 `new Function` 执行共享作用域 chunk，至少 6 个入口依赖。
 - [ ] **6. 消除生产依赖环** — 未完成。必须在 chunk 模块化后重新生成权威依赖图并将循环数降为 0。
 - [ ] **7. 拆除 `legacy/aiHost` 上帝模块** — 未完成。`api/legacy/aiHost.js` 仍约 2096 行，并被 planning、image generation 和测试引用。
-- [ ] **8. 建立最小 CI 门禁** — 未完成。仓库不存在 `.github/workflows`。
+- [ ] **8. 建立最小 CI 门禁** — 部分完成。提交 `5e7e168` 已新增 Windows Node 20 全量门禁和 Ubuntu Node 20 Linux 策略门禁，覆盖安装、版本、lint、prompt、tracked secrets、production audit 与测试，并隔离 `.env`、`data` 和本地 prompt roots；尚未在远端 GitHub Actions 真实运行，不能标记完成。
 - [ ] **9. 使用 ESLint 取代语法解析器** — 未完成。`scripts/lint.js` 仍以解析和组合入口加载为主。
 - [ ] **10. 核心边界类型检查** — 未完成。无 `typecheck` 脚本或项目级 `checkJs`/TypeScript 配置。
 - [x] **11. 删除未使用的 Runtime V1** — 已完成。`api/legacy/agentGraphV1Runtime.js` 已删除，依赖与失效检查已清理。
@@ -50,8 +50,8 @@
 - [ ] **27. 健康、就绪和优雅退出** — 部分完成。已有 `/healthz` 与 `service_healthy`，仍缺 `/live`、`/ready`、排空和完整资源关闭。
 - [x] **28. 扩展安全诊断** — 已完成。提交 `c3ca711`、`d20208b` 已覆盖鉴权/监听组合、direct 与 Compose 宿主边界、Windows ACL、日志无限保留、Docker 最终用户和每服务权限基线；error 状态返回非零退出码，无法可靠解析时降级为 warning。
 - [ ] **29. 供应链安全门禁** — 未完成。无固定镜像 digest、SBOM、gitleaks、OSV/Trivy/Grype 和许可证门禁。
-- [ ] **30. 会话研究缓存全局容量限制** — 未完成。`utils/sessionResearchCache.js` 只限制单会话 8 条，未限制总会话数。
-- [ ] **31. 统一 Node 版本** — 未完成。以 `package.json` 的 Node 20 为基准，仍需核对并统一全部部署文档、脚本和 CI。
+- [x] **30. 会话研究缓存全局容量限制** — 已完成。提交 `5e7e168` 已加入每进程全局会话上限、确定性 LRU、主动/惰性 TTL、size/eviction/expired 指标和可停止的 unref 定时器；10,000 会话压力测试稳定回落到配置上限。
+- [ ] **31. 统一 Node 版本** — 部分完成。提交 `5e7e168` 已将 `.nvmrc`、`package.json`/lock、Docker、CI、Linux 安装检查脚本和用户部署文档统一为 Node 20.x；本机只有 Node 24，官方 Node 20 下载因网络超时未完成，因此仍需在实际 Node 20 环境复验后标记完成。
 - [ ] **32. 建立依赖升级节奏** — 未完成。无自动补丁升级、月度窗口和大版本 smoke 流程。
 
 ## 阶段与计划文件

@@ -1468,6 +1468,14 @@
 - 验收：12组定向运维测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev`、`git diff --check`通过；全量`npm test` 339.7秒自然退出且退出码0。
 - 未完成证据：WSL Docker daemon存在旧容器rw-layer snapshot缺失，build约6分钟无产物后已停止且未清理旧容器；真实UID、命名卷、只读根、资源限制、SIGTERM和health门控未验收。跨进程不同target的目录总配额也不是事务级硬上限，因此目标17、19保持部分完成。
 
+## 运行维护 2026-07-12 21:46 +08:00
+
+- Node 版本边界：新增根目录 `.nvmrc`，将根 package engines、Linux 安装/检查/bootstrap、README 和部署手册统一为 Node 20.x；`check:node` 会同时校验实际主版本和 package engines，错误主版本启动前直接失败。
+- CI 门禁：新增 Windows Node 20 全量质量任务和 Ubuntu Node 20 Linux 策略任务；使用最小 `contents: read` 权限、并发取消、禁用 checkout 凭据持久化，显式隔离 `.env`、`data` 和本地 prompt roots，不使用 `pull_request_target` 或项目 secrets。Windows 全量任务按最近 339.7 秒基线设置 15 分钟上限，失败时仅上传测试输出。
+- secrets 检查：保留本地默认 staged 模式，增加 `--all`/`check:secrets:all` 扫描全部 tracked 文件，避免 CI 在空暂存区假通过；测试中的假密钥由运行时片段拼接，提交后不会自锁扫描。
+- 本地验收：3 组定向策略测试、`npm run lint`、隔离环境下 `npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`、Bash/Node 语法检查和 `git diff --check` 通过。
+- 未完成证据：本机实际运行时为 Node 24；官方 Node 20.20.2 压缩包下载两次因网络超时未完成，已停止继续下载。GitHub Actions 尚未远端运行，因此目标 8、31 均保持部分完成，待真实 Node 20 与首次 CI 运行验收。
+
 ## 运行维护 2026-07-12 21:25 +08:00
 
 - 小目标已完成：恢复本机 NapCat HTTP reverse 与 MizukiBot 主进程连接。
@@ -1475,3 +1483,11 @@
 - 修复：通过仓库现有 `scripts/configure-napcat-onebot.js` 同步 NapCat HTTP Server/Client token 到 `.env`，随后执行 `restart-bot.cmd restart confirm`；业务代码未改动。
 - 验收：主进程 PID 10040 持续运行；NapCat `get_status` 返回 `online=true`、`good=true`；3000/3002 端口分别由 NapCat/Bot 监听；反向入口正确 token 通过鉴权并对无效载荷返回 400；`npm run smoke:napcat-ingress` 全部通过。
 - 提交后记录：修复与验收记录提交 `73f2a86` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
+
+## 运行维护 2026-07-12 22:03 +08:00
+
+- 实现提交 `5e7e168`：新增最小权限 GitHub Actions，Windows Node 20 跑完整质量门禁，Ubuntu Node 20 跑版本、Linux脚本语法和策略测试；checkout不持久化凭据，CI数据/env/prompt roots隔离，不使用pull_request_target或项目secrets。
+- Node版本：`.nvmrc`、package/lock engines、Linux安装/check/bootstrap、README及部署文档统一为20.x；新增启动前主版本检查。tracked secrets模式扫描最终暂存树通过，不会因测试假密钥自锁。
+- 缓存治理：sessionResearchCache保留旧API和每会话8条语义，新增每进程全局容量、会话级LRU、主动/惰性TTL、size/evictions/expired指标及unref/stop定时器；10,000会话max=128后size=128、evictions=9872，过期扫描后size=0。
+- 验收：7组定向测试、`npm run lint`、隔离prompt检查、tracked secrets、`npm audit --omit=dev`和`git diff --check`通过；全量`npm test` 347.4秒自然退出且退出码0。
+- 未完成证据：本机只有Node24，官方Node20.20.2下载两次超时后停止；GitHub Actions尚未远端运行。因此目标8、31保持部分完成，目标30完成。
