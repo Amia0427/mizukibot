@@ -117,13 +117,18 @@ function createSchedulerRuntime(options = {}) {
           continue;
         }
 
-        const result = await executeTask(task);
+        const claimedTask = typeof store.claimDueTask === 'function'
+          ? store.claimDueTask(task.id, nowText)
+          : task;
+        if (!claimedTask) continue;
+
+        const result = await executeTask(claimedTask);
         const nextStatus = result.ownerNoLongerAdmin
-          ? (task.scheduleType === 'once' ? 'failed' : 'cancelled')
-          : (task.scheduleType === 'once'
+          ? (claimedTask.scheduleType === 'once' ? 'failed' : 'cancelled')
+          : (claimedTask.scheduleType === 'once'
             ? (result.success ? 'completed' : 'failed')
             : 'active');
-        store.markRunResult(task.id, {
+        store.markRunResult(claimedTask.id, {
           status: nextStatus,
           lastRunAt: new Date().toISOString(),
           nowText,

@@ -28,23 +28,45 @@ function createScheduledTaskStore(options = {}) {
     maxDelayMs: Math.max(0, Number(options.maxDelayMs || config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
   });
 
-  function persist() {
+  function persist(options = {}) {
     const tasks = Array.from(tasksById.values())
       .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
     hotStore.replace({
       version: 1,
       tasks
-    });
+    }, options);
   }
 
   function restore() {
     tasksById.clear();
     const data = hotStore.read({ forceReload: true });
+    let recovered = false;
     for (const item of Array.isArray(data?.tasks) ? data.tasks : []) {
-      const normalized = normalizeTask(item);
+      let normalized = normalizeTask(item);
       if (!normalized.id) continue;
+      if (normalized.status === 'executing') {
+        const scheduledAt = normalizeText(normalized.execution?.scheduledAt || normalized.nextRunAt);
+        const recoveredAt = nowIso();
+        normalized = normalizeTask({
+          ...normalized,
+          status: normalized.scheduleType === 'cron' ? 'active' : 'failed',
+          nextRunAt: normalized.scheduleType === 'cron'
+            ? computeNextCronRun(normalized.cronExpr, scheduledAt || nowDateTimeText())
+            : '',
+          lastRunAt: normalizeText(normalized.execution?.claimedAt) || recoveredAt,
+          lastResult: {
+            success: false,
+            reason: 'execution outcome unknown after restart; automatic retry suppressed',
+            source: 'scheduler_crash_recovery'
+          },
+          execution: null,
+          updatedAt: recoveredAt
+        });
+        recovered = true;
+      }
       tasksById.set(normalized.id, normalized);
     }
+    if (recovered) persist({ flushNow: true });
   }
 
   function listTasks(filters = {}) {
@@ -101,7 +123,7 @@ function createScheduledTaskStore(options = {}) {
     };
   }
 
-  function updateTask(taskId = '', mutator = null) {
+  function updateTask(taskId = '', mutator = null, options = {}) {
     const key = normalizeText(taskId);
     const current = tasksById.get(key);
     if (!current) return null;
@@ -112,7 +134,7 @@ function createScheduledTaskStore(options = {}) {
       updatedAt: nowIso()
     });
     tasksById.set(key, normalized);
-    persist();
+    persist(options);
     return cloneJson(normalized, null);
   }
 
@@ -141,6 +163,23 @@ function createScheduledTaskStore(options = {}) {
       .map((task) => cloneJson(task, null));
   }
 
+  function claimDueTask(taskId = '', nowText = nowDateTimeText()) {
+    const key = normalizeText(taskId);
+    const task = tasksById.get(key);
+    if (!task || !ACTIVE_STATUSES.has(task.status)) return null;
+    if (!normalizeText(task.nextRunAt) || compareDateTimeText(task.nextRunAt, nowText) > 0) return null;
+    const scheduledAt = normalizeText(task.nextRunAt);
+    return updateTask(key, (current) => ({
+      ...current,
+      status: 'executing',
+      execution: {
+        key: [current.id, scheduledAt].join(':'),
+        scheduledAt,
+        claimedAt: nowIso()
+      }
+    }), { flushNow: true });
+  }
+
   function markRunResult(taskId = '', payload = {}) {
     return updateTask(taskId, (task) => {
       const status = normalizeText(payload.status) || task.status;
@@ -159,9 +198,10 @@ function createScheduledTaskStore(options = {}) {
         lastRunAt: payload.lastRunAt || nowIso(),
         lastResult,
         nextRunAt,
+        execution: null,
         updatedAt: nowIso()
       };
-    });
+    }, { flushNow: true });
   }
 
   function advanceCronWithoutExecution(taskId = '', nowText = nowDateTimeText()) {
@@ -180,6 +220,7 @@ function createScheduledTaskStore(options = {}) {
   return {
     advanceCronWithoutExecution,
     cancelTask,
+    claimDueTask,
     createTask,
     deleteTask,
     flushSync() {

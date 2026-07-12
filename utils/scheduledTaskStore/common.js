@@ -8,7 +8,7 @@ const TERMINAL_STATUSES = new Set(['cancelled', 'completed', 'failed']);
 const ALLOWED_KINDS = new Set(['message', 'command']);
 const ALLOWED_COMMAND_TYPES = new Set(['group_message', 'qzone_post']);
 const ALLOWED_SCHEDULE_TYPES = new Set(['once', 'cron']);
-const ALLOWED_STATUSES = new Set(['active', 'cancelled', 'completed', 'failed']);
+const ALLOWED_STATUSES = new Set(['active', 'executing', 'cancelled', 'completed', 'failed']);
 
 function nowIso() {
   return new Date().toISOString();

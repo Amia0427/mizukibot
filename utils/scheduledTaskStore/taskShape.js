@@ -72,7 +72,8 @@ function normalizeTask(task = {}, options = {}) {
     createdAt,
     updatedAt,
     lastRunAt: normalizeText(task.lastRunAt || task.last_run_at),
-    lastResult: task.lastResult && typeof task.lastResult === 'object' ? cloneJson(task.lastResult, {}) : null
+    lastResult: task.lastResult && typeof task.lastResult === 'object' ? cloneJson(task.lastResult, {}) : null,
+    execution: task.execution && typeof task.execution === 'object' ? cloneJson(task.execution, {}) : null
   };
 
   if (!normalized.nextRunAt && ACTIVE_STATUSES.has(normalized.status)) {

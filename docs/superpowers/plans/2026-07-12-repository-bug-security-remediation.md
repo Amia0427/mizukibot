@@ -100,11 +100,11 @@
 - Modify: `utils/scheduledTaskStore/index.js`
 - Test: `tests/schedulerRuntime.test.js`
 
-- [ ] 增加发送后落盘前崩溃的重复执行测试。
-- [ ] 执行前持久化 claim，完成后原子更新结果；启动时按租约恢复过期 claim。
-- [ ] 对 once 与 cron 使用稳定执行键去重。
-- [ ] 验证重启后不重复不可逆副作用。
-- [ ] 更新维护日志并提交。
+- [x] 增加发送后落盘前崩溃的重复执行测试。
+- [x] 执行前同步持久化 claim，完成后同步更新结果；启动时恢复中断 claim。
+- [x] 对 once 与 cron 使用稳定执行键去重。
+- [x] 验证重启后不重复不可逆副作用。
+- [x] 更新维护日志并提交。
 
 ## Chunk 3: Web、容器与质量基线
 
