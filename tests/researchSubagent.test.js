@@ -28,6 +28,19 @@ module.exports = (async () => {
     assert.ok(calls.some(([name]) => name === 'web_fetch'));
     assert.ok(result.summary.includes('latest example'));
     assert.strictEqual(getRecentResearchBriefs('s1', { query: 'example' }).length, 1);
+
+    clearResearchBriefs();
+    const controller = new AbortController();
+    TOOL_EXECUTORS.web_search = async (args) => new Promise((resolve, reject) => {
+      args.signal.addEventListener('abort', () => reject(new Error('request aborted')), { once: true });
+    });
+    const abortedRun = runResearchSubagent(
+      { sessionKey: 's-abort', userId: 'u1', query: 'slow research' },
+      { maxToolRounds: 1, cacheTtlMs: 10000, signal: controller.signal }
+    );
+    controller.abort();
+    await assert.rejects(() => abortedRun, /aborted/);
+    assert.strictEqual(getRecentResearchBriefs('s-abort', { query: 'slow research' }).length, 0);
   } finally {
     TOOL_EXECUTORS.web_search = oldSearch;
     TOOL_EXECUTORS.web_fetch = oldFetch;

@@ -169,7 +169,8 @@ async function runFreeUrlExtract(args = {}) {
       requestOptions: {
         timeout: 12000,
         proxy: false,
-        headers: requestHeaders
+        headers: requestHeaders,
+        signal: args.signal
       }
     });
 

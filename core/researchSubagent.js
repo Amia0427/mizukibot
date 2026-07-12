@@ -64,26 +64,37 @@ async function callResearchTool(toolName = '', args = {}) {
   return executor(args);
 }
 
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('research_subagent aborted');
+  error.name = 'AbortError';
+  throw error;
+}
+
 async function runResearchSubagent(task = {}, options = {}) {
   const query = normalizeText(task.query || task.question);
   const sessionKey = normalizeText(task.sessionKey);
   const userId = normalizeText(task.userId);
   const maxRounds = Math.max(1, Math.min(5, Number(options.maxToolRounds || config.RESEARCH_SUBAGENT_MAX_TOOL_ROUNDS || 3) || 3));
+  const signal = options.signal;
   const sources = [];
   const toolLog = [];
   if (!query) throw new Error('research_subagent query is empty');
+  throwIfAborted(signal);
 
   let rounds = 0;
   const explicitUrls = extractUrls(query);
   for (const url of explicitUrls.slice(0, 2)) {
     if (rounds >= maxRounds) break;
     rounds += 1;
-    const safety = await callResearchTool('url_safety_check', { url });
+    const safety = await callResearchTool('url_safety_check', { url, signal });
+    throwIfAborted(signal);
     toolLog.push({ tool: 'url_safety_check', args: { url }, result: trimText(safety, 300) });
     if (/unsafe|blocked|danger|forbidden/i.test(String(safety || ''))) continue;
     if (rounds >= maxRounds) break;
     rounds += 1;
-    const fetched = await callResearchTool('web_fetch', { url });
+    const fetched = await callResearchTool('web_fetch', { url, signal });
+    throwIfAborted(signal);
     toolLog.push({ tool: 'web_fetch', args: { url }, result: trimText(fetched, 500) });
     sources.push(buildSourceFromFetch(url, fetched));
   }
@@ -91,19 +102,22 @@ async function runResearchSubagent(task = {}, options = {}) {
   let searchText = '';
   if (sources.length === 0 && rounds < maxRounds) {
     rounds += 1;
-    searchText = String(await callResearchTool('web_search', { query })) || '';
+    searchText = String(await callResearchTool('web_search', { query, signal })) || '';
+    throwIfAborted(signal);
     toolLog.push({ tool: 'web_search', args: { query }, result: trimText(searchText, 700) });
     const urls = extractUrls(searchText).slice(0, Math.max(1, maxRounds - rounds));
     for (const url of urls) {
       if (rounds >= maxRounds) break;
       rounds += 1;
-      const fetched = await callResearchTool('web_fetch', { url });
+      const fetched = await callResearchTool('web_fetch', { url, signal });
+      throwIfAborted(signal);
       toolLog.push({ tool: 'web_fetch', args: { url }, result: trimText(fetched, 500) });
       sources.push(buildSourceFromFetch(url, fetched));
     }
   }
 
   const summary = buildSummary(query, searchText || toolLog.map((item) => item.result).join('\n'), sources);
+  throwIfAborted(signal);
   const brief = saveResearchBrief({
     sessionKey,
     userId,

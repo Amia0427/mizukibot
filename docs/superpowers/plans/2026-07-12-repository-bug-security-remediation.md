@@ -87,11 +87,11 @@
 - Modify: `core/researchSubagent.js`
 - Test: `tests/researchTaskQueue.test.js`
 
-- [ ] 增加超时后真实 runner 仍存活和并发突破测试。
-- [ ] 通过 AbortController 将取消信号传递到网络执行层。
-- [ ] 只在 runner 真正结束后释放并发槽，忽略迟到完成写入。
-- [ ] 验证最大真实并发不超过配置。
-- [ ] 更新维护日志并提交。
+- [x] 增加超时后真实 runner 仍存活和并发突破测试。
+- [x] 通过 AbortController 将取消信号传递到网络执行层。
+- [x] 只在 runner 真正结束后释放并发槽，忽略迟到完成写入。
+- [x] 验证最大真实并发不超过配置。
+- [x] 更新维护日志并提交。
 
 ### Task 7: 定时任务 claim 与幂等执行
 
