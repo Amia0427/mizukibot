@@ -1574,3 +1574,10 @@
 - 契约修复：空白覆盖回退默认路径，自定义覆盖同步传播四个变量；临时夹具不再继承父 Git 工作树，tracked-only 与 Git 不可用时的文件系统 fallback 均保留原语义，runner 仍通过环境副本启动子进程。
 - 验收：独立只读审查 Approve；默认与自定义路径下两项定向测试、`npm run lint`、`npm run typecheck`、prompt/secrets/audit 门禁和 `git diff --check` 全部退出0；并发4全量首次退出1但截断日志不足以归因，立即复跑93秒全部通过，日志中的 LanceDB/lock 临时路径均位于 `D:\waifu-test-temp`。
 - 边界：本提交只阻止测试继续写入系统临时盘，不删除任何既有临时文件，也不等同于完成日志目录事务级总配额；目标19保持部分完成，目标22保持已完成。
+
+## 运行维护 2026-07-13 05:04 +08:00
+
+- 实现提交 `a2ccc94`：`restart-bot-periodic.ps1 -ValidateOnly` 输出结构化启动计划，真实 `Start-Process` 复用同一 Node 可执行文件、`index.js` 参数和工作目录；`install-periodic-restart.ps1` 新增无需管理员权限的 `-ValidateOnly`，真实注册与验证复用同一计划任务 XML。
+- 行为门禁：测试通过全局命令 trap 证明 ValidateOnly 不调用 Stop/Start/Get-CimInstance、Get/Unregister-ScheduledTask、schtasks 或 Remove-Item，并拦截 Add-Content 避免测试日志落盘；同时验证默认04:00、每日 CalendarTrigger、入口脚本、工作目录、无 Repetition 及非法24:00失败。
+- 验收：独立只读审查 Approve；周期重启行为测试、tracked-only PowerShell AST 语法门禁、lint、typecheck、prompt、secrets、production audit 和 diff check 全部通过；并发4全量94.2秒通过。
+- 路线图状态：目标23继续部分完成，周期重启源码字符串断言已清除；剩余 `restartBotScript`、`windowsDaemonScript` 与日志保留调用点等守卫待行为化。

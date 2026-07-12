@@ -22,11 +22,17 @@
 - 验收：独立审查 Approve；默认/自定义路径定向测试、全部静态门禁和并发4全量复跑通过，全量耗时93秒，临时数据实际写入 `D:\waifu-test-temp`。
 - 路线图状态：目标22保持已完成；该修复只避免测试继续占用系统盘，未删除历史临时文件，也不替代目标19剩余的事务级目录总配额。
 
+## 运行维护 2026-07-13 05:04 +08:00
+
+- 实现提交 `a2ccc94`：周期重启和计划任务安装脚本提供真实无副作用 ValidateOnly，验证与执行共用同一启动计划/XML；行为测试用命令 trap 证明不会停止/启动进程、注册任务或写测试日志。
+- 验收：独立审查 Approve；定向行为、全仓 PowerShell AST、全部静态门禁和并发4全量测试通过，全量耗时94.2秒。
+- 路线图状态：目标23继续部分完成，periodic restart 守卫已行为化；危险 restart/daemon 策略与日志保留调用点仍待迁移。
+
 ## 当前证据快照
 
-更新时间：2026-07-13 04:44 +08:00。
+更新时间：2026-07-13 05:04 +08:00。
 
-- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 54 个提交。
+- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 56 个提交。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
 - 已确认的完整基线：`npm run lint` 覆盖 724 个文件；`TEST_CONCURRENCY=4 node scripts/run-tests.js` 最近一次自然结束用时 93 秒。
 - 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
@@ -55,7 +61,7 @@
 - [ ] **20. 限制请求追踪日志内容** — 部分完成。提交 `d20208b` 已使用真实消费者契约收口字段，正文、headers、未知嵌套和 URL 凭据不再落盘；`userId/groupId/messageId` 的 keyed hash 迁移仍未完成。
 - [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
 - [x] **22. 测试运行器并发和超时** — 已完成。提交 `d44d051`、`be32669` 完成tracked-only发现、有限并发、串行barrier、进程树终止、慢测榜和慢测网络/生产等待治理；视觉文本预算裁剪改为等价二分查找，`TEST_CONCURRENCY=4`全量连续三轮100.6/97.6/103.6秒自然通过。
-- [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced`、`f0e472d`、`269078f`、`f2cd4b8`、`c973fe2` 已迁移 DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress、configureNapcat、noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands、mainBotEarlyExitDiagnostics、hotpathRequireGuard、CI Workflow、Docker Compose、chunk lint 映射和主要 facade identity 守卫；15 个 PowerShell 脚本已由 AST 统一校验语法。剩余危险重启/daemon 策略守卫仍待行为化。
+- [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced`、`f0e472d`、`269078f`、`f2cd4b8`、`c973fe2`、`a2ccc94` 已迁移 DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress、configureNapcat、noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands、mainBotEarlyExitDiagnostics、hotpathRequireGuard、CI Workflow、Docker Compose、chunk lint 映射、主要 facade identity 和周期重启守卫；15 个 PowerShell 脚本已由 AST 统一校验语法。剩余危险 restart/daemon 策略与日志保留调用点守卫仍待行为化。
 - [x] **24. 强化提示词清单检查** — 已完成。提交 `d44d051` 已建立版本化exact allowlist，覆盖tracked/package/private边界、39个worldbook、7个runtime模板和4组冲突标签；新增、删除、过期、未知字段或标签成员漂移均失败，默认warning为0。
 - [ ] **25. SQLite 多进程并发与完整性检查** — 未完成。缺少统一连接工厂、`busy_timeout`、checkpoint、`quick_check` 和多进程压测门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。
