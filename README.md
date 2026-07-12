@@ -4,6 +4,13 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-12 20:17 +08:00
+
+- 小目标：强化 provider reasoning 的瑞希第一人称沉浸思考要求。
+- 最小修复：主回复必选的 `roleplay_inner_protocol` 在提示词头部增加硬性契约，要求 reasoning 只能使用瑞希第一人称简体中文内心独白；技术和工具任务也不得切换为助手、分析员、导演或旁白叙述。
+- 边界：仍直接转发 provider 原始 reasoning，不增加二次改写或清洗；提示词只能提高模型遵循率，不能替代 provider 对 reasoning 输出能力的支持。
+- 验收：9 项提示词、正文防泄漏和 reasoning 转发回归、`npm run check:prompts`、`npm run lint`、`git diff --check` 通过；小目标已完成。
+
 ## 运行维护 2026-07-12 19:21
 
 - 小目标：清理没有 CLI、脚本、测试或运行入口的 OpenViking backfill 分支。

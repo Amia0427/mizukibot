@@ -30,6 +30,11 @@ module.exports = (async () => {
       clearRuntimePromptCaches
     } = require('../utils/runtimePrompts');
     const roleplayFallback = String(RUNTIME_PROMPT_DEFAULTS['roleplay-inner-protocol'] || '');
+    assert.ok(roleplayFallback.includes('硬性规则'));
+    assert.ok(roleplayFallback.includes('叙述者只能是“我”'));
+    assert.ok(roleplayFallback.includes('始终使用简体中文'));
+    assert.ok(roleplayFallback.includes('禁止切换成助手、分析员、导演或旁白'));
+    assert.ok(roleplayFallback.includes('技术、代码、工具或任务场景'));
     assert.ok(roleplayFallback.includes('（心想：……）') || roleplayFallback.includes('(内心OS：……)'));
     assert.ok(roleplayFallback.includes('我心想') && roleplayFallback.includes('我觉得') && roleplayFallback.includes('我暗自'));
     assert.ok(roleplayFallback.includes('emotional flow') || roleplayFallback.includes('情绪流'));

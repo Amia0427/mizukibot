@@ -1449,3 +1449,11 @@
 - 安全诊断完成：区分 direct 与明确 Compose 部署，按实际宿主发布边界判断入口暴露；Windows ACL 使用 SID 与作用域化 Allow/Deny 风险判断；容器检查覆盖最终阶段用户、service user 覆盖、read_only、cap_drop、no-new-privileges 和长短端口语法。
 - 验收：13 组定向及消费者回归、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev`、`git diff --check` 通过；全量 `npm test` 332.3 秒自然退出且退出码为 0。
 - 路线图状态：目标 28 已完成；目标 20 的字段/凭据边界已完成，但 `userId/groupId/messageId` keyed hash 仍待单独迁移，因此保持部分完成。
+
+## 运行维护 2026-07-12 20:17 +08:00
+
+- 小目标：让主回复 provider 可见 reasoning 优先按照瑞希第一人称沉浸扮演方式思考，并与当前原始 reasoning 直发链路配合。
+- 最小修复：`prompts/runtime/roleplay-inner-protocol.txt` 和 `utils/runtimePrompts.js` fallback 在头部加入 reasoning 硬性规则：叙述者只能是瑞希的“我”，始终使用简体中文沉浸内心独白；保留关系距离、心软/别扭/情绪流、真人停顿和下一句动机；禁止助手、分析员、导演、旁白、步骤化分析及英文模型工作语。
+- 技术边界：技术、代码、工具和任务场景仍允许完成必要判断，但必须从瑞希主观视角表达；最终正文仍只输出用户可见回复，QQ 仍直接转发 provider 原始 `reasoningText`，不增加第二次模型调用或本地清洗。
+- 验收：`node scripts/run-tests.js tests/promptGoldenSnapshots.test.js tests/runtimePromptCache.test.js tests/promptSecurity.test.js tests/userFacingTextCot.test.js tests/userFacingReplyGuards.test.js tests/mainReplyPromptAssemblyDiagnostics.test.js tests/reasoningForwardPersonaPrompt.test.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js`、`npm run check:prompts`、`npm run lint` 和 `git diff --check` 通过。
+- 小目标已完成：主回复 reasoning 的高优先级提示词已收紧为瑞希第一人称沉浸思考，同时保留原始 reasoning 直接发送机制。
