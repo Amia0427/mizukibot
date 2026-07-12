@@ -63,7 +63,7 @@ function createDailyShareEngine({
       const status = stateEntry.windowStatus[windowDef.key];
       const type = getAutoTypeForWindow(target, stateEntry, windowDef.key) || '无';
       lines.push(
-        `${windowDef.label} ${formatWindowRange(windowDef)} | ${WINDOW_STATUS_LABELS[status.status] || status.status} | 自动类型 ${type} | 已发 ${Math.max(0, Number(schedule.sentCount || 0) || 0)}/${MAX_AUTO_SENDS_PER_WINDOW} | 计划 ${formatHm(schedule.plannedAt)} | 延期 ${formatHm(schedule.deferredAt)} | 最近成功 ${status.lastSuccessType || '无'} | 最近原因 ${status.lastReason || '无'}`
+        `${windowDef.label} ${formatWindowRange(windowDef)} | ${WINDOW_STATUS_LABELS[status.status] || status.status} | 自动类型 ${type} | 已发 ${Math.max(0, Number(schedule.sentCount || 0) || 0)}/${getMaxAutoSendsPerWindow(target)} | 计划 ${formatHm(schedule.plannedAt)} | 延期 ${formatHm(schedule.deferredAt)} | 最近成功 ${status.lastSuccessType || '无'} | 最近原因 ${status.lastReason || '无'}`
       );
     }
     return lines.join('\n');
