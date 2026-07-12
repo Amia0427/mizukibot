@@ -1,9 +1,9 @@
 const config = require('../../config');
 const { normalizeText, clampText } = require('./helpers');
-const {
-  loadEmbeddingIndex,
-  getEmbeddingForCandidate
-} = require('./embeddingIndex');
+
+function getEmbeddingIndexHelpers() {
+  return require('./embeddingIndex');
+}
 
 function getStrongSemanticThreshold(options = {}) {
   return Math.max(0.1, Number(options.strongSemanticMinScore || config.MEMORY_STRONG_SEMANTIC_MIN_SCORE || 0.82) || 0.82);
@@ -47,8 +47,10 @@ function buildLanceDbFallbackReason(diagnostics = {}, queryEmbedding = null, vec
 
 function buildEmbeddingCoverageDiagnostics(candidates = []) {
   const total = Array.isArray(candidates) ? candidates.length : 0;
+  const { loadEmbeddingIndex, getEmbeddingForCandidate } = getEmbeddingIndexHelpers();
   const index = loadEmbeddingIndex();
-  const ready = (Array.isArray(candidates) ? candidates : []).filter((candidate) => Boolean(getEmbeddingForCandidate(candidate, index))).length;
+  const ready = (Array.isArray(candidates) ? candidates : [])
+    .filter((candidate) => Boolean(getEmbeddingForCandidate(candidate, index))).length;
   const readyRatio = total > 0 ? ready / total : 0;
   const threshold = Math.max(0, Number(config.MEMORY_LANCEDB_LOW_COVERAGE_THRESHOLD || 0.05) || 0.05);
   return {

@@ -5,7 +5,7 @@ const {
   stableSortByScore
 } = require('./helpers');
 const { getJournalDocDay } = require('./journalDocs');
-const { rowPassesMemoryFilter } = require('../lancedbMemoryStore');
+const { rowPassesMemoryFilter } = require('../lancedbMemoryStore/rows');
 const { lifecycleStatusOf } = require('./recallFilter');
 const { applyLifecycleScore } = require('./profileLifecycle');
 const { filterResolvedMemoryConflicts } = require('./memoryConflictResolver');

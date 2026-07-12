@@ -193,19 +193,19 @@ function logFatalStartupError(kind, error) {
   });
 }
 
-process.on('uncaughtException', (error) => {
+function handleMainUncaughtException(error) {
   preserveSingleInstanceLockOnExit = true;
   logFatalStartupError('uncaughtException', error);
   process.exit(1);
-});
+}
 
-process.on('unhandledRejection', (error) => {
+function handleMainUnhandledRejection(error) {
   preserveSingleInstanceLockOnExit = true;
   logFatalStartupError('unhandledRejection', error);
   process.exit(1);
-});
+}
 
-process.on('beforeExit', (code) => {
+function handleMainBeforeExit(code) {
   appendMainExitObservation('beforeExit', {
     code,
     messageIngress: messageIngressDispatcher?.getSnapshot?.()
@@ -217,9 +217,9 @@ process.on('beforeExit', (code) => {
     uptimeMs: Math.round(process.uptime() * 1000),
     messageIngress: messageIngressDispatcher?.getSnapshot?.()
   });
-});
+}
 
-process.on('exit', (code) => {
+function handleMainExit(code) {
   appendMainExitObservation('exit', { code });
   recordMainRuntimeState('exit', { code });
   console.warn('[process] exit', {
@@ -227,7 +227,12 @@ process.on('exit', (code) => {
     code,
     uptimeMs: Math.round(process.uptime() * 1000)
   });
-});
+}
+
+process.on('uncaughtException', handleMainUncaughtException);
+process.on('unhandledRejection', handleMainUnhandledRejection);
+process.on('beforeExit', handleMainBeforeExit);
+process.on('exit', handleMainExit);
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -735,22 +740,26 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   process.exit(exitCode);
 }
 
-function drainForScheduledRestart(meta = {}) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  const delayMs = Math.max(0, Number(meta?.delayMs || 0) || 0);
-  recordExpectedShutdown('remote_restart_scheduled', {
-    delayMs,
+function buildScheduledRestartMarker(meta = {}) {
+  return {
+    delayMs: Math.max(0, Number(meta?.delayMs || 0) || 0),
     source: String(meta?.source || 'remote_restart').trim() || 'remote_restart',
     requestedBy: String(meta?.userId || '').trim(),
     requestId: String(meta?.requestId || '').trim(),
     messageId: String(meta?.messageId || '').trim(),
     groupId: String(meta?.groupId || '').trim(),
     command: String(meta?.command || '').trim()
-  });
+  };
+}
+
+function drainForScheduledRestart(meta = {}) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const marker = buildScheduledRestartMarker(meta);
+  recordExpectedShutdown('remote_restart_scheduled', marker);
   console.log('[restart] drain old instance before external restart', {
     pid: process.pid,
-    delayMs,
+    delayMs: marker.delayMs,
     source: String(meta?.source || '').trim(),
     requestedBy: String(meta?.userId || '').trim(),
     requestId: String(meta?.requestId || '').trim(),
@@ -773,18 +782,26 @@ function drainForScheduledRestart(meta = {}) {
 
 process.on('mizuki:restartScheduled', drainForScheduledRestart);
 
-process.on('SIGINT', () => {
+function handleMainSigint() {
   void shutdownMainProcess('SIGINT', 130);
-});
-process.on('SIGTERM', () => {
+}
+
+function handleMainSigterm() {
   void shutdownMainProcess('SIGTERM', 143);
-});
-process.on('SIGBREAK', () => {
+}
+
+function handleMainSigbreak() {
   void shutdownMainProcess('SIGBREAK', 131);
-});
-process.on('SIGHUP', () => {
+}
+
+function handleMainSighup() {
   void shutdownMainProcess('SIGHUP', 129);
-});
+}
+
+process.on('SIGINT', handleMainSigint);
+process.on('SIGTERM', handleMainSigterm);
+process.on('SIGBREAK', handleMainSigbreak);
+process.on('SIGHUP', handleMainSighup);
 
 async function startMainProcess() {
   cleanupSingleInstanceLock = await acquireSingleInstanceLock();
@@ -792,14 +809,7 @@ async function startMainProcess() {
   await cleanupStaleTmpFilesOnStartup();
   webServer = startServer();
   initializeMemeManager();
-  if (config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) {
-    const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
-    enqueueMissingEmbeddings(null, {
-      schedule: true,
-      delayMs: 15000,
-      continueDelayMs: 60000
-    });
-  }
+  scheduleMainProcessEmbeddingBackfill();
   startResourceSnapshots();
   startNapCatTransport();
   scheduleRestartResultFeedback();
@@ -813,22 +823,54 @@ async function startMainProcess() {
   });
 }
 
+function scheduleMainProcessEmbeddingBackfill() {
+  if (!config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) return false;
+  const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
+  enqueueMissingEmbeddings(null, {
+    schedule: true,
+    delayMs: 15000,
+    continueDelayMs: 60000
+  });
+  return true;
+}
+
 if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
   module.exports = {
     __test: {
       acquireSingleInstanceLock,
       acceptIncomingMessage,
       acceptNapCatIncomingMessage,
+      appendMainExitObservation,
+      buildScheduledRestartMarker,
       commandLineLooksLikeMainBot,
       cleanupSingleInstanceLockSync,
       connectNapCat,
+      configureNodeProcessReports,
+      drainForScheduledRestart,
+      expectedShutdownFile: EXPECTED_SHUTDOWN_FILE,
+      exitObservationsFile: EXIT_OBSERVATIONS_FILE,
       getProcessCommandLine,
+      handleMainBeforeExit,
+      handleMainExit,
+      handleMainSigbreak,
+      handleMainSighup,
+      handleMainSigint,
+      handleMainSigterm,
+      handleMainUncaughtException,
+      handleMainUnhandledRejection,
       isMainBotProcess,
       isProcessAlive,
+      nodeReportDir: NODE_REPORT_DIR,
       readLockOwnerPid,
+      recordExpectedShutdown,
+      recordMainRuntimeState,
+      runtimeStateFile: RUNTIME_STATE_FILE,
+      scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {
         messageIngressDispatcher = dispatcher;
       },
+      startMainRuntimeHeartbeat,
+      stopMainRuntimeHeartbeat,
       stopNapCatWebSocketForTest: closeNapCatWebSocket
     }
   };

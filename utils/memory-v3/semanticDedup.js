@@ -1,10 +1,5 @@
 const config = require('../../config');
 const { normalizeText, stableSortByScore } = require('./helpers');
-const {
-  buildEmbeddingIdentity,
-  getEmbeddingForCandidate,
-  loadEmbeddingIndex
-} = require('./embeddingIndex');
 const { appendSelectionReason } = require('./queryDiagnostics');
 const { cosineArray } = require('../vectorMemory');
 
@@ -46,10 +41,14 @@ function buildDuplicateEvidence(loser = {}, similarity = 0) {
   };
 }
 
-function getFreshEmbeddingRow(candidate = {}, embeddingIndex) {
-  const row = getEmbeddingForCandidate(candidate, embeddingIndex);
+function getEmbeddingIndexHelpers() {
+  return require('./embeddingIndex');
+}
+
+function getFreshEmbeddingRow(candidate = {}, embeddingIndex, embeddingHelpers) {
+  const row = embeddingHelpers.getEmbeddingForCandidate(candidate, embeddingIndex);
   if (!row) return null;
-  const identity = buildEmbeddingIdentity(candidate);
+  const identity = embeddingHelpers.buildEmbeddingIdentity(candidate);
   if (row.model !== identity.model) return null;
   if (Number(row.updatedAt || 0) !== Number(identity.updatedAt || 0)) return null;
   if (row.textHash === identity.textHash) return row;
@@ -117,10 +116,11 @@ function collapseJournalLongTermSemanticDuplicates(items = [], options = {}) {
     };
   }
 
-  const embeddingIndex = resolved.embeddingIndex || loadEmbeddingIndex();
+  const embeddingHelpers = getEmbeddingIndexHelpers();
+  const embeddingIndex = resolved.embeddingIndex || embeddingHelpers.loadEmbeddingIndex();
   const rowsById = new Map();
   const readyCandidates = journal.concat(longTerm).filter((candidate) => {
-    const row = getFreshEmbeddingRow(candidate, embeddingIndex);
+    const row = getFreshEmbeddingRow(candidate, embeddingIndex, embeddingHelpers);
     if (!row) return false;
     rowsById.set(candidateId(candidate), row);
     return true;
