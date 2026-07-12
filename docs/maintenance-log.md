@@ -1404,3 +1404,10 @@
 - 文档：新增 `docs/superpowers/plans/2026-07-12-repository-32-goals-roadmap.md` 和 `docs/superpowers/plans/2026-07-12-security-boundaries-data-protection.md`；总路线记录每项目标的当前证据，第一阶段给出精确文件、失败测试、实现步骤、验收命令和提交边界。
 - NapCat 说明：README 与 Docker 部署文档明确区分 HMAC 签名和原生客户端静态 token 兼容模式，签名串固定为 `timestamp.nonce.rawBody`，空对象匿名 POST 不再作为有效探针。
 - 验收：确认只修改计划、README、Docker 部署说明和维护日志；执行 `git diff --check`。本轮未提交代码，也未把共享工作区中的并行安全实现标记为完成。
+
+## 运行维护 2026-07-12 17:10 +08:00
+
+- 小目标已完成：提交 `c3ca711` 完成图片缓存和 `skill_summarize` SSRF 防护，并为 NapCat reverse 加入 HMAC、防重放、事件校验、请求限制和原生静态 token 兼容路径。
+- 安全诊断：NapCat 缺少 secret 或其他 error 状态现在返回非零退出码；兼容模式保持 warning，避免把弱模式误报为安全完成。
+- 验收：7 组定向安全测试通过；`npm run lint`、`npm run check:prompts`、`npm audit --omit=dev` 通过；全量 `npm test` 在 326.9 秒后自然退出且退出码为 0；`git diff --check` 通过。
+- 未完成：当前本机启用了 NapCat HTTP reverse 但缺少 `NAPCAT_HTTP_REVERSE_SECRET`，需由部署方配置真实 secret；目标 1 的 signed-only 收口及目标 28 的 ACL、监听地址、日志容量、容器基线诊断继续保留在路线图中。

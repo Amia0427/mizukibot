@@ -21,9 +21,9 @@
 
 ## 32 项状态
 
-- [ ] **1. NapCat HTTP 入口认证与防重放** — 实施中。工作区已有 HMAC、时间戳、nonce、重放缓存、事件类型校验、请求体限制和限流改动；仍需完成兼容模式说明、定向测试和提交验收。
-- [ ] **2. 图片缓存 SSRF** — 实施中。`utils/imageInputCache.js` 正在接入逐跳安全请求边界；未提交、未完成全套验收。
-- [ ] **3. `skill_summarize` SSRF** — 实施中。`api/skills_native/summarize.js` 正在复用 `requestSafeHttpUrl` 并限制响应大小；未提交、未完成全套验收。
+- [ ] **1. NapCat HTTP 入口认证与防重放** — 部分完成。提交 `c3ca711` 已加入 HMAC、时间戳、nonce、防重放、事件校验、请求体限制、鉴权后限流和真实配置链测试；NapCat 原生客户端仍需静态 token 兼容模式，安全诊断会将该模式标为 warning，后续需通过受控签名代理完成 signed-only 收口。
+- [x] **2. 图片缓存 SSRF** — 已完成。提交 `c3ca711` 已接入逐跳 DNS/重定向校验、固定解析地址、IPv4-mapped IPv6 拒绝和 8 MiB 响应限制，并有本地真实 HTTP 集成测试。
+- [x] **3. `skill_summarize` SSRF** — 已完成。提交 `c3ca711` 已统一使用安全请求边界并限制 2 MiB 响应，覆盖私网、重定向和固定 DNS 行为测试。
 - [ ] **4. `.env` 与 `data` ACL** — 未完成。当前 ACL 仍对普通认证用户开放修改或读取。
 - [ ] **5. 取消源码拼接式模块加载** — 未完成。`src/shared/chunkedModule.js` 仍通过 `new Function` 执行共享作用域 chunk，至少 6 个入口依赖。
 - [ ] **6. 消除生产依赖环** — 未完成。必须在 chunk 模块化后重新生成权威依赖图并将循环数降为 0。
@@ -48,7 +48,7 @@
 - [ ] **25. SQLite 多进程并发与完整性检查** — 未完成。缺少统一连接工厂、`busy_timeout`、checkpoint、`quick_check` 和多进程压测门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。
 - [ ] **27. 健康、就绪和优雅退出** — 部分完成。已有 `/healthz` 与 `service_healthy`，仍缺 `/live`、`/ready`、排空和完整资源关闭。
-- [ ] **28. 扩展安全诊断** — 实施中。工作区正增加 NapCat 鉴权诊断；仍需覆盖 ACL、监听地址、日志容量、容器基线并在 error 时非零退出。
+- [ ] **28. 扩展安全诊断** — 部分完成。提交 `c3ca711` 已增加 NapCat 鉴权模式诊断，并保证 CLI 在 `status=error` 时返回非零退出码；仍需覆盖 ACL、监听地址、日志容量和容器基线。
 - [ ] **29. 供应链安全门禁** — 未完成。无固定镜像 digest、SBOM、gitleaks、OSV/Trivy/Grype 和许可证门禁。
 - [ ] **30. 会话研究缓存全局容量限制** — 未完成。`utils/sessionResearchCache.js` 只限制单会话 8 条，未限制总会话数。
 - [ ] **31. 统一 Node 版本** — 未完成。以 `package.json` 的 Node 20 为基准，仍需核对并统一全部部署文档、脚本和 CI。
