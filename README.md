@@ -62,6 +62,12 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - 安全诊断新增 direct/Compose 部署边界、Windows ACL、日志无限保留、Docker 最终用户及每服务容器权限检查；无法可靠解析的配置只 warning，不输出假绿灯。
 - 验收：13 组定向/消费者测试、731 文件 lint、提示词检查、密钥扫描、依赖审计和 332.3 秒全量测试全部通过。实现提交：`d20208b`。
 
+## 运行维护 2026-07-12 21:08 +08:00
+
+- 容器两服务已采用 non-root、只读根、能力清空、no-new-privileges、init、资源/PID/停止宽限和 Docker 日志轮转；主服务独占可写 `runtime.env`，worker 不再获得可写配置文件。
+- 应用日志治理改为显式 opt-in，状态型 NDJSON 默认不轮转；共享日志的检查、轮转、追加与维护由跨进程锁保护，Windows daemon 只清理明确归档格式。
+- 验收：12 组运维测试、723 文件 lint、提示词检查、密钥扫描、依赖审计和 339.7 秒全量测试通过。实现提交：`9e5f0e8`；真实容器启动仍因本机 Docker snapshot 损坏和磁盘约 99% 占用待验收。
+
 ## 并发与后台线程
 
 更新 2026-07-09 17:48 +08:00：修复主回复 prepare 软超时 fallback 在非召回 `chat/default/direct_chat` 下构造 ambient memory context 并注入 `retrieved_memory_lite/daily_journal` 的问题；非召回普通主回复不再构造 fallback memory context，显式召回保持原记忆 fallback。验收结果：`node scripts/run-tests.js tests/runtimeV2PromptTimeoutMemoryFallback.test.js tests/chatDefaultMemoryLeakDiagnostics.test.js tests/geminiSamplingDegradationPromptGate.test.js` 通过；真实 24h 诊断仍显示修复前日志中 `candidateChatDefaultRequests=49`、`violationRequests=15`。小目标已完成。

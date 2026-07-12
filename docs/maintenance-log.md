@@ -1458,3 +1458,12 @@
 - 验收：`node scripts/run-tests.js tests/promptGoldenSnapshots.test.js tests/runtimePromptCache.test.js tests/promptSecurity.test.js tests/userFacingTextCot.test.js tests/userFacingReplyGuards.test.js tests/mainReplyPromptAssemblyDiagnostics.test.js tests/reasoningForwardPersonaPrompt.test.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js`、`npm run check:prompts`、`npm run lint` 和 `git diff --check` 通过。
 - 小目标已完成：主回复 reasoning 的高优先级提示词已收紧为瑞希第一人称沉浸思考，同时保留原始 reasoning 直接发送机制。
 - 提交后记录：功能提交 `4ea51e0` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
+
+## 运行维护 2026-07-12 21:08 +08:00
+
+- 容器加固提交 `9e5f0e8`：主/worker 使用 non-root、read_only、init、cap_drop ALL、no-new-privileges、CPU/内存/PID/30秒停止限制和受限 `/tmp`；命令直接执行 Node，主配置文件单独可写挂载，worker不挂载可写env，多余 `/app/logs` 卷已移除。
+- 运行文件：主锁和worker pid/lock迁入DATA_DIR角色目录并在首次写入前创建父目录；perf/resource默认按main/worker分流。部署文档增加`.env`权限和旧命名卷写入探针。
+- 日志治理：仅显式标记的诊断日志使用默认10份、30天、1GiB同目录容量和磁盘水位告警；状态型NDJSON无显式参数时不轮转。共享target通过跨进程原子锁覆盖检查、轮转、追加和维护，双进程100条并发测试无丢失或重复。
+- Windows daemon：新增归档维护脚本，只匹配daemon/runtime/worker时间戳归档，当前重定向文件不会匹配；文件占用或拒绝删除时保留并告警。Compose stdout/stderr使用local driver并限制10MiB×5。
+- 验收：12组定向运维测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev`、`git diff --check`通过；全量`npm test` 339.7秒自然退出且退出码0。
+- 未完成证据：WSL Docker daemon存在旧容器rw-layer snapshot缺失，build约6分钟无产物后已停止且未清理旧容器；真实UID、命名卷、只读根、资源限制、SIGTERM和health门控未验收。跨进程不同target的目录总配额也不是事务级硬上限，因此目标17、19保持部分完成。

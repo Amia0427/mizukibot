@@ -37,9 +37,9 @@
 - [ ] **14. 统一正常停机与远程重启** — 部分完成。JSON 热存储已移交信号所有权，仍需统一 server、worker、数据库和远程重启的 lifecycle coordinator。
 - [x] **15. 重构 Web 控制台认证** — 已完成。提交 `39b5428` 将 `WEB_TOKEN` 收口为常量时间登录校验，使用短期可撤销 HttpOnly 会话、登录限流、严格同源 CSRF 和受控代理链；旧 Bearer/header/query/localStorage 认证已移除。
 - [x] **16. 增加 Web 安全响应头** — 已完成。提交 `39b5428` 集中设置逐响应 nonce CSP、`frame-ancestors 'none'`、nosniff、Referrer Policy、Cache-Control，并仅在可信 HTTPS 链路发送 HSTS/Secure cookie。
-- [ ] **17. 容器最小权限运行** — 部分完成。已切换非 root 并收缩端口，仍缺只读根文件系统、能力收缩、`no-new-privileges`、资源限制和真实容器验收。
+- [ ] **17. 容器最小权限运行** — 部分完成。提交 `9e5f0e8` 已实现 non-root、只读根、cap_drop ALL、no-new-privileges、init、资源/PID/停止限制、角色锁目录和 Docker 日志轮转；真实 UID、旧命名卷权限、只读根写路径、SIGTERM 与资源上限仍因 Docker snapshot 损坏未完成运行验收，env秘密也尚未按角色拆分。
 - [x] **18. 收缩 Compose 网络暴露面** — 已完成默认 loopback 绑定；跨主机部署仍需受控代理和鉴权说明。
-- [ ] **19. 日志脱敏、保留和容量限制** — 未完成。`LOG_ROTATE_MAX_FILES` 默认仍为 0，缺少统一 TTL、目录配额和磁盘水位告警。
+- [ ] **19. 日志脱敏、保留和容量限制** — 部分完成。提交 `9e5f0e8` 已实现默认10份/30天、显式日志注册、同目录 active+archive 容量、85/95%水位告警、共享日志跨进程轮转锁和Windows daemon allowlist；不同进程写不同target时的目录硬上限尚非事务级一致，当前磁盘约99%占用仍需运维处理。
 - [ ] **20. 限制请求追踪日志内容** — 部分完成。提交 `d20208b` 已使用真实消费者契约收口字段，正文、headers、未知嵌套和 URL 凭据不再落盘；`userId/groupId/messageId` 的 keyed hash 迁移仍未完成。
 - [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
 - [ ] **22. 测试运行器并发和超时** — 部分完成。已有默认单文件 60 秒超时，仍为串行执行且 307.5 秒未达到两分钟目标。
