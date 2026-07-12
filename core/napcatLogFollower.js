@@ -142,6 +142,7 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
   try {
     if (!packetLogWriter || packetLogWriter.getMeta?.().filePath !== targetPath) {
       packetLogWriter = createJsonLineHotWriter(targetPath, {
+        retentionManaged: true,
         debounceMs: Math.max(0, Number(config.FOLLOWER_LOG_WRITE_DEBOUNCE_MS || 150) || 150),
         maxDelayMs: Math.max(0, Number(config.FOLLOWER_LOG_WRITE_MAX_DELAY_MS || 1500) || 1500)
       });

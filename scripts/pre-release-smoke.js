@@ -152,6 +152,7 @@ async function runExpectedShutdownGuard(root) {
   const restartScript = copySmokeFile(root, sandboxRoot, 'restart-bot.cmd');
   copySmokeFile(root, sandboxRoot, 'scripts/restart-bot.ps1');
   copySmokeFile(root, sandboxRoot, 'scripts/windows-daemon-common.ps1');
+  copySmokeFile(root, sandboxRoot, 'scripts/log-archive-maintenance.ps1');
   copySmokeFile(root, sandboxRoot, 'scripts/run-bot-daemon.ps1');
 
   const markerPath = path.join(sandboxRoot, 'data', 'bot-main-expected-shutdown.json');

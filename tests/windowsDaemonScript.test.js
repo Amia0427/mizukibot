@@ -5,12 +5,17 @@ const path = require('path');
 module.exports = (() => {
   const scriptPath = path.join(__dirname, '..', 'scripts', 'run-bot-daemon.ps1');
   const script = fs.readFileSync(scriptPath, 'utf8');
+  const maintenanceScript = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'log-archive-maintenance.ps1'), 'utf8');
 
   assert.ok(script.includes('function Wait-MainBotLockOwnership'), 'daemon should wait for main bot lock handoff');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_LOCK_WAIT_MS'"), 'daemon lock wait timeout should be configurable');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_LOCK_POLL_MS'"), 'daemon lock polling interval should be configurable');
   assert.ok(script.includes('function Archive-DaemonRedirectLogIfNeeded'), 'daemon should archive runtime logs before redirect truncates them');
   assert.ok(script.includes('archived runtime redirect log before restart'), 'daemon should log archived runtime stdout/stderr paths');
+  assert.ok(script.includes('Invoke-ManagedLogArchiveMaintenance'), 'daemon should govern explicit runtime log archives after archiving');
+  assert.ok(maintenanceScript.includes('bot-daemon\\.log'), 'maintenance should allowlist timestamped daemon archives');
+  assert.ok(maintenanceScript.includes('post-reply-worker'), 'maintenance should allowlist worker stdout/stderr archives');
+  assert.ok(!maintenanceScript.includes('*.jsonl'), 'maintenance must not use extension-wide data deletion rules');
   assert.ok(script.includes("Join-Path $logDir 'bot-main-restart-state.json'"), 'daemon should persist main bot restart backoff state');
   assert.ok(script.includes("Join-Path $logDir 'bot-main-runtime-state.json'"), 'daemon should read main bot runtime heartbeat state');
   assert.ok(script.includes("Join-Path $logDir 'bot-main-exit-observations.jsonl'"), 'daemon should append structured main bot exit observations');

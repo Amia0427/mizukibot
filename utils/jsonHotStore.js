@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { rotateFileIfNeeded } = require('./logRotation');
+const { appendFileWithRotation, rotateFileIfNeeded } = require('./logRotation');
 
 const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_MAX_DELAY_MS = 3000;
@@ -324,6 +324,7 @@ function createJsonLineHotWriter(filePath, options = {}) {
     maxDelayMs: Math.max(0, Number(options.maxDelayMs) || DEFAULT_MAX_DELAY_MS),
     rotateMaxBytes: options.rotateMaxBytes,
     rotateMaxFiles: options.rotateMaxFiles,
+    retentionManaged: options.retentionManaged === true,
     serializeLine: typeof options.serializeLine === 'function'
       ? options.serializeLine
       : ((value) => JSON.stringify(value)),
@@ -350,11 +351,21 @@ function createJsonLineHotWriter(filePath, options = {}) {
     clearTimer();
     try {
       const body = `${lines.join('\n')}\n`;
-      rotateFileIfNeeded(writer.filePath, Buffer.byteLength(body, writer.encoding), {
-        maxBytes: writer.rotateMaxBytes,
-        maxFiles: writer.rotateMaxFiles
-      });
-      fs.appendFileSync(writer.filePath, body, writer.encoding);
+      if (writer.retentionManaged) {
+        appendFileWithRotation(writer.filePath, body, {
+          encoding: writer.encoding,
+          maxBytes: writer.rotateMaxBytes,
+          maxFiles: writer.rotateMaxFiles
+        });
+      } else if (writer.rotateMaxBytes !== undefined || writer.rotateMaxFiles !== undefined) {
+        rotateFileIfNeeded(writer.filePath, Buffer.byteLength(body, writer.encoding), {
+          maxBytes: writer.rotateMaxBytes,
+          maxFiles: writer.rotateMaxFiles
+        });
+        fs.appendFileSync(writer.filePath, body, writer.encoding);
+      } else {
+        fs.appendFileSync(writer.filePath, body, writer.encoding);
+      }
       writer.flushCount += 1;
       return true;
     } catch (error) {
@@ -394,7 +405,8 @@ function createJsonLineHotWriter(filePath, options = {}) {
       filePath: writer.filePath,
       dirty: writer.dirty,
       pendingLines: writer.pendingLines.length,
-      flushCount: writer.flushCount
+      flushCount: writer.flushCount,
+      retentionManaged: writer.retentionManaged
     };
   }
 

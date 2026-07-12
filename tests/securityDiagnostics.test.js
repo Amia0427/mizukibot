@@ -64,6 +64,9 @@ assert.strictEqual(containerLoopbackBoundary.status, 'ok');
 
 assert.strictEqual(inspectLogRetention({ LOG_ROTATE_MAX_FILES: 0 }).status, 'warn');
 assert.strictEqual(inspectLogRetention({ LOG_ROTATE_MAX_FILES: 7 }).status, 'ok');
+assert.strictEqual(inspectLogRetention({ LOG_ROTATE_MAX_FILES: 7, LOG_ROTATE_MAX_AGE_MS: 0 }).status, 'warn');
+assert.strictEqual(inspectLogRetention({ LOG_ROTATE_MAX_FILES: 7, LOG_ROTATE_MAX_TOTAL_BYTES: 0 }).status, 'warn');
+assert.strictEqual(inspectLogRetention({ LOG_ROTATE_MAX_FILES: 7, LOG_DISK_WARN_PERCENT: 95, LOG_DISK_ERROR_PERCENT: 85 }).status, 'warn');
 
 const broadAcl = inspectSensitivePathAcls(require('path').resolve(__dirname, '..'), () => ({
   supported: true,
@@ -147,13 +150,14 @@ assert.ok(variablePort.findings.some((finding) => finding.id === 'compose-app-po
 const secureContainer = inspectContainerBaseline(__dirname, (file) => (
   file.endsWith('Dockerfile')
     ? 'FROM node:20\nUSER node\n'
-    : 'services:\n  app:\n    read_only: true\n    cap_drop: [ALL]\n    security_opt:\n      - no-new-privileges:true\n    ports:\n      - "127.0.0.1:3005:3005"\n'
+    : 'services:\n  app:\n    user: node\n    read_only: true\n    init: true\n    cpus: "1.0"\n    mem_limit: 1g\n    pids_limit: 128\n    stop_grace_period: 30s\n    cap_drop: [ALL]\n    security_opt:\n      - no-new-privileges:true\n    tmpfs:\n      - /tmp:rw,noexec,nosuid,nodev,size=128m,mode=1777\n    ports:\n      - "127.0.0.1:3005:3005"\n'
 ));
 assert.strictEqual(secureContainer.status, 'ok');
 
 const repositoryContainer = inspectContainerBaseline(require('path').resolve(__dirname, '..'));
 assert.ok(!repositoryContainer.findings.some((finding) => finding.id === 'docker-root-user'));
 assert.ok(!repositoryContainer.findings.some((finding) => finding.id.endsWith('-public-port-bind')));
+assert.strictEqual(repositoryContainer.status, 'ok');
 
 const compatibleNapCatAuth = inspectNapCatReverseAuth({
   NAPCAT_HTTP_REVERSE_ENABLED: true,

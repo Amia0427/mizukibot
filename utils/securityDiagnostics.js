@@ -196,19 +196,48 @@ function inspectIngressExposure(config = {}, options = {}) {
 }
 
 function inspectLogRetention(config = {}) {
-  const raw = config.LOG_ROTATE_MAX_FILES ?? process.env.LOG_ROTATE_MAX_FILES;
-  const maxFiles = raw === undefined || raw === null || raw === '' ? 0 : Number(raw);
-  const unlimited = !Number.isFinite(maxFiles) || maxFiles <= 0;
-  const findings = unlimited
-    ? [makeFinding(
+  const maxFiles = Number(config.LOG_ROTATE_MAX_FILES ?? process.env.LOG_ROTATE_MAX_FILES ?? 10);
+  const maxAgeMs = Number(config.LOG_ROTATE_MAX_AGE_MS ?? process.env.LOG_ROTATE_MAX_AGE_MS ?? 30 * 24 * 60 * 60 * 1000);
+  const maxTotalBytes = Number(config.LOG_ROTATE_MAX_TOTAL_BYTES ?? process.env.LOG_ROTATE_MAX_TOTAL_BYTES ?? 1024 * 1024 * 1024);
+  const diskWarnPercent = Number(config.LOG_DISK_WARN_PERCENT ?? process.env.LOG_DISK_WARN_PERCENT ?? 85);
+  const diskErrorPercent = Number(config.LOG_DISK_ERROR_PERCENT ?? process.env.LOG_DISK_ERROR_PERCENT ?? 95);
+  const findings = [];
+  if (!Number.isFinite(maxFiles) || maxFiles <= 0) {
+    findings.push(makeFinding(
       'log-retention-unbounded',
       'warn',
       'Rotated log retention is unbounded',
       'LOG_ROTATE_MAX_FILES is missing, zero, or invalid, so rotated archives can grow without a file-count limit.',
       'Set LOG_ROTATE_MAX_FILES to a positive value and monitor the data volume.'
-    )]
-    : [makeFinding('log-retention-bounded', 'ok', 'Rotated log retention is bounded', `At most ${Math.floor(maxFiles)} rotated files are retained per log.`)];
-  return { status: summarizeLevel(findings), maxFiles: unlimited ? 'unbounded' : Math.floor(maxFiles), findings };
+    ));
+  }
+  if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) {
+    findings.push(makeFinding('log-retention-ttl-disabled', 'warn', 'Rotated log TTL is disabled', 'LOG_ROTATE_MAX_AGE_MS does not set a positive archive lifetime.'));
+  }
+  if (!Number.isFinite(maxTotalBytes) || maxTotalBytes <= 0) {
+    findings.push(makeFinding('log-retention-capacity-disabled', 'warn', 'Rotated log capacity limit is disabled', 'LOG_ROTATE_MAX_TOTAL_BYTES does not set a positive shared capacity for registered log archives.'));
+  }
+  if (!Number.isFinite(diskWarnPercent) || !Number.isFinite(diskErrorPercent)
+    || diskWarnPercent <= 0 || diskErrorPercent <= diskWarnPercent || diskErrorPercent > 100) {
+    findings.push(makeFinding('log-disk-watermarks-invalid', 'warn', 'Log disk watermarks are invalid', 'Log disk warning/error percentages must be ordered values within 1-100.'));
+  }
+  if (findings.length === 0) {
+    findings.push(makeFinding(
+      'log-retention-bounded',
+      'ok',
+      'Rotated log retention is bounded',
+      `Each registered log family retains at most ${Math.floor(maxFiles)} archives for ${Math.floor(maxAgeMs)} ms, with ${Math.floor(maxTotalBytes)} shared archive bytes across the process.`
+    ));
+  }
+  return {
+    status: summarizeLevel(findings),
+    maxFiles: Number.isFinite(maxFiles) && maxFiles > 0 ? Math.floor(maxFiles) : 'unbounded',
+    maxAgeMs: Number.isFinite(maxAgeMs) && maxAgeMs > 0 ? Math.floor(maxAgeMs) : 'unbounded',
+    maxTotalBytes: Number.isFinite(maxTotalBytes) && maxTotalBytes > 0 ? Math.floor(maxTotalBytes) : 'unbounded',
+    diskWarnPercent,
+    diskErrorPercent,
+    findings
+  };
 }
 
 function readWindowsAcl(targetPath) {
@@ -341,7 +370,21 @@ function parseComposeServices(compose = '') {
     if (/^\S/.test(line) && line.trim() && !line.trim().startsWith('#')) break;
     const serviceMatch = line.match(/^  ([A-Za-z0-9_.-]+):\s*(?:#.*)?$/);
     if (serviceMatch) {
-      current = { name: serviceMatch[1], readOnly: false, capDropAll: false, noNewPrivileges: false, user: '', ports: [], uncertainPorts: false };
+      current = {
+        name: serviceMatch[1],
+        readOnly: false,
+        init: false,
+        capDropAll: false,
+        noNewPrivileges: false,
+        user: '',
+        cpus: 0,
+        memoryLimit: '',
+        pidsLimit: 0,
+        stopGracePeriod: '',
+        writableTmpfs: false,
+        ports: [],
+        uncertainPorts: false
+      };
       services[current.name] = current;
       listKey = null;
       currentPort = null;
@@ -354,8 +397,13 @@ function parseComposeServices(compose = '') {
       currentPort = null;
       const value = property[2].replace(/["']/g, '');
       if (listKey === 'read_only') current.readOnly = value === 'true';
+      if (listKey === 'init') current.init = value === 'true';
       if (listKey === 'cap_drop' && /\bALL\b/i.test(value)) current.capDropAll = true;
       if (listKey === 'user') current.user = value;
+      if (listKey === 'cpus') current.cpus = Number(value) || 0;
+      if (listKey === 'mem_limit') current.memoryLimit = value;
+      if (listKey === 'pids_limit') current.pidsLimit = Number(value) || 0;
+      if (listKey === 'stop_grace_period') current.stopGracePeriod = value;
       continue;
     }
     const listItem = line.match(/^      -\s*["']?(.*?)["']?\s*(?:#.*)?$/);
@@ -363,6 +411,7 @@ function parseComposeServices(compose = '') {
       const value = listItem[1];
       if (listKey === 'cap_drop' && /^ALL$/i.test(value)) current.capDropAll = true;
       if (listKey === 'security_opt' && /^no-new-privileges\s*:\s*true$/i.test(value)) current.noNewPrivileges = true;
+      if (listKey === 'tmpfs' && /^\/tmp(?::|$)/.test(value)) current.writableTmpfs = true;
       if (listKey === 'ports') {
         const target = value.match(/^target:\s*(.+)$/i);
         currentPort = target ? { target: target[1] } : null;
@@ -433,8 +482,14 @@ function inspectContainerBaseline(rootDir = PROJECT_ROOT, readText = (file) => f
   } else {
     for (const service of services) {
       if (!service.readOnly) findings.push(makeFinding(`compose-${service.name}-rootfs-writable`, 'warn', `${service.name} root filesystem is writable`, 'read_only: true is not configured for this service.', 'Use a read-only root filesystem and explicit writable volumes or tmpfs mounts.'));
+      if (!service.init) findings.push(makeFinding(`compose-${service.name}-init-missing`, 'warn', `${service.name} has no init process`, 'init: true is not configured for this service.', 'Enable the minimal init process so orphaned child processes are reaped.'));
       if (!service.capDropAll) findings.push(makeFinding(`compose-${service.name}-capabilities-not-dropped`, 'warn', `${service.name} does not drop all capabilities`, 'cap_drop: ALL is not configured for this service.', 'Drop all capabilities and add back only those proven necessary.'));
       if (!service.noNewPrivileges) findings.push(makeFinding(`compose-${service.name}-new-privileges-allowed`, 'warn', `${service.name} does not enforce no-new-privileges`, 'security_opt lacks no-new-privileges:true for this service.', 'Set no-new-privileges:true for this service.'));
+      if (service.cpus <= 0) findings.push(makeFinding(`compose-${service.name}-cpu-limit-missing`, 'warn', `${service.name} has no CPU limit`, 'cpus is missing or invalid for this service.', 'Set a tested CPU limit to contain runaway work.'));
+      if (!service.memoryLimit) findings.push(makeFinding(`compose-${service.name}-memory-limit-missing`, 'warn', `${service.name} has no memory limit`, 'mem_limit is not configured for this service.', 'Set a tested memory limit above the observed steady-state requirement.'));
+      if (service.pidsLimit <= 0) findings.push(makeFinding(`compose-${service.name}-pids-limit-missing`, 'warn', `${service.name} has no process limit`, 'pids_limit is missing or invalid for this service.', 'Set a process limit that permits normal child processes without allowing unbounded forks.'));
+      if (!service.stopGracePeriod) findings.push(makeFinding(`compose-${service.name}-stop-grace-period-missing`, 'warn', `${service.name} has no explicit stop grace period`, 'stop_grace_period is not configured for this service.', 'Set a grace period long enough for normal shutdown cleanup.'));
+      if (!service.writableTmpfs) findings.push(makeFinding(`compose-${service.name}-tmpfs-missing`, 'warn', `${service.name} has no writable temporary filesystem`, 'No /tmp tmpfs mount was found for the read-only service.', 'Mount a size-limited /tmp tmpfs with nosuid, nodev, and noexec where compatible.'));
       if (/^(?:root|0)(?::|$)/i.test(service.user)) findings.push(makeFinding(`compose-${service.name}-root-user`, 'error', `${service.name} overrides the image user with root`, `The service user is ${service.user}.`, 'Remove the root user override or use a dedicated numeric UID/GID.'));
       const portStates = service.ports.map(isPublicPortMapping);
       const publicPorts = portStates.filter((state) => state === true);
@@ -442,7 +497,7 @@ function inspectContainerBaseline(rootDir = PROJECT_ROOT, readText = (file) => f
       if (portStates.some((state) => state === null)) findings.push(makeFinding(`compose-${service.name}-port-bind-unresolved`, 'warn', `${service.name} port binding could not be resolved`, 'A variable or long-syntax port mapping prevents reliable host exposure analysis.', 'Resolve the effective Compose configuration and verify host_ip is loopback or a controlled address.'));
     }
   }
-  if (findings.length === 0) findings.push(makeFinding('container-baseline-ok', 'ok', 'Container security baseline is present', 'Non-root, read-only, capability, privilege, and port-binding checks passed.'));
+  if (findings.length === 0) findings.push(makeFinding('container-baseline-ok', 'ok', 'Container security baseline is present', 'Non-root, read-only, capability, privilege, resource-limit, temporary-filesystem, shutdown, and port-binding checks passed.'));
   return { status: summarizeLevel(findings), findings };
 }
 

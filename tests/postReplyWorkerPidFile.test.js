@@ -44,8 +44,8 @@ module.exports = (async () => {
 
   const guardDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-postreply-single-'));
   try {
-    const guardPidFile = path.join(guardDir, '.mizukibot-postreply-worker.pid');
-    const guardLockFile = path.join(guardDir, '.mizukibot-postreply-worker.lock');
+    const guardPidFile = path.join(guardDir, 'runtime', 'post-reply-worker', 'worker.pid');
+    const guardLockFile = path.join(guardDir, 'runtime', 'post-reply-worker', 'worker.lock');
     const existingWorker = {
       pid: 22222,
       ppid: 1,

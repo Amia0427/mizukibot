@@ -27,6 +27,7 @@ foreach ($requiredPath in @($commonPath, $runnerPath)) {
 }
 
 . $commonPath
+. (Join-Path $scriptRoot 'log-archive-maintenance.ps1')
 
 function Write-RestartLog {
   param([Parameter(Mandatory = $true)][string]$Message)
@@ -215,6 +216,10 @@ function Resolve-RestartWritableLogPath {
         $archivePath = Get-RestartFallbackLogPath -Path $Path
         Copy-Item -LiteralPath $Path -Destination $archivePath -Force
         Write-RestartLog -Message "archived runtime redirect log before restart. source=$Path archive=$archivePath"
+        Invoke-ManagedLogArchiveMaintenance -LogDirectory $dataDir -WarningSink {
+          param($Message)
+          Write-RestartLog -Message $Message
+        }
       }
     } catch {
       Write-RestartLog -Message "runtime redirect log archive failed. path=$Path error=$($_.Exception.Message)"

@@ -3,8 +3,13 @@ const path = require('path');
 
 const REQUIRED_ENV_KEYS = ['API_KEY'];
 
+function resolveEnvironmentPath(rootDir = path.resolve(__dirname, '..')) {
+  const configuredPath = String(process.env.MIZUKIBOT_ENV_FILE || '').trim();
+  return configuredPath ? path.resolve(configuredPath) : path.join(rootDir, '.env');
+}
+
 function loadLocalEnvFallback(rootDir = path.resolve(__dirname, '..')) {
-  const envPath = path.join(rootDir, '.env');
+  const envPath = resolveEnvironmentPath(rootDir);
   if (!fs.existsSync(envPath)) return;
 
   const raw = fs.readFileSync(envPath, 'utf8');
@@ -32,9 +37,10 @@ function loadLocalEnvFallback(rootDir = path.resolve(__dirname, '..')) {
 }
 
 function loadEnvironment(rootDir = path.resolve(__dirname, '..')) {
+  const envPath = resolveEnvironmentPath(rootDir);
   // Prefer dotenv when available, but keep startup independent from that optional dependency.
   try {
-    require('dotenv').config({ path: path.join(rootDir, '.env') });
+    require('dotenv').config({ path: envPath });
   } catch (_) {
     loadLocalEnvFallback(rootDir);
   }
@@ -166,6 +172,7 @@ module.exports = {
   pickList,
   pickNum,
   REQUIRED_ENV_KEYS,
+  resolveEnvironmentPath,
   safeReadText,
   validateRequiredConfig
 };

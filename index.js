@@ -37,9 +37,9 @@ const { flushAllHotStoresSync } = require('./utils/jsonHotStore');
 const { sendNapCatActionWithRetry } = require('./utils/napcatActionRetry');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
-const LOCK_FILE = process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE
-  ? process.env.MIZUKIBOT_LOCK_FILE
-  : path.join(__dirname, '.mizukibot.lock');
+const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
+  || (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE)
+  || path.join(__dirname, '.mizukibot.lock');
 const EXPECTED_SHUTDOWN_FILE = path.join(config.DATA_DIR, 'bot-main-expected-shutdown.json');
 const RUNTIME_STATE_FILE = path.join(config.DATA_DIR, 'bot-main-runtime-state.json');
 const EXIT_OBSERVATIONS_FILE = path.join(config.DATA_DIR, 'bot-main-exit-observations.jsonl');
@@ -330,6 +330,7 @@ async function acquireSingleInstanceLock() {
     }
   };
 
+  await fsp.mkdir(path.dirname(LOCK_FILE), { recursive: true });
   try {
     await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
   } catch (error) {

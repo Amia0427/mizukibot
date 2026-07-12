@@ -4,10 +4,29 @@ services:
     image: mizukibot:local
     container_name: mizukibot
     restart: unless-stopped
+    user: node
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "2.0"
+    mem_limit: 2g
+    pids_limit: 256
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
     env_file:
       - .env
     environment:
       DATA_DIR: /app/data
+      HOME: /tmp
+      TMPDIR: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
       MIZUKIBOT_DEPLOYMENT_CONTEXT: compose
       WEB_BIND_HOST: 0.0.0.0
       NAPCAT_HTTP_REVERSE_BIND_HOST: 0.0.0.0
@@ -15,6 +34,8 @@ services:
       POST_REPLY_WORKER_ENABLED: "true"
       POST_REPLY_WORKER_INLINE: "false"
       POST_REPLY_WORKER_SUPERVISOR_ENABLED: "false"
+      MIZUKIBOT_MAIN_LOCK_FILE: /app/data/runtime/main/.mizukibot.lock
+      MIZUKIBOT_ENV_FILE: /app/runtime.env
     ports:
       - "127.0.0.1:${NAPCAT_HTTP_REVERSE_PORT:-3002}:${NAPCAT_HTTP_REVERSE_PORT:-3002}"
       - "127.0.0.1:${WEB_PORT:-3005}:${WEB_PORT:-3005}"
@@ -26,14 +47,32 @@ services:
       start_period: 20s
     volumes:
       - mizukibot-data:/app/data
-      - mizukibot-logs:/app/logs
+      - ./.env:/app/runtime.env:rw
       - ./prompts/persona:/app/prompts/persona:ro
       - ./prompts/admin.txt:/app/prompts/admin.txt:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
 
   post-reply-worker:
     image: mizukibot:local
     container_name: mizukibot-post-reply-worker
     restart: unless-stopped
+    user: node
+    read_only: true
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: "1.5"
+    mem_limit: 1536m
+    pids_limit: 192
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "5"
     depends_on:
       mizukibot:
         condition: service_healthy
@@ -41,19 +80,24 @@ services:
       - .env
     environment:
       DATA_DIR: /app/data
+      HOME: /tmp
+      TMPDIR: /tmp
+      XDG_CACHE_HOME: /tmp/.cache
       MIZUKIBOT_DEPLOYMENT_CONTEXT: compose
       GROUP_REPLY_SENSITIVE_VENDOR_DIR: /app/assets/sensitive-words/vendor/sensitive-lexicon/Vocabulary
       POST_REPLY_WORKER_ENABLED: "true"
       POST_REPLY_WORKER_INLINE: "false"
       POST_REPLY_WORKER_SUPERVISOR_ENABLED: "false"
       MIZUKIBOT_RUNTIME_ROLE: post_reply_worker
-    command: ["npm", "run", "start:post-reply-worker"]
+      MIZUKIBOT_POST_REPLY_WORKER_PID_FILE: /app/data/runtime/post-reply-worker/worker.pid
+      MIZUKIBOT_POST_REPLY_WORKER_LOCK_FILE: /app/data/runtime/post-reply-worker/worker.lock
+    command: ["node", "scripts/post-reply-worker.js"]
     volumes:
       - mizukibot-data:/app/data
-      - mizukibot-logs:/app/logs
       - ./prompts/persona:/app/prompts/persona:ro
       - ./prompts/admin.txt:/app/prompts/admin.txt:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
 
 volumes:
   mizukibot-data:
-  mizukibot-logs:

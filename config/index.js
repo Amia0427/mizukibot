@@ -66,6 +66,13 @@ const SYSTEM_PROMPT_BLOCKS = buildSystemPromptBlocks();
 const humanizerAgentEnabled = pickBool('HUMANIZER_AGENT_ENABLED', pickBool('LLM_HUMANIZER_ENABLED', true));
 const lowResourceMode = pickBool('LOW_RESOURCE_MODE', false);
 const runtimeRole = pick('MIZUKIBOT_RUNTIME_ROLE', 'generic').toLowerCase();
+const runtimeRoleFileSuffix = runtimeRole === 'post_reply_worker'
+  ? 'post-reply-worker'
+  : runtimeRole === 'main' ? 'main' : '';
+function roleScopedDataFile(baseName) {
+  const suffix = runtimeRoleFileSuffix ? `-${runtimeRoleFileSuffix}` : '';
+  return path.join(DATA_DIR, `${baseName}${suffix}.jsonl`);
+}
 const lowResourceMainProcessMode = lowResourceMode && runtimeRole === 'main';
 const lowResourceDisableLanceDbHotPath = pickBool('LOW_RESOURCE_DISABLE_LANCEDB_HOT_PATH', false);
 const lowResourceDisableWorldbookSemantic = pickBool('LOW_RESOURCE_DISABLE_WORLDBOOK_SEMANTIC', false);
@@ -799,12 +806,22 @@ module.exports = {
   ...buildOpenVikingRuntimeConfig({ pick, pickNum, pickBool, pickList }),
   GRAPH_TOOL_SUCCESS_LOG_ENABLED: pickBool('GRAPH_TOOL_SUCCESS_LOG_ENABLED', false),
   ENABLE_DEBUG_LOG: pickBool('ENABLE_DEBUG_LOG', true),
+  LOG_ROTATE_MAX_BYTES: pickNum('LOG_ROTATE_MAX_BYTES', 100 * 1024 * 1024),
+  LOG_ROTATE_MAX_FILES: pickNum('LOG_ROTATE_MAX_FILES', 10),
+  LOG_ROTATE_MAX_AGE_MS: pickNum('LOG_ROTATE_MAX_AGE_MS', 30 * 24 * 60 * 60 * 1000),
+  LOG_ROTATE_MAX_TOTAL_BYTES: pickNum('LOG_ROTATE_MAX_TOTAL_BYTES', 1024 * 1024 * 1024),
+  LOG_MAINTENANCE_INTERVAL_MS: pickNum('LOG_MAINTENANCE_INTERVAL_MS', 60 * 1000),
+  LOG_DISK_WARN_PERCENT: pickNum('LOG_DISK_WARN_PERCENT', 85),
+  LOG_DISK_ERROR_PERCENT: pickNum('LOG_DISK_ERROR_PERCENT', 95),
+  LOG_ROTATE_LOCK_TIMEOUT_MS: pickNum('LOG_ROTATE_LOCK_TIMEOUT_MS', 5000),
+  LOG_ROTATE_LOCK_STALE_MS: pickNum('LOG_ROTATE_LOCK_STALE_MS', 30000),
+  LOG_ROTATE_LOCK_RETRY_MS: pickNum('LOG_ROTATE_LOCK_RETRY_MS', 10),
   PERF_LOG_ENABLED: pickBool('PERF_LOG_ENABLED', false),
-  PERF_LOG_FILE: pick('PERF_LOG_FILE', path.join(DATA_DIR, 'perf-events.jsonl')),
+  PERF_LOG_FILE: pick('PERF_LOG_FILE', roleScopedDataFile('perf-events')),
   PERF_LOG_DEBOUNCE_MS: pickNum('PERF_LOG_DEBOUNCE_MS', 250),
   PERF_LOG_MAX_DELAY_MS: pickNum('PERF_LOG_MAX_DELAY_MS', 2000),
   RESOURCE_SNAPSHOT_ENABLED: pickBool('RESOURCE_SNAPSHOT_ENABLED', false),
-  RESOURCE_SNAPSHOT_FILE: pick('RESOURCE_SNAPSHOT_FILE', path.join(DATA_DIR, 'resource-snapshots.jsonl')),
+  RESOURCE_SNAPSHOT_FILE: pick('RESOURCE_SNAPSHOT_FILE', roleScopedDataFile('resource-snapshots')),
   RESOURCE_SNAPSHOT_INTERVAL_MS: pickNum('RESOURCE_SNAPSHOT_INTERVAL_MS', 60000),
   RESOURCE_SNAPSHOT_LOOP_RESOLUTION_MS: pickNum('RESOURCE_SNAPSHOT_LOOP_RESOLUTION_MS', 20),
   RESOURCE_SNAPSHOT_DEBOUNCE_MS: pickNum('RESOURCE_SNAPSHOT_DEBOUNCE_MS', 500),

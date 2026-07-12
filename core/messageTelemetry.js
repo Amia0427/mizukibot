@@ -25,6 +25,7 @@ function appendInboundTimingLog(logFilePath, enableDebugLog, payload = {}) {
     if (!writerKey) return;
     if (!timingLogWriters.has(writerKey)) {
       timingLogWriters.set(writerKey, createJsonLineHotWriter(writerKey, {
+        retentionManaged: true,
         debounceMs: 150,
         maxDelayMs: 1500
       }));

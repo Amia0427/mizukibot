@@ -4,13 +4,18 @@ const os = require('os');
 const path = require('path');
 
 const {
+  resolveEnvPath,
   sanitizeEnvValue,
   serializeEnvValue,
   setEnvPairs
 } = require('../utils/envFile');
+const { loadLocalEnvFallback, resolveEnvironmentPath } = require('../config/envRuntime');
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'env-file-test-'));
 const envPath = path.join(tmpDir, '.env');
+const originalEnvFile = process.env.MIZUKIBOT_ENV_FILE;
+const testKey = 'MIZUKIBOT_ENV_FILE_TEST_VALUE';
+const originalTestValue = process.env[testKey];
 
 try {
   assert.strictEqual(sanitizeEnvValue('  keep spaces  '), '  keep spaces  ');
@@ -40,7 +45,22 @@ try {
   assert.match(output, /^BACKSLASH_VALUE="C:\\\\tmp\\\\x"$/m);
   assert.match(output, /^MULTILINE_VALUE="a b c"$/m);
 
+  const runtimeEnvPath = path.join(tmpDir, 'runtime.env');
+  fs.writeFileSync(runtimeEnvPath, `${testKey}=loaded-from-runtime-file\n`, 'utf8');
+  process.env.MIZUKIBOT_ENV_FILE = runtimeEnvPath;
+  delete process.env[testKey];
+  assert.strictEqual(resolveEnvPath(), runtimeEnvPath);
+  assert.strictEqual(resolveEnvironmentPath(path.join(tmpDir, 'ignored-root')), runtimeEnvPath);
+  loadLocalEnvFallback(path.join(tmpDir, 'ignored-root'));
+  assert.strictEqual(process.env[testKey], 'loaded-from-runtime-file');
+  setEnvPairs({ SAVED_TO_RUNTIME_FILE: 'yes' });
+  assert.match(fs.readFileSync(runtimeEnvPath, 'utf8'), /^SAVED_TO_RUNTIME_FILE=yes$/m);
+
   console.log('envFile.test.js passed');
 } finally {
+  if (originalEnvFile === undefined) delete process.env.MIZUKIBOT_ENV_FILE;
+  else process.env.MIZUKIBOT_ENV_FILE = originalEnvFile;
+  if (originalTestValue === undefined) delete process.env[testKey];
+  else process.env[testKey] = originalTestValue;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }

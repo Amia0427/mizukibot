@@ -34,6 +34,7 @@ function getJsonLineWriter(filePath, options = {}) {
     maxDelayMs: Math.max(0, Number(options.maxDelayMs || config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000),
     rotateMaxBytes: options.rotateMaxBytes,
     rotateMaxFiles: options.rotateMaxFiles,
+    retentionManaged: options.retentionManaged === true,
     serializeLine: options.serializeLine
   }));
 }

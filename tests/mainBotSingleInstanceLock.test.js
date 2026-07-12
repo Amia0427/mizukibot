@@ -48,11 +48,12 @@ function collectChildOutput(child) {
 
 module.exports = (async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-main-lock-'));
-  const lockFile = path.join(tempRoot, '.mizukibot.lock');
+  const lockFile = path.join(tempRoot, 'runtime', 'main', '.mizukibot.lock');
   const fakeMainBotScript = path.join(tempRoot, 'index.js');
   const testDataDir = path.join(tempRoot, 'data');
   const originalTestMode = process.env.MIZUKIBOT_INDEX_TEST_MODE;
   const originalLockFile = process.env.MIZUKIBOT_LOCK_FILE;
+  const originalMainLockFile = process.env.MIZUKIBOT_MAIN_LOCK_FILE;
   const originalDataDir = process.env.DATA_DIR;
   const originalApiKey = process.env.API_KEY;
   const originalExit = process.exit;
@@ -63,13 +64,13 @@ module.exports = (async () => {
 
   try {
     process.env.MIZUKIBOT_INDEX_TEST_MODE = '1';
-    process.env.MIZUKIBOT_LOCK_FILE = lockFile;
+    process.env.MIZUKIBOT_MAIN_LOCK_FILE = lockFile;
     process.env.DATA_DIR = testDataDir;
     process.env.API_KEY = process.env.API_KEY || 'test-api-key';
 
     const { __test } = require('../index');
 
-    fs.writeFileSync(lockFile, `${process.pid}\n`, 'utf8');
+    assert.strictEqual(fs.existsSync(path.dirname(lockFile)), false);
     const cleanupSelfOwned = await __test.acquireSingleInstanceLock();
     assert.strictEqual(fs.readFileSync(lockFile, 'utf8').trim(), String(process.pid));
     cleanupSelfOwned();
@@ -122,7 +123,7 @@ module.exports = (async () => {
     const raceEnv = {
       ...process.env,
       MIZUKIBOT_INDEX_TEST_MODE: '1',
-      MIZUKIBOT_LOCK_FILE: raceLockFile,
+      MIZUKIBOT_MAIN_LOCK_FILE: raceLockFile,
       RACE_GATE_FILE: raceGateFile,
       DATA_DIR: path.join(tempRoot, 'race-data'),
       API_KEY: process.env.API_KEY || 'test-api-key'
@@ -158,6 +159,11 @@ module.exports = (async () => {
       delete process.env.MIZUKIBOT_LOCK_FILE;
     } else {
       process.env.MIZUKIBOT_LOCK_FILE = originalLockFile;
+    }
+    if (originalMainLockFile === undefined) {
+      delete process.env.MIZUKIBOT_MAIN_LOCK_FILE;
+    } else {
+      process.env.MIZUKIBOT_MAIN_LOCK_FILE = originalMainLockFile;
     }
     if (originalDataDir === undefined) {
       delete process.env.DATA_DIR;

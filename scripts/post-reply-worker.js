@@ -8,8 +8,10 @@ const path = require('path');
 
 config.validateRequiredConfig();
 
-const PID_FILE = path.join(__dirname, '..', '.mizukibot-postreply-worker.pid');
-const INSTANCE_LOCK_FILE = path.join(__dirname, '..', '.mizukibot-postreply-worker.lock');
+const PID_FILE = process.env.MIZUKIBOT_POST_REPLY_WORKER_PID_FILE
+  || path.join(__dirname, '..', '.mizukibot-postreply-worker.pid');
+const INSTANCE_LOCK_FILE = process.env.MIZUKIBOT_POST_REPLY_WORKER_LOCK_FILE
+  || path.join(__dirname, '..', '.mizukibot-postreply-worker.lock');
 const singleInstance = acquirePostReplyWorkerSingleInstance({
   pidFile: PID_FILE,
   lockFile: INSTANCE_LOCK_FILE

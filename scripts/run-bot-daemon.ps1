@@ -6,6 +6,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 # Always run from repo root so relative paths (.env/data) stay stable.
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $repoRoot
+. (Join-Path $PSScriptRoot 'log-archive-maintenance.ps1')
 
 $logDir = Join-Path $repoRoot 'data'
 if (-not (Test-Path $logDir)) {
@@ -186,8 +187,9 @@ function Rotate-DaemonLogIfNeeded {
     $archiveStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $archivePath = "$logFile.$archiveStamp"
     Move-Item -LiteralPath $logFile -Destination $archivePath -Force
+    Invoke-ManagedLogArchiveMaintenance -LogDirectory $logDir
   } catch {
-    # Logging must never stop the daemon from starting the bot.
+    Write-Warning "daemon log rotation failed; skipped path=$logFile error=$($_.Exception.Message)"
   }
 }
 
@@ -271,6 +273,7 @@ function Resolve-DaemonWritableLogPath {
   $archivePath = Archive-DaemonRedirectLogIfNeeded -Path $Path
   if (-not [string]::IsNullOrWhiteSpace($archivePath)) {
     Write-DaemonLog -Message "archived runtime redirect log before restart. source=$Path archive=$archivePath"
+    Invoke-ManagedLogArchiveMaintenance -LogDirectory $logDir
   }
 
   if (New-EmptyDaemonLogFile -Path $Path) {

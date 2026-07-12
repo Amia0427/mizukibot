@@ -1,7 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_ENV_PATH = path.join(path.resolve(__dirname, '..'), '.env');
+function resolveEnvPath() {
+  const configuredPath = String(process.env.MIZUKIBOT_ENV_FILE || '').trim();
+  return configuredPath
+    ? path.resolve(configuredPath)
+    : path.join(path.resolve(__dirname, '..'), '.env');
+}
+
+const DEFAULT_ENV_PATH = resolveEnvPath();
 
 function sanitizeEnvKey(key) {
   const text = String(key || '').trim();
@@ -25,7 +32,7 @@ function serializeEnvValue(value) {
   return safe;
 }
 
-function readEnvRaw(envPath = DEFAULT_ENV_PATH) {
+function readEnvRaw(envPath = resolveEnvPath()) {
   try {
     if (!fs.existsSync(envPath)) return '';
     return fs.readFileSync(envPath, 'utf8');
@@ -62,7 +69,7 @@ function upsertEnv(raw, key, value) {
   return output.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
-function setEnvPairs(pairs, envPath = DEFAULT_ENV_PATH) {
+function setEnvPairs(pairs, envPath = resolveEnvPath()) {
   let raw = readEnvRaw(envPath);
 
   for (const [key, value] of Object.entries(pairs || {})) {
@@ -85,6 +92,7 @@ function maskSecret(value, prefix = 3, suffix = 3) {
 module.exports = {
   DEFAULT_ENV_PATH,
   readEnvRaw,
+  resolveEnvPath,
   sanitizeEnvKey,
   sanitizeEnvValue,
   serializeEnvValue,
