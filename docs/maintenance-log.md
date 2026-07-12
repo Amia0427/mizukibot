@@ -1304,3 +1304,10 @@
 - 范围控制：未改 post-reply 队列、LangGraph 事件格式和 SQLite WAL；这些属于更大结构性优化。原先发现的 `embedding_cache.jsonl.*.tmp` 复查时已不存在，未执行删除。
 - 验收：`node --check core\napcatLogFollower.js`、`node --check utils\memory-v3\events.js`、`node --check tests\napcatPacketLogConfig.test.js`、`node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。`tests\napcatLogFollower.test.js` 与 `tests\memoryCliV3.test.js` 直接运行会留下外部 DNS 句柄，本轮未作为验收依据。
 - 小目标已完成：默认运行不再持续记录 NapCat 原始包，Memory V3 事件写入不再每条同步刷盘，同时保留必要诊断开关和同进程读取一致性。
+
+## 运行维护 2026-07-12 12:20 +08:00
+
+- 目标：修复 JSON 热存储信号监听器抢先退出进程、绕过主进程优雅停机的问题。
+- 最小修复：`jsonHotStore` 只保留 `beforeExit` 兜底刷盘，不再拥有 `SIGINT/SIGTERM` 或调用 `process.exit`；主入口在关闭消息、调度器、HTTP 服务和外部运行时后统一执行同步刷盘。
+- 验收：新增 `jsonHotStoreSignalOwnership.test.js`，先确认旧实现会新增信号监听器并失败；修复后与 `jsonHotStoreCorruptFallback`、`napcatWsIngressSmoke`、`tickEngineStopGuard` 共 4 项定向测试全部通过。
+- 小目标已完成：信号退出权已收口到主入口，存储落盘不再截断后续优雅停机流程。

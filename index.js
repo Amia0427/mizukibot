@@ -33,6 +33,7 @@ const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer
 const { createMessageIngressDispatcher } = require('./core/messageIngressDispatcher');
 const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
 const { maybeSendRestartResultFeedback } = require('./utils/restartResultFeedback');
+const { flushAllHotStoresSync } = require('./utils/jsonHotStore');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE
@@ -713,6 +714,8 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   try { await shutdownCycleTLS(); } catch (error) {
     console.error('[shutdown] cycletls cleanup failed:', error?.message || error);
   }
+
+  flushAllHotStoresSync();
 
   cleanupSingleInstanceLock();
   stopMainRuntimeHeartbeat('shutdown_complete', { reason, exitCode });

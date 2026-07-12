@@ -93,16 +93,7 @@ function defaultJsonSerialize(value) {
 function registerFlushHooks() {
   if (process[JSON_HOT_STORE_HOOK_KEY]) return;
   process[JSON_HOT_STORE_HOOK_KEY] = true;
-  const flushAll = () => flushAllHotStoresSync();
-  process.once('beforeExit', flushAll);
-  process.once('SIGINT', () => {
-    flushAll();
-    process.exit(130);
-  });
-  process.once('SIGTERM', () => {
-    flushAll();
-    process.exit(143);
-  });
+  process.once('beforeExit', flushAllHotStoresSync);
 }
 
 function createHotStore(filePath, options = {}) {
