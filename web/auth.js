@@ -1,3 +1,4 @@
+// @ts-check
 const crypto = require('crypto');
 
 const config = require('../config');

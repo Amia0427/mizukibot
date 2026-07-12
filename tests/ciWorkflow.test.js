@@ -24,6 +24,7 @@ assert.match(workflow, /persist-credentials: false/);
 assert.match(workflow, /run: npm ci/);
 assert.match(workflow, /run: npm run check:node/);
 assert.match(workflow, /run: npm run lint/);
+assert.match(workflow, /run: npm run typecheck/);
 assert.match(workflow, /run: npm run check:prompts/);
 assert.match(workflow, /run: npm run check:secrets:all/);
 assert.match(workflow, /run: npm audit --omit=dev/);

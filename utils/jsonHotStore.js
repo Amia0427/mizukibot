@@ -59,12 +59,9 @@ function atomicWriteFile(filePath, text, encoding = 'utf8') {
       }
     }
     try {
-      try {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-      } catch (_) {}
-    } finally {
-      if (fallbackError) throw fallbackError;
-    }
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    } catch (_) {}
+    if (fallbackError) throw fallbackError;
     throw error;
   }
 }

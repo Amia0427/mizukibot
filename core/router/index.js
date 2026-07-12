@@ -29,6 +29,7 @@ const {
 const {
   INTENT_ALIASES,
   hasExplicitActSignal,
+  isSimpleTransformTask,
   isSelfContainedProductivityPlan,
   isStrictTimeDirectQuestion,
   isTextOnlyPlanRequest,

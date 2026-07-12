@@ -1,3 +1,4 @@
+// @ts-check
 const config = require('../../../config');
 const { isReplyFailure } = require('../../../utils/replyFailure');
 const { normalizeObject } = require('./runtimeHelpers');

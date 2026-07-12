@@ -15,6 +15,7 @@ const { sanitizeText } = require('./commandParser');
 const { sanitizePreviewText } = require('./text');
 const { openImageMemoryResult } = require('./openImage');
 const { openV3MemoryItemById } = require('./openV3Item');
+const { loadProfileProjection } = require('../memory-v3/storage');
 const {
   getJournalSummaryFiles,
   openJournalByRef,

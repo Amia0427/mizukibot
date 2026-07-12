@@ -827,11 +827,6 @@ function createPersistNode(deps = {}) {
 
     return saveAndEmit({
       ...state,
-      memory: {
-        ...state.memory,
-        persisted: true,
-        learningQueued: Boolean(enqueuedPostReplyJob?.jobId)
-      },
       execution: {
         ...state.execution,
         currentNode: 'persist',

@@ -1,3 +1,4 @@
+// @ts-check
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -427,10 +428,11 @@ function parseComposeServices(compose = '') {
 
 function isPublicPortMapping(mapping = '') {
   if (mapping && typeof mapping === 'object') {
-    const values = [mapping.target, mapping.published, mapping.host_ip].map(normalizeText);
+    const portMapping = /** @type {Record<string, unknown>} */ (mapping);
+    const values = [portMapping.target, portMapping.published, portMapping.host_ip].map(normalizeText);
     if (values.some((value) => /\$\{|\$[A-Za-z_]/.test(value))) return null;
-    if (!mapping.published) return null;
-    return mapping.host_ip ? !isLoopbackHost(mapping.host_ip) : true;
+    if (!portMapping.published) return null;
+    return portMapping.host_ip ? !isLoopbackHost(String(portMapping.host_ip)) : true;
   }
   const value = normalizeText(mapping);
   if (!value) return null;
@@ -587,7 +589,7 @@ function collectSecurityDiagnostics(config = require('../config'), options = {})
   const napCatReverseAuth = inspectNapCatReverseAuth(config);
   const apiBaseUrls = inspectApiBaseUrls(config);
   const sourceSecrets = inspectSourceSecrets(options.rootDir || PROJECT_ROOT);
-  const deploymentContext = normalizeText(options.deploymentContext || config.MIZUKIBOT_DEPLOYMENT_CONTEXT || process.env.MIZUKIBOT_DEPLOYMENT_CONTEXT).toLowerCase();
+  const deploymentContext = normalizeText(options.deploymentContext || process.env.MIZUKIBOT_DEPLOYMENT_CONTEXT).toLowerCase();
   let composeText = '';
   if (deploymentContext === 'compose') {
     try { composeText = (options.readText || ((file) => fs.readFileSync(file, 'utf8')))(path.join(options.rootDir || PROJECT_ROOT, 'docker-compose.yml')); } catch (_) {}

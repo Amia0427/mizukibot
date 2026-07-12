@@ -440,22 +440,6 @@ function buildEmptyRecall(query = '', patch = {}) {
     used: false,
     rejectedReason: '',
     promptText: '',
-    diagnostics: {
-      enabled: false,
-      serverName: '',
-      recallSource: '',
-      sourceToolName: '',
-      kbToolName: '',
-      searchToolName: '',
-      availableTools: [],
-      durationMs: 0,
-      error: '',
-      readOnly: true,
-      queryMode: '',
-      queryChanged: false,
-      routeGate: null,
-      quality: null
-    },
     ...patch,
     diagnostics: {
       enabled: false,

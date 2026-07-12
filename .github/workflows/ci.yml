@@ -44,6 +44,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Typecheck stable boundaries
+        run: npm run typecheck
+
       - name: Check prompts
         run: npm run check:prompts
 

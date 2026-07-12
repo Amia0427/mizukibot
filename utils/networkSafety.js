@@ -1,3 +1,4 @@
+// @ts-check
 const dns = require('dns');
 const net = require('net');
 
@@ -137,6 +138,7 @@ function createPinnedLookup(addresses = []) {
       ? entries.filter((entry) => entry.family === requestedFamily)
       : entries;
     if (!candidates.length) {
+      /** @type {NodeJS.ErrnoException} */
       const error = new Error('No validated address matches the requested family');
       error.code = 'ENOTFOUND';
       done(error);

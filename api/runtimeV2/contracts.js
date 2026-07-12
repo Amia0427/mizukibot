@@ -1,3 +1,4 @@
+// @ts-check
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
 }
@@ -379,6 +380,7 @@ function buildToolEvidenceBundle(state = {}, options = {}) {
     }
   }
 
+  /** @type {Array<{source: string, originalSource: string, result: string, tool_name?: string, tool_call_id?: string, step_id?: string}>} */
   const globalEvidence = [];
   const globalEvidenceText = normalizeText(state.memory?.globalToolEvidence);
   if (globalEvidenceText) {

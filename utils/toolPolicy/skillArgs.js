@@ -1,3 +1,4 @@
+// @ts-check
 function normalizeWeatherArgs(args = {}) {
   const next = {};
   const location = String(args.location ?? args.city ?? args.text ?? '').trim();

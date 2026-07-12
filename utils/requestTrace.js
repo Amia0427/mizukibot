@@ -1,4 +1,4 @@
-const fs = require('fs');
+// @ts-check
 const path = require('path');
 const crypto = require('crypto');
 const {
@@ -236,7 +236,9 @@ function cloneTraceForMeta(trace = null) {
 }
 
 function appendRequestTraceEvent(event = {}) {
-  const payload = event && typeof event === 'object' && !Array.isArray(event) ? event : {};
+  const payload = /** @type {Record<string, unknown>} */ (
+    event && typeof event === 'object' && !Array.isArray(event) ? event : {}
+  );
   const requestId = sanitizeTraceText(payload.requestId || payload.request_id).slice(0, 160);
   if (!requestId) return;
   const explicitSeq = Math.max(0, Number(payload.phaseSeq || payload.phase_seq || 0) || 0);

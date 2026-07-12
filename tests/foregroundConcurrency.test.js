@@ -11,7 +11,6 @@ module.exports = (async () => {
 
   const generalLocks = [];
   for (let i = 0; i < 9; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
     generalLocks.push(await controller.acquire({
       userId: `user_${i}`,
       lane: 'general',
