@@ -1507,3 +1507,17 @@
 - prompt治理：主检查器与完整config解耦，支持Git tracked、clean CI与package模式；私有required prompt由exact allowlist声明，本地存在时仍校验。39个worldbook、7个runtime模板和4组conflict tag纳入review_by门禁，unknown/stale/expired/drift均非零失败，基线0 warning。
 - 验收：runner/prompt/fixture定向测试、`npm run check:prompts`、`npm run lint`、`npm run check:secrets:all`、`npm audit --omit=dev`、`git diff --check`通过；TEST_CONCURRENCY=4全量测试146.7秒自然退出且退出码0。
 - 路线图状态：目标24完成；目标22功能完成但性能未达标，默认2约184秒、并发4约147.9秒，慢测集中在NapCat follower、QQ action、stock summarize、vision budget和prompt snapshots，保持部分完成。
+
+## 运行维护 2026-07-13 01:20 +08:00
+
+- 目标22已完成：NapCat follower 通过默认保持真实被动感知、测试可注入处理器的边界隔离模型/记忆网络链，QQ action 注入 `sleep` 验证生产拟人延迟而不真实等待；stock 与 MCP native 测试使用固定 fixture 和自建临时目录，不再访问公网或污染仓库数据。
+- 文本预算优化：`trimTextByTokenBudget` 在原 32 字符裁剪网格上由线性重复扫描改为二分查找，保持 head/tail 结果等价；新增 reference 测试覆盖短文本、非32倍边界、CJK/Latin/emoji 和多档 budget，视觉预算测试由约21.2秒降至 0.37–0.43秒。
+- prompt golden 仍执行真实 prompt block 组装、planner 选择/拒绝、Gemini native body 及全部 golden 断言，仅通过显式静态 persona material 注入避免17次重复候选收集，并保留无 planner worldbook 真实检索场景；5次定向耗时 3.27–3.83秒。
+- 验收：NapCat follower 5次 0.46–0.76秒，QQ action 5次 0.23–0.25秒，native stock/MCP 5次均低于0.39秒，continuous message 5次 5.65–7.42秒；`npm run lint`、`git diff --check` 通过，`TEST_CONCURRENCY=4` 全量连续三轮均自然退出且全部通过，耗时 100.6秒、97.6秒、103.6秒。
+
+## 运行维护 2026-07-13 01:27 +08:00
+
+- 实现提交 `be32669`：NapCat follower、QQ action、stock与ontology MCP测试通过依赖注入验证真实生产入口但不访问公网或等待生产延迟；相关测试均使用自建临时目录并在finally清理。
+- 性能：`trimTextByTokenBudget`在原32字符裁剪网格上使用二分查找，并以旧线性算法作多字符集/多budget等价验证；prompt golden保留真实block组装、planner选择与Gemini body，只注入稳定persona候选避免重复收集。
+- Source迁移：DirectAnchor、ReasoningForward、NormalFastReplyHandler三个测试不再读取源码/includes/indexOf，改为真实handler行为与模块契约，覆盖acceptedBy、formal/fast raw reasoning、发送顺序、失败回退、安全元数据、emoji与history顺序。
+- 最终验收：10项定向测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`通过；全量连续三轮100.6/97.6/103.6秒自然通过。目标22完成，目标23保持部分完成。
