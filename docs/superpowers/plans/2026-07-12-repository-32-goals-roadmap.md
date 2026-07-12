@@ -12,9 +12,9 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-13 02:33 +08:00。
+更新时间：2026-07-13 02:57 +08:00。
 
-- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 44 个提交。
+- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 46 个提交。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
 - 已确认的完整基线：`npm run lint` 覆盖 727 个 JS 文件和 71 个 chunk；完整 `npm test` 最近一次自然结束用时 307.5 秒。
 - 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
@@ -43,7 +43,7 @@
 - [ ] **20. 限制请求追踪日志内容** — 部分完成。提交 `d20208b` 已使用真实消费者契约收口字段，正文、headers、未知嵌套和 URL 凭据不再落盘；`userId/groupId/messageId` 的 keyed hash 迁移仍未完成。
 - [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
 - [x] **22. 测试运行器并发和超时** — 已完成。提交 `d44d051`、`be32669` 完成tracked-only发现、有限并发、串行barrier、进程树终止、慢测榜和慢测网络/生产等待治理；视觉文本预算裁剪改为等价二分查找，`TEST_CONCURRENCY=4`全量连续三轮100.6/97.6/103.6秒自然通过。
-- [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced` 已迁移DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress和configureNapcat七个高价值测试，并通过模块契约消除planner参数重复；noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands及部分CI/Docker/PowerShell安全守卫仍待行为化或结构化解析。
+- [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced`、`f0e472d` 已迁移 DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress、configureNapcat、noExternalProcessSkills、runtimeHostShortTermBatchWiring 和 messageAdminCommands；外部进程技能现在逐项执行并封锁全部 child_process 入口，重启命令通过真实消息入口验证。剩余 CI、Docker、PowerShell 安全守卫仍待行为化或结构化解析。
 - [x] **24. 强化提示词清单检查** — 已完成。提交 `d44d051` 已建立版本化exact allowlist，覆盖tracked/package/private边界、39个worldbook、7个runtime模板和4组冲突标签；新增、删除、过期、未知字段或标签成员漂移均失败，默认warning为0。
 - [ ] **25. SQLite 多进程并发与完整性检查** — 未完成。缺少统一连接工厂、`busy_timeout`、checkpoint、`quick_check` 和多进程压测门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。

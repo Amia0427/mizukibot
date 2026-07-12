@@ -1536,3 +1536,11 @@
 - 静态检查修复：补齐 router、memory CLI 的真实缺失导入，移除重复对象键和未使用导入，修正 JSON 热存储 unsafe finally，并补足 Runtime V2 状态 reducer 与安全诊断的类型契约；未做无关重构。
 - 验收：`npm run lint`、`npm run typecheck`、质量/CI策略测试、13项关联行为测试、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`、`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 108.2秒自然通过。
 - 路线图状态：目标10完成；目标9保持部分完成。实测启用 `no-promise-executor-return` 会产生75个历史错误，全仓 unused 与复杂度规则也未清零；共享作用域 chunk 仍等待目标5模块化后由 ESLint 完整接管。
+
+## 运行维护 2026-07-13 02:57 +08:00
+
+- 实现提交 `f0e472d`：`noExternalProcessSkillsSource` 不再截取源码，改为逐项执行 21 个原生技能 executor、验证参数与返回值，并封锁 `spawn/spawnSync/exec/execSync/execFile/execFileSync/fork`；QQ 依赖检查也改为真实运行结果断言。
+- Runtime 接线：`createRuntime` 增加可选 persist factory seam，测试从真实组合根捕获依赖并确认 `withSessionContextBatch` 与 `appendShortTermHistory` 接入；默认生产 factory 不变。
+- 管理员重启：消息入口增加可选 restart trigger seam，真实发送 `/restart` 与 `/restart confirm` 验证确认门槛、回复、800ms 延迟和完整来源元数据。行为测试同时发现并修复原路径引用不存在的 `inboundRequestId`，改用当前入站锁的 requestId。
+- 验收：5项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 92.2秒自然通过。
+- 路线图状态：目标23继续部分完成，三个高价值源码守卫已迁移；剩余 CI、Docker 和 PowerShell 安全/部署守卫需继续改为行为测试或结构化解析。
