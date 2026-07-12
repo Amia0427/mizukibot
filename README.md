@@ -4,6 +4,13 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-12 19:21
+
+- 小目标：清理没有 CLI、脚本、测试或运行入口的 OpenViking backfill 分支。
+- 最小修复：删除 `utils/openVikingMemory/backfill.js` 和无调用聚合入口 `utils/openVikingMemory/index.js`，移除三个 `OPENVIKING_BACKFILL_*` 孤立配置及文档中的失效回灌章节，共删除 142 行未接入模块代码。
+- 验收：backfill 导出和配置 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、7 个 OpenViking/Runtime V2 相关测试、配置构建探针、保留模块 require smoke、`npm pack --dry-run` 和 `git diff --check` 均通过。
+- 小目标已完成：OpenViking 仅保留实际可执行的召回、写入、CLI、调度和诊断链路。
+
 ## 运行维护 2026-07-12 19:07 +08:00
 
 - 小目标：QQ 正文发送成功后直接合并转发 provider 原始 `reasoningText`，不再使用本地清洗后的 `reasoningForwardText`。

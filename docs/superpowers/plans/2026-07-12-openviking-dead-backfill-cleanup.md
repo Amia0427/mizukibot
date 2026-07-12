@@ -34,7 +34,7 @@
 - [x] 运行 `npm run lint`、`npm run check:agent:static`。
 - [x] 运行 OpenViking client、identity、recall、CLI、persist、prompt 相关测试。
 - [x] 运行配置回归、保留模块 smoke 和 `npm pack --dry-run`。
-- [ ] 仅暂存本任务文件并提交。
+- [x] 仅暂存本任务文件并提交。
 
 ### Task 4: 记录完成状态
 
@@ -42,5 +42,5 @@
 - Modify: `README.md`
 - Modify: `docs/maintenance-log.md`
 
-- [ ] 在代码提交后追加带时间戳的验收记录。
-- [ ] 复查并行工作区未被覆盖后提交文档。
+- [x] 在代码提交后追加带时间戳的验收记录。
+- [x] 复查并行工作区未被覆盖后提交文档。

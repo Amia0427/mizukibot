@@ -1,3 +1,10 @@
+## 运行维护 2026-07-12 19:21
+
+- 小目标：清理没有 CLI、脚本、测试或运行入口的 OpenViking backfill 分支。
+- 最小修复：删除 `utils/openVikingMemory/backfill.js` 和无调用聚合入口 `utils/openVikingMemory/index.js`，移除三个 `OPENVIKING_BACKFILL_*` 孤立配置及文档中的失效回灌章节，共删除 142 行未接入模块代码。
+- 验收：backfill 导出和配置 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、7 个 OpenViking/Runtime V2 相关测试、配置构建探针、保留模块 require smoke、`npm pack --dry-run`、`git diff --check` 均通过。
+- 小目标已完成：OpenViking 仅保留实际可执行的召回、写入、CLI、调度和诊断链路。
+
 ## 运行维护 2026-07-12 19:03
 
 - 小目标：继续清理已退役 `/cot` 状态、零入口 AI 聚合层和无调用的本地命令桥客户端。
