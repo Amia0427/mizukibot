@@ -49,6 +49,12 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - 写请求增加严格同源 CSRF 校验，登录失败有限流；CSP 使用逐响应 nonce，并集中设置 frame、MIME、Referrer Policy 和受信 HTTPS 下的 HSTS。
 - 验收：真实浏览器完成登录、控制台渲染和注销，控制台无 CSP 错误；6 组 Web 测试、729 文件 lint、提示词检查、密钥扫描、依赖审计和 326.7 秒全量测试全部通过。实现提交：`39b5428`。
 
+## 运行维护 2026-07-12 19:49 +08:00
+
+- 请求追踪改为显式字段契约，保留诊断需要的路由、流式、重试、工具、缓存和耗时元数据，不再自动写入正文、headers、未知嵌套对象或带凭据 URL；错误和 requestId 同样执行限长与脱敏。
+- 安全诊断新增 direct/Compose 部署边界、Windows ACL、日志无限保留、Docker 最终用户及每服务容器权限检查；无法可靠解析的配置只 warning，不输出假绿灯。
+- 验收：13 组定向/消费者测试、731 文件 lint、提示词检查、密钥扫描、依赖审计和 332.3 秒全量测试全部通过。实现提交：`d20208b`。
+
 ## 并发与后台线程
 
 更新 2026-07-09 17:48 +08:00：修复主回复 prepare 软超时 fallback 在非召回 `chat/default/direct_chat` 下构造 ambient memory context 并注入 `retrieved_memory_lite/daily_journal` 的问题；非召回普通主回复不再构造 fallback memory context，显式召回保持原记忆 fallback。验收结果：`node scripts/run-tests.js tests/runtimeV2PromptTimeoutMemoryFallback.test.js tests/chatDefaultMemoryLeakDiagnostics.test.js tests/geminiSamplingDegradationPromptGate.test.js` 通过；真实 24h 诊断仍显示修复前日志中 `candidateChatDefaultRequests=49`、`violationRequests=15`。小目标已完成。

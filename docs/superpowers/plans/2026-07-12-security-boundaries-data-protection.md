@@ -176,27 +176,27 @@ git commit -m "fix: add web security headers"
 - Modify: `tests/requestTrace.test.js`
 - Modify: `tests/requestTracePreflightDiagnostics.test.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 传入 `apiKey`、`authorization`、`token`、消息正文、任意嵌套对象和 Error，断言落盘事件只保留明确允许的标识、阶段、耗时、布尔状态、稳定错误码和已清洗短摘要。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `node scripts/run-tests.js tests/requestTrace.test.js tests/requestTracePreflightDiagnostics.test.js`
 
 Expected: FAIL，当前 `appendRequestTraceEvent` 会展开调用方 payload。
 
-- [ ] **Step 3: 实现字段白名单**
+- [x] **Step 3: 实现字段白名单**
 
 在 `utils/requestTrace.js` 内建立唯一 serializer；调用方新增字段不会自动进入日志。错误对象只提取状态码、错误码和截断清洗后的消息，不记录 headers、request config、response body 或凭据。
 
-- [ ] **Step 4: 运行测试并确认通过**
+- [x] **Step 4: 运行测试并确认通过**
 
 Run: `node scripts/run-tests.js tests/requestTrace.test.js tests/requestTracePreflightDiagnostics.test.js tests/messageHandlerRequestTrace.test.js`
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交实现**
+- [x] **Step 5: 提交实现**
 
 ```bash
 git add utils/requestTrace.js tests/requestTrace.test.js tests/requestTracePreflightDiagnostics.test.js tests/messageHandlerRequestTrace.test.js
@@ -211,21 +211,21 @@ git commit -m "fix: whitelist request trace fields"
 - Modify: `tests/securityDiagnostics.test.js`
 - Create: `tests/securityDiagnosticsCli.test.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 覆盖公开监听缺少鉴权、NapCat 兼容 token、无限日志保留、宽松 `.env`/`data` ACL、容器缺少安全基线，以及 `status=error` 时 CLI 退出码非 0。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `node scripts/run-tests.js tests/securityDiagnostics.test.js tests/securityDiagnosticsCli.test.js`
 
 Expected: FAIL，当前诊断覆盖面不足且 CLI 不根据 error 设置退出码。
 
-- [ ] **Step 3: 实现可注入检查器**
+- [x] **Step 3: 实现可注入检查器**
 
 文件 ACL、Compose 文本和配置读取通过 options 注入，单元测试不依赖当前机器状态；诊断不得输出真实 token、URL 凭据或文件内容。
 
-- [ ] **Step 4: 运行测试和真实诊断**
+- [x] **Step 4: 运行测试和真实诊断**
 
 Run: `node scripts/run-tests.js tests/securityDiagnostics.test.js tests/securityDiagnosticsCli.test.js`
 
@@ -233,7 +233,7 @@ Run: `npm run diag:security -- --json`
 
 Expected: 测试 PASS；真实诊断在 ACL 未收紧前明确返回 error，且 JSON 指出可执行修复，不泄露秘密。
 
-- [ ] **Step 5: 提交实现**
+- [x] **Step 5: 提交实现**
 
 ```bash
 git add utils/securityDiagnostics.js scripts/diagnose-security.js tests/securityDiagnostics.test.js tests/securityDiagnosticsCli.test.js

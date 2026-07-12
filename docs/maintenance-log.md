@@ -1442,3 +1442,10 @@
 - 验收：`node scripts/run-tests.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js tests/messageHandlerCotSource.test.js tests/messageRouteFlowGroupStreaming.test.js tests/runtimeStreamingCoordinator.test.js tests/runtimeV2DirectReplyFailureTelemetry.test.js tests/modelServiceReasoning.test.js tests/parserModelResponseFormats.test.js tests/normalFastReplyRuntime.test.js`、`npm run lint`、`node -e "require('./core/messageHandler')"` 和 `git diff --check` 通过。
 - 小目标已完成：QQ 群聊和私聊在主回复后直接转发 provider 原始 reasoning，不再转发角色化清洗结果。
 - 提交后记录：功能提交 `a8f7b3e` 已完成，本轮未推送远端，也未纳入其他并行代理的工作区改动。
+
+## 运行维护 2026-07-12 19:49 +08:00
+
+- 小目标完成：提交 `d20208b` 将 request trace 从任意 payload 展开改为真实消费者驱动的显式字段契约；保留路由、流式、重试、工具、缓存和耗时元数据，丢弃正文、headers、未知嵌套，并清洗 requestId、错误、Bearer、JSON/header/query 凭据和 URL userinfo。
+- 安全诊断完成：区分 direct 与明确 Compose 部署，按实际宿主发布边界判断入口暴露；Windows ACL 使用 SID 与作用域化 Allow/Deny 风险判断；容器检查覆盖最终阶段用户、service user 覆盖、read_only、cap_drop、no-new-privileges 和长短端口语法。
+- 验收：13 组定向及消费者回归、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev`、`git diff --check` 通过；全量 `npm test` 332.3 秒自然退出且退出码为 0。
+- 路线图状态：目标 28 已完成；目标 20 的字段/凭据边界已完成，但 `userId/groupId/messageId` keyed hash 仍待单独迁移，因此保持部分完成。

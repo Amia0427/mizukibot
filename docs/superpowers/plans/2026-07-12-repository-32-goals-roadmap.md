@@ -40,7 +40,7 @@
 - [ ] **17. 容器最小权限运行** — 部分完成。已切换非 root 并收缩端口，仍缺只读根文件系统、能力收缩、`no-new-privileges`、资源限制和真实容器验收。
 - [x] **18. 收缩 Compose 网络暴露面** — 已完成默认 loopback 绑定；跨主机部署仍需受控代理和鉴权说明。
 - [ ] **19. 日志脱敏、保留和容量限制** — 未完成。`LOG_ROTATE_MAX_FILES` 默认仍为 0，缺少统一 TTL、目录配额和磁盘水位告警。
-- [ ] **20. 限制请求追踪日志内容** — 未完成。`appendRequestTraceEvent` 仍展开调用方 payload，缺少字段白名单和统一敏感值清洗。
+- [ ] **20. 限制请求追踪日志内容** — 部分完成。提交 `d20208b` 已使用真实消费者契约收口字段，正文、headers、未知嵌套和 URL 凭据不再落盘；`userId/groupId/messageId` 的 keyed hash 迁移仍未完成。
 - [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
 - [ ] **22. 测试运行器并发和超时** — 部分完成。已有默认单文件 60 秒超时，仍为串行执行且 307.5 秒未达到两分钟目标。
 - [ ] **23. 减少源码文本断言测试** — 未完成。多个 `*Source.test.js` 仍依赖 `includes/indexOf` 和源码顺序。
@@ -48,7 +48,7 @@
 - [ ] **25. SQLite 多进程并发与完整性检查** — 未完成。缺少统一连接工厂、`busy_timeout`、checkpoint、`quick_check` 和多进程压测门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。
 - [ ] **27. 健康、就绪和优雅退出** — 部分完成。已有 `/healthz` 与 `service_healthy`，仍缺 `/live`、`/ready`、排空和完整资源关闭。
-- [ ] **28. 扩展安全诊断** — 部分完成。提交 `c3ca711` 已增加 NapCat 鉴权模式诊断，并保证 CLI 在 `status=error` 时返回非零退出码；仍需覆盖 ACL、监听地址、日志容量和容器基线。
+- [x] **28. 扩展安全诊断** — 已完成。提交 `c3ca711`、`d20208b` 已覆盖鉴权/监听组合、direct 与 Compose 宿主边界、Windows ACL、日志无限保留、Docker 最终用户和每服务权限基线；error 状态返回非零退出码，无法可靠解析时降级为 warning。
 - [ ] **29. 供应链安全门禁** — 未完成。无固定镜像 digest、SBOM、gitleaks、OSV/Trivy/Grype 和许可证门禁。
 - [ ] **30. 会话研究缓存全局容量限制** — 未完成。`utils/sessionResearchCache.js` 只限制单会话 8 条，未限制总会话数。
 - [ ] **31. 统一 Node 版本** — 未完成。以 `package.json` 的 Node 20 为基准，仍需核对并统一全部部署文档、脚本和 CI。
