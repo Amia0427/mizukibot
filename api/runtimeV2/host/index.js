@@ -230,6 +230,7 @@ function applyRuntimeReplyOutput(out = {}, options = {}, sanitize = sanitizeUser
 
 function createRuntime(options = {}) {
   const store = createCheckpointStore(options.storeOptions || {});
+  const persistNodeFactory = options.createPersistNodeOverride || createPersistNode;
   const runtimeOptions = normalizeObject(options, {});
   const capabilityRuntime = getCapabilityExecutors(runtimeOptions);
   const capabilityRegistry = capabilityRuntime.registry;
@@ -1176,7 +1177,7 @@ function createRuntime(options = {}) {
     saveAndEmit
   });
 
-  const persistNode = createPersistNode({
+  const persistNode = persistNodeFactory({
     normalizeObject,
     normalizeArray,
     createEvent,

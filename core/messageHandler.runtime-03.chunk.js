@@ -591,7 +591,7 @@
         });
       }
       if (restartResult?.restartRequested) {
-        triggerRemoteRestart({
+        remoteRestartTrigger({
           delayMs: 800,
           meta: {
             source: 'admin_chat_command',
@@ -599,7 +599,7 @@
             userId: String(senderId || '').trim(),
             groupId: String(groupId || '').trim(),
             messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-            requestId: String(inboundRequestId || '').trim(),
+            requestId: String(inboundLock?.requestId || '').trim(),
             command: String(slashCommandText || '').trim()
           }
         });

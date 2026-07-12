@@ -6,7 +6,8 @@ function createMessageHandler({
   generateSessionContextSummaryOverride = null,
   inboundConcurrencyControllerOverride = null,
   runVisionCaptionWorkerOverride = null,
-  normalGroupMainReplyRateLimiterOverride = null
+  normalGroupMainReplyRateLimiterOverride = null,
+  triggerRemoteRestartOverride = null
 }) {
   const globalNapCatActionClient = actionClient;
   const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
@@ -16,6 +17,7 @@ function createMessageHandler({
     maxEntries: 4096
   });
   const normalGroupMainReplyRateLimiter = normalGroupMainReplyRateLimiterOverride || createNormalGroupMainReplyRateLimiter(config);
+  const remoteRestartTrigger = triggerRemoteRestartOverride || triggerRemoteRestart;
   const privateTypingPokeCooldownByUser = new Map();
   const sessionFreshnessVersionByKey = new Map();
   function nextSessionFreshnessVersion(sessionKey = '') {
