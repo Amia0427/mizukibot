@@ -4,6 +4,12 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-12 22:32 +08:00
+
+- 小目标：修复 NapCat HTTP Client 真实消息事件上报持续返回 401。
+- 根因与修复：当前 NapCat 使用 OneBot `X-Signature: sha1=<HMAC-SHA1(rawBody, token)>`，而反向入口只识别自定义 HMAC-SHA256 与 Bearer token；现已在兼容模式内增加 OneBot SHA1 签名校验，匿名和错误签名仍拒绝。
+- 验收：正确 OneBot 签名运行态返回 204，错误签名回归返回 401；NapCat reverse/WS 定向测试、723 文件 lint 和语法检查通过。实现提交：`18015e1`；小目标已完成。
+
 ## 运行维护 2026-07-12 22:03 +08:00
 
 - 新增 Windows Node 20 全量 CI 与 Ubuntu Node 20 Linux 策略门禁，执行版本、lint、prompt、tracked secrets、production audit 和测试；工作流使用最小权限、隔离数据目录且不注入项目 secrets。

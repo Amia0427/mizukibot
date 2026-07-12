@@ -1491,3 +1491,11 @@
 - 缓存治理：sessionResearchCache保留旧API和每会话8条语义，新增每进程全局容量、会话级LRU、主动/惰性TTL、size/evictions/expired指标及unref/stop定时器；10,000会话max=128后size=128、evictions=9872，过期扫描后size=0。
 - 验收：7组定向测试、`npm run lint`、隔离prompt检查、tracked secrets、`npm audit --omit=dev`和`git diff --check`通过；全量`npm test` 347.4秒自然退出且退出码0。
 - 未完成证据：本机只有Node24，官方Node20.20.2下载两次超时后停止；GitHub Actions尚未远端运行。因此目标8、31保持部分完成，目标30完成。
+
+## 运行维护 2026-07-12 22:32 +08:00
+
+- 小目标已完成：修复 NapCat HTTP Client 新消息事件上报持续返回 401。
+- 根因：本机 NapCat 版本实际发送 `X-Signature: sha1=<HMAC-SHA1(rawBody, token)>`，反向入口此前只支持自定义 HMAC-SHA256 和静态 Bearer/X-NapCat-Token，配置 token 一致仍会鉴权失败。
+- 最小修复：仅在现有原生兼容模式开启时校验 OneBot SHA1 签名；错误签名继续返回 401，不改变 signed HMAC-SHA256、防重放、限流和载荷校验路径。
+- 验收：`node scripts/run-tests.js tests/napcatHttpReverseServer.test.js tests/napcatWsIngressSmoke.test.js`、相关 `node --check`、`npm run lint` 通过；重启后使用 NapCat 同格式签名请求 3002 返回 204，主进程持续运行。
+- 提交后记录：实现提交 `18015e1` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
