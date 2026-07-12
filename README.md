@@ -368,7 +368,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-09 19:09 +08:00
+更新时间：2026-07-13 02:33 +08:00
+维护记录：2026-07-13 02:33 +08:00，提交 `fe80591` 引入 ESLint 9 flat config、10 个核心边界的渐进式 JavaScript 类型检查，并将 typecheck 接入 CI；并发 4 全量测试 108.2 秒通过。目标 10 已完成，目标 9 因全仓 unused、Promise executor 返回值和复杂度基线仍保持部分完成。
 维护记录：2026-07-09 19:09 +08:00，新增独立 `瑞希瑞幸` 命令：仅命令前缀触发，群聊菜单/推荐/预览，私聊使用临时个人 Token 创建订单、查单、取消订单并只展示支付二维码链接；接入官方 `my-coffee` skill 和瑞幸 streamable HTTP MCP 配置。验收结果：瑞希瑞幸定向测试、消息入口回归、MCP lazy discovery 回归、`.mcp.json` 解析、message handler 加载和 `git diff --check` 均通过。小目标已完成。
 维护记录：2026-07-09 17:45 +08:00，新增 `npm run smoke:runtime-hotfixes` 最小本地 smoke，固定今天 5 个运行时热修复的目标回归清单。验收结果：脚本清单回归先红后绿，`npm run smoke:runtime-hotfixes` 通过。
 维护记录：2026-07-09 09:18 +08:00，已修复 post-reply worker 记忆写入/向量巡检内存常驻增长；写入管线只读候选 scope shard，LanceDB plan 不再默认加载全量 embedding cache，watchdog summary 后清理 embedding 缓存。验收结果：三项定向测试通过，隔离内存探针显示 heap 未再进入数百 MB 常驻。

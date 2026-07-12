@@ -12,9 +12,9 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-12 16:51 +08:00。
+更新时间：2026-07-13 02:33 +08:00。
 
-- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 15 个提交。
+- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 44 个提交。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
 - 已确认的完整基线：`npm run lint` 覆盖 727 个 JS 文件和 71 个 chunk；完整 `npm test` 最近一次自然结束用时 307.5 秒。
 - 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
@@ -29,8 +29,8 @@
 - [ ] **6. 消除生产依赖环** — 未完成。必须在 chunk 模块化后重新生成权威依赖图并将循环数降为 0。
 - [ ] **7. 拆除 `legacy/aiHost` 上帝模块** — 未完成。`api/legacy/aiHost.js` 仍约 2096 行，并被 planning、image generation 和测试引用。
 - [ ] **8. 建立最小 CI 门禁** — 部分完成。提交 `5e7e168` 已新增 Windows Node 20 全量门禁和 Ubuntu Node 20 Linux 策略门禁，覆盖安装、版本、lint、prompt、tracked secrets、production audit 与测试，并隔离 `.env`、`data` 和本地 prompt roots；尚未在远端 GitHub Actions 真实运行，不能标记完成。
-- [ ] **9. 使用 ESLint 取代语法解析器** — 未完成。`scripts/lint.js` 仍以解析和组合入口加载为主。
-- [ ] **10. 核心边界类型检查** — 未完成。无 `typecheck` 脚本或项目级 `checkJs`/TypeScript 配置。
+- [ ] **9. 使用 ESLint 取代语法解析器** — 部分完成。提交 `fe80591` 已用 ESLint 9 flat config 覆盖 724 个普通 JS 文件，并启用未定义变量、不可达代码、重复键、异步 Promise executor 等 correctness 规则；71 个共享作用域 chunk 仍由组合入口/语法解析器校验，全仓 unused、Promise executor 返回值和复杂度基线尚未清零。
+- [x] **10. 核心边界类型检查** — 已完成。提交 `fe80591` 为 Web 会话安全、网络安全、请求追踪、安全诊断、工具参数和 Runtime V2 契约/状态/路由共 10 个稳定边界启用 `@ts-check`，无 `any`、`@ts-ignore` 或 `@ts-nocheck` 绕过，并接入 CI。
 - [x] **11. 删除未使用的 Runtime V1** — 已完成。`api/legacy/agentGraphV1Runtime.js` 已删除，依赖与失效检查已清理。
 - [ ] **12. 拆分高扇出编排器** — 未完成。Runtime host、router、prepare 仍分别约 1447、1325、1313 行。
 - [ ] **13. 按领域拆分配置并集中校验环境变量** — 未完成。`config/index.js` 约 1258 行，生产域仍有约 186 处 `process.env` 读取。

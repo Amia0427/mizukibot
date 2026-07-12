@@ -1528,3 +1528,11 @@
 - 消息入口：`messageIngressAsyncEntrypointSource`改为仅在`MIZUKIBOT_INDEX_TEST_MODE=1`导出的测试入口和dispatcher enqueue行为，packet预处理可注入无副作用实现，生产路径无新增外部绕过。
 - NapCat配置：configure测试直接调用`patchOnebotConfig`，覆盖新增端点、已有action/reverse端点旧token更新、独立secret/fallback及无关端点保留，不再依赖函数名或源码顺序。
 - 验收：9项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`通过；并发4全量测试111.4秒自然通过。目标23继续部分完成，剩余安全/部署源码守卫按优先级迁移。
+
+## 运行维护 2026-07-13 02:33 +08:00
+
+- 实现提交 `fe80591`：引入 ESLint 9 flat config，普通生产/测试 JS 由 ESLint 执行 correctness 门禁，71 个共享作用域 chunk 继续由现有组合入口校验；CI 新增稳定边界 typecheck。
+- 类型边界：Web auth/security headers/session、network safety/request trace/security diagnostics、skill args、Runtime V2 contracts/state/route predicates 共 10 个文件启用 `@ts-check`；策略测试强制这些文件无 `any`、`@ts-ignore`、`@ts-nocheck`，并全部启用 unused-symbol 门禁。
+- 静态检查修复：补齐 router、memory CLI 的真实缺失导入，移除重复对象键和未使用导入，修正 JSON 热存储 unsafe finally，并补足 Runtime V2 状态 reducer 与安全诊断的类型契约；未做无关重构。
+- 验收：`npm run lint`、`npm run typecheck`、质量/CI策略测试、13项关联行为测试、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`、`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 108.2秒自然通过。
+- 路线图状态：目标10完成；目标9保持部分完成。实测启用 `no-promise-executor-return` 会产生75个历史错误，全仓 unused 与复杂度规则也未清零；共享作用域 chunk 仍等待目标5模块化后由 ESLint 完整接管。
