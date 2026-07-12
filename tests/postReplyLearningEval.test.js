@@ -7,7 +7,7 @@ const {
 } = require('../scripts/eval-post-reply-learning');
 
 module.exports = (() => {
-  const casesPath = path.join(__dirname, '..', 'artifacts', 'post-reply-eval', 'cases.jsonl');
+  const casesPath = path.join(__dirname, 'fixtures', 'post-reply-learning-cases.jsonl');
   const cases = fs.readFileSync(casesPath, 'utf8')
     .split(/\r?\n/)
     .map((line) => line.trim())

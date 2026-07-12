@@ -2,7 +2,7 @@
 
 ## Daily Use
 
-- `run-tests.js`：测试入口；更新 2026-05-24 02:16 +08:00，逐测试文件子进程隔离执行，避免全局 stub/env/模块缓存和后台异步任务跨测试污染
+- `run-tests.js`：测试入口；更新 2026-07-12 +08:00，默认以 2 个独立 Node 子进程并发执行，锁与多进程竞态测试进入显式串行组；单文件默认 60 秒超时并终止完整进程树，结果按文件顺序输出并附慢测榜
 - `pre-release-smoke.js`：发布前最小冒烟入口；更新 2026-06-17 20:04 +08:00，支持 `npm run smoke:pre-release -- --root D:\mizuki_release`，串联 expected-shutdown 未确认重启保护、主模型 fallback 重启恢复、普通群纯文本短 debounce 与群/入站并发回归
 - `check-agent.js`：LangGraph / agent 自检
 - `check-prompts.js`：prompt 资源检查

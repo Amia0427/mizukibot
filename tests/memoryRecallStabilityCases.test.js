@@ -4,7 +4,7 @@ const assert = require('assert');
 
 const { classifyMemoryNeed } = require('../utils/recallHeuristics');
 
-const file = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval', 'stability-cases.jsonl');
+const file = path.join(__dirname, 'fixtures', 'memory-recall-stability-cases.jsonl');
 const cases = fs.readFileSync(file, 'utf8')
   .split(/\r?\n/)
   .map((line) => line.trim())

@@ -1,6 +1,6 @@
 ﻿const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 function listTestFiles(rootDir) {
   const discovered = [];
@@ -240,35 +240,202 @@ function applyDefaultTestEnv(env = process.env) {
   return env;
 }
 
-function runTestFile(file) {
+function discoverDefaultTestFiles(projectRoot, testsDir, options = {}) {
+  const gitResult = spawnSync(options.gitCommand || 'git', ['ls-files', '-z', '--', 'tests/*.test.js'], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    windowsHide: true
+  });
+  if (!gitResult.error && gitResult.status === 0) {
+    return String(gitResult.stdout || '')
+      .split('\0')
+      .filter((item) => item.endsWith('.test.js'))
+      .map((item) => path.resolve(projectRoot, item))
+      .filter((item) => fs.existsSync(item))
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  return fs.existsSync(testsDir) ? listTestFiles(testsDir) : [];
+}
+
+const SERIAL_TEST_REASONS = Object.freeze({
+  'logRotationCrossProcess.test.js': 'cross-process file rotation',
+  'mainBotSingleInstanceLock.test.js': 'multi-process lock race',
+  'periodicRestartScript.test.js': 'PowerShell process inspection',
+  'postReplyQueueMergeRace.test.js': 'multi-process queue race',
+  'postReplyWorkerPidFile.test.js': 'worker process lock',
+  'postReplyWorkerSupervisor.test.js': 'worker supervisor process lifecycle',
+  'restartBotScript.test.js': 'PowerShell process inspection',
+  'runTestsDefaultEnv.test.js': 'nested test runner',
+  'runTestsRunner.test.js': 'nested test runner and process-tree timeout',
+  'windowsLogArchiveMaintenance.test.js': 'PowerShell file maintenance'
+});
+const SERIAL_TEST_FILES = new Set(Object.keys(SERIAL_TEST_REASONS));
+const MAX_TEST_CONCURRENCY = 8;
+
+function readPositiveInteger(value, fallback, minimum = 1) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isFinite(parsed) && parsed >= minimum ? parsed : fallback;
+}
+
+function resolveTestConcurrency(value) {
+  return Math.min(readPositiveInteger(value, 2), MAX_TEST_CONCURRENCY);
+}
+
+function waitForProcess(processHandle) {
   return new Promise((resolve) => {
-    let settled = false;
-    const timeoutMs = Math.max(1000, Number(process.env.TEST_FILE_TIMEOUT_MS || 60000) || 60000);
+    processHandle.once('error', (error) => resolve({ error, code: null }));
+    processHandle.once('close', (code) => resolve({ error: null, code }));
+  });
+}
+
+function waitForChildClose(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      child.removeListener('close', onClose);
+      resolve(false);
+    }, timeoutMs);
+    const onClose = () => {
+      clearTimeout(timeout);
+      resolve(true);
+    };
+    child.once('close', onClose);
+  });
+}
+
+async function terminateProcessTree(child, options = {}) {
+  if (!child || !child.pid || child.exitCode !== null || child.signalCode !== null) return;
+
+  const platform = options.platform || process.platform;
+  const spawnProcess = options.spawnProcess || spawn;
+  const waitForSpawnedProcess = options.waitForProcess || waitForProcess;
+  const waitForClose = options.waitForChildClose || waitForChildClose;
+  if (platform === 'win32') {
+    const killer = spawnProcess('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    const result = await waitForSpawnedProcess(killer);
+    if ((result.error || result.code !== 0) && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
+  } else {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch (error) {
+      if (error && error.code !== 'ESRCH') child.kill('SIGKILL');
+    }
+  }
+
+  if (await waitForClose(child, 2000)) return;
+  child.kill('SIGKILL');
+  if (!await waitForClose(child, 2000)) {
+    throw new Error(`test process ${child.pid} did not exit after forced termination`);
+  }
+}
+
+function runTestFile(file, options = {}) {
+  return new Promise((resolve) => {
+    const timeoutMs = readPositiveInteger(options.timeoutMs, 60000, 100);
+    const startedAt = Date.now();
+    let stdout = '';
+    let stderr = '';
+    let spawnError = null;
+    let timedOut = false;
+    let terminationPromise = null;
+    let timeout = null;
     const child = spawn(process.execPath, ['--unhandled-rejections=strict', file], {
       cwd: path.resolve(__dirname, '..'),
       env: applyDefaultTestEnv({ ...process.env }),
-      stdio: 'inherit',
-      windowsHide: true
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32'
     });
 
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once('error', (error) => {
+      spawnError = error;
+    });
+    child.once('close', async (code, signal) => {
       clearTimeout(timeout);
-      resolve(result);
-    };
-    const timeout = setTimeout(() => {
-      child.kill();
-      finish({ ok: false, timedOut: true, timeoutMs });
-    }, timeoutMs);
+      if (terminationPromise) {
+        try {
+          await terminationPromise;
+        } catch (error) {
+          spawnError = error;
+        }
+      }
+      resolve({
+        file,
+        ok: !timedOut && !spawnError && code === 0,
+        code,
+        signal,
+        error: spawnError,
+        timedOut,
+        timeoutMs,
+        durationMs: Date.now() - startedAt,
+        stdout,
+        stderr
+      });
+    });
 
-    child.on('error', (error) => {
-      finish({ ok: false, error });
-    });
-    child.on('exit', (code, signal) => {
-      finish({ ok: code === 0, code, signal });
-    });
+    timeout = setTimeout(async () => {
+      timedOut = true;
+      terminationPromise = terminateProcessTree(child);
+      await terminationPromise.catch((error) => {
+        spawnError = error;
+      });
+    }, timeoutMs);
   });
+}
+
+async function runWithConcurrency(files, concurrency, options) {
+  const results = new Array(files.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < files.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await runTestFile(files[index], options);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, files.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+function isSerialTestFile(file) {
+  return SERIAL_TEST_FILES.has(path.basename(file));
+}
+
+async function executeTestFiles(files, options) {
+  const results = [];
+  let parallelSegment = [];
+
+  async function flushParallelSegment() {
+    if (parallelSegment.length === 0) return;
+    results.push(...await runWithConcurrency(parallelSegment, options.concurrency, options));
+    parallelSegment = [];
+  }
+
+  for (const file of files) {
+    if (!isSerialTestFile(file)) {
+      parallelSegment.push(file);
+      continue;
+    }
+    await flushParallelSegment();
+    results.push(await runTestFile(file, options));
+  }
+  await flushParallelSegment();
+  return results;
 }
 
 function resolveRequestedTestFile(item, testsDir) {
@@ -284,26 +451,40 @@ function resolveRequestedTestFile(item, testsDir) {
 }
 
 async function runAllTests() {
-  let failed = 0;
   const testsDir = path.join(__dirname, '..', 'tests');
   const requestedFiles = process.argv.slice(2)
     .filter((item) => String(item || '').trim() && !String(item || '').startsWith('--'))
     .map((item) => resolveRequestedTestFile(item, testsDir));
-  const discoveredTestFiles = listTestFiles(testsDir);
+  const discoveredTestFiles = requestedFiles.length > 0
+    ? []
+    : discoverDefaultTestFiles(path.resolve(__dirname, '..'), testsDir);
   const runnableFiles = requestedFiles.length > 0
     ? requestedFiles.filter((candidate) => fs.existsSync(candidate))
-    : discoveredTestFiles.length > 0
-    ? discoveredTestFiles
-    : testFiles.filter((candidate) => fs.existsSync(candidate));
+    : discoveredTestFiles;
   if (requestedFiles.length > 0 && runnableFiles.length !== requestedFiles.length) {
     const missing = requestedFiles.filter((candidate) => !fs.existsSync(candidate));
     console.error('[test] missing requested files: ' + missing.join(', '));
     process.exit(1);
   }
-  for (const file of runnableFiles) {
-    const result = await runTestFile(file);
+  if (runnableFiles.length === 0) {
+    console.error('[test] no test files found');
+    process.exitCode = 1;
+    return;
+  }
+  const options = {
+    concurrency: resolveTestConcurrency(process.env.TEST_CONCURRENCY),
+    timeoutMs: readPositiveInteger(process.env.TEST_FILE_TIMEOUT_MS, 60000, 100),
+    slowTopN: readPositiveInteger(process.env.TEST_SLOW_TOP_N, 10)
+  };
+  const results = await executeTestFiles(runnableFiles, options);
+  let failed = 0;
+
+  for (const result of results) {
+    const file = result.file;
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
     if (result.ok) {
-      console.log(`[test] pass ${path.basename(file)}`);
+      console.log(`[test] pass ${path.basename(file)} (${result.durationMs}ms)`);
       continue;
     }
     failed += 1;
@@ -317,16 +498,43 @@ async function runAllTests() {
     }
   }
 
+  const slowest = [...results]
+    .sort((left, right) => right.durationMs - left.durationMs || left.file.localeCompare(right.file))
+    .slice(0, Math.min(options.slowTopN, results.length));
+  console.log(`[test] slowest ${slowest.length} files`);
+  for (const result of slowest) {
+    console.log(`       ${result.durationMs}ms ${path.basename(result.file)}`);
+  }
+
   if (failed > 0) {
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log('[test] all tests passed');
 }
 
-runAllTests().catch((e) => {
-  console.error('[test] runner crashed:', e && e.stack ? e.stack : String(e));
-  process.exit(1);
-});
+if (require.main === module) {
+  runAllTests().catch((e) => {
+    console.error('[test] runner crashed:', e && e.stack ? e.stack : String(e));
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  MAX_TEST_CONCURRENCY,
+  SERIAL_TEST_FILES,
+  SERIAL_TEST_REASONS,
+  applyDefaultTestEnv,
+  discoverDefaultTestFiles,
+  executeTestFiles,
+  isSerialTestFile,
+  listTestFiles,
+  readPositiveInteger,
+  resolveTestConcurrency,
+  runTestFile,
+  runWithConcurrency,
+  terminateProcessTree
+};
 
 
