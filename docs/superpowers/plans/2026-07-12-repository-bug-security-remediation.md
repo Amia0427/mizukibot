@@ -126,10 +126,10 @@
 - Modify: `docker-compose.yml`
 - Modify: `deploy/docker/README.md`
 
-- [ ] 创建非 root 运行用户并修正运行目录权限。
-- [ ] Web 端口默认仅绑定 loopback，资源限制使用现有部署约束。
+- [x] 使用镜像内置 node 用户运行并修正运行目录权限。
+- [x] Web 与 NapCat 端口默认仅绑定宿主 loopback。
 - [ ] 验证容器 UID 非 0、数据卷可写、端口绑定正确。
-- [ ] 更新部署文档并提交。
+- [x] 更新部署文档并提交。
 
 ### Task 10: 容器健康检查和依赖门控
 

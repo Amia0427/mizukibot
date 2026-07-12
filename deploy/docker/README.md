@@ -4,6 +4,8 @@
 
 更新 2026-06-25 13:00 +08:00：`amia/dev` 的 Docker 构建改为显式复制运行白名单，并通过 `.dockerignore` 排除 `.env`、密钥文件、运行数据、本地 MCP 配置和私有 prompt。`prompts/persona/` 与 `prompts/admin.txt` 只在 Compose 运行时只读挂载，不进入镜像。
 
+更新 2026-07-12 14:15 +08:00：运行镜像改用内置 `node` 非 root 用户，`/app` 可创建实例锁且数据/日志目录归该用户所有；Compose 的 3002、3005 端口均只发布到宿主 loopback。当前环境 Docker daemon 与 Compose 插件均不可用，已完成 Dockerfile 安全断言和 YAML 解析，真实镜像 UID/卷写入探针需在 daemon 可用后执行。
+
 ## 适用范围
 
 Docker 部署只运行 MizukiBot 主进程和 post-reply worker，不包含 NapCat。NapCat 需要单独运行，并把 OneBot HTTP reverse `postUrls` 指向宿主机的 `http://<host>:3002/`。
@@ -79,6 +81,7 @@ docker compose config
 docker compose run --rm --entrypoint node mizukibot --check index.js
 docker compose run --rm --entrypoint node mizukibot --check core/napcatHttpReverseServer.js
 docker compose run --rm --entrypoint node mizukibot --check utils/postReplyWorkerSupervisor.js
+docker compose run --rm --entrypoint sh mizukibot -c 'id -u && touch /app/data/.write-probe && rm /app/data/.write-probe'
 ```
 
 Web 面板默认访问：

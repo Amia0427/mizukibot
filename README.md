@@ -316,3 +316,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-07-12 13:30 +08:00，研究任务超时已接入 AbortController 并传递到 web fetch；runner 真正停止前不释放并发槽，取消任务不会写入迟到的 completed brief。
 维护记录：2026-07-12 13:50 +08:00，定时任务执行前后均同步落盘，使用稳定执行键记录 executing claim；崩溃恢复时 once 不重发、cron 跳过不确定旧周期，真实文件重启回归通过。
 维护记录：2026-07-12 14:00 +08:00，profile journal 诊断 GET 已固定为只读并忽略 auto_clean 参数；数据清洗仅保留在鉴权 POST，路由及鉴权回归测试通过。
+维护记录：2026-07-12 14:15 +08:00，Docker 运行阶段已切换为 node 非 root 用户，3002/3005 均默认只发布到宿主 loopback；静态回归和 Compose YAML 解析通过，真实容器 UID/卷写入验收等待 Docker daemon。

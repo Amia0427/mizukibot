@@ -1368,3 +1368,10 @@
 - 最小修复：诊断 GET 无条件传入 autoClean=false，忽略客户端 auto_clean 参数；显式 clean POST 完成清洗后的诊断读取也保持只读。
 - 验收：新增路由级依赖注入测试，使用 auto_clean=true 请求仍只收到 autoClean=false；Web 鉴权与 memory ops 诊断回归共 3 组测试通过。
 - 小目标已完成：GET diagnostics 只读取状态，清洗只能通过已有鉴权 POST 入口触发。
+
+## 运行维护 2026-07-12 14:15 +08:00
+
+- 目标：降低容器被利用后的权限和默认网络暴露。
+- 最小修复：运行阶段切换为镜像内置 node 用户，允许该用户创建实例锁并写 data/logs；Compose 的 Web 与 NapCat 端口都仅绑定宿主 127.0.0.1。
+- 已验收：Docker 安全配置回归测试通过，PyYAML 成功解析两个服务和 loopback 端口配置。
+- 待验收：本机 Docker daemon 未运行且无 Compose 插件，真实镜像 UID 与命名卷写入探针已写入部署文档，待 daemon 可用后复跑。
