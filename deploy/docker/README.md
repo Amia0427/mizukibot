@@ -84,6 +84,8 @@ docker compose run --rm --entrypoint node mizukibot --check utils/postReplyWorke
 docker compose run --rm --entrypoint sh mizukibot -c 'id -u && touch /app/data/.write-probe && rm /app/data/.write-probe'
 ```
 
+主服务提供无需令牌且只返回 `{ "ok": true }` 的 `/healthz` 容器探针；post-reply worker 使用 `service_healthy` 门控，主服务未通过健康检查前不会启动。
+
 Web 面板默认访问：
 
 ```text

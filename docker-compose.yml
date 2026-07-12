@@ -17,6 +17,12 @@ services:
     ports:
       - "127.0.0.1:${NAPCAT_HTTP_REVERSE_PORT:-3002}:${NAPCAT_HTTP_REVERSE_PORT:-3002}"
       - "127.0.0.1:${WEB_PORT:-3005}:${WEB_PORT:-3005}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.WEB_PORT||3005)+'/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     volumes:
       - mizukibot-data:/app/data
       - mizukibot-logs:/app/logs
@@ -28,7 +34,8 @@ services:
     container_name: mizukibot-post-reply-worker
     restart: unless-stopped
     depends_on:
-      - mizukibot
+      mizukibot:
+        condition: service_healthy
     env_file:
       - .env
     environment:

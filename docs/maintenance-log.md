@@ -1375,3 +1375,10 @@
 - 最小修复：运行阶段切换为镜像内置 node 用户，允许该用户创建实例锁并写 data/logs；Compose 的 Web 与 NapCat 端口都仅绑定宿主 127.0.0.1。
 - 已验收：Docker 安全配置回归测试通过，PyYAML 成功解析两个服务和 loopback 端口配置。
 - 待验收：本机 Docker daemon 未运行且无 Compose 插件，真实镜像 UID 与命名卷写入探针已写入部署文档，待 daemon 可用后复跑。
+
+## 运行维护 2026-07-12 14:25 +08:00
+
+- 目标：避免主服务进程未就绪或失效时 post-reply worker 仍立即启动。
+- 最小修复：新增不经过管理鉴权、只返回 ok 布尔值的 /healthz；Compose 主服务增加 Node fetch 健康检查，worker 的 depends_on 改为 service_healthy。
+- 已验收：健康处理器响应结构、Web 鉴权不受影响、Docker 安全配置测试通过；PyYAML 确认 healthcheck 和依赖条件结构正确。
+- 待验收：Docker daemon 不可用，主服务故障时 worker 的真实容器门控需在 daemon 可用后复跑。

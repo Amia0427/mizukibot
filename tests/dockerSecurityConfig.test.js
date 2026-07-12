@@ -19,3 +19,5 @@ assert.match(
   compose,
   /127\.0\.0\.1:\$\{WEB_PORT:-3005\}:\$\{WEB_PORT:-3005\}/
 );
+assert.match(compose, /healthcheck:[\s\S]*\/healthz/);
+assert.match(compose, /depends_on:[\s\S]*mizukibot:[\s\S]*condition:\s*service_healthy/);

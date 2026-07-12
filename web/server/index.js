@@ -47,6 +47,10 @@ const {
   validateExternalApiBaseUrl
 } = require('../settingsRuntime');
 
+function handleHealthRequest(_req, res) {
+  return res.status(200).json({ ok: true });
+}
+
 function startServer() {
   const app = express();
   const port = config.WEB_PORT || 3005;
@@ -59,6 +63,7 @@ function startServer() {
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '300kb' }));
+  app.get('/healthz', handleHealthRequest);
 
   app.use((req, res, next) => {
     if (checkWebAuth(req, { host, port })) return next();
@@ -977,6 +982,7 @@ module.exports = {
   __test: {
     checkWebAuth,
     getSettingsEndpointError,
+    handleHealthRequest,
     isLocalBindHost,
     isLocalIp,
     isTokenlessLocalWebAllowed

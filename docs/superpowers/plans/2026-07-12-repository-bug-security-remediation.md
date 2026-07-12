@@ -138,10 +138,10 @@
 - Modify: `web/server/index.js`
 - Test: `tests/webHealthRoute.test.js`
 
-- [ ] 增加不泄露状态的健康检查接口。
-- [ ] Compose 增加 healthcheck，worker 使用 `service_healthy`。
+- [x] 增加不泄露状态的健康检查接口。
+- [x] Compose 增加 healthcheck，worker 使用 service_healthy。
 - [ ] 验证主服务未就绪时 worker 不启动。
-- [ ] 更新部署文档并提交。
+- [x] 更新部署文档并提交。
 
 ### Task 11: 恢复提示词契约测试
 
