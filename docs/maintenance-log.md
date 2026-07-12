@@ -1,3 +1,10 @@
+## 运行维护 2026-07-12 19:03
+
+- 小目标：继续清理已退役 `/cot` 状态、零入口 AI 聚合层和无调用的本地命令桥客户端。
+- 最小修复：删除 `utils/cotOnceRuntime.js`、`api/ai.js`、`api/graphPlanning.js`、`utils/localCommandBridgeClient.js` 及孤立的 `cotOnceRuntime` 测试；桥安全测试仅移除客户端断言，保留服务端鉴权和泄密扫描，共删除 254 行生产死代码和 56 行失效测试代码。
+- 验收：运行代码 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、13 个 `/cot`/reasoning/桥安全/LangGraph/Qzone/daily-share 相关测试、保留模块 require smoke、`npm pack --dry-run`、`git diff --check` 均通过。
+- 小目标已完成：第二批死代码已移除，Runtime V2、reasoning 转发、图片生成和本地命令桥服务端保持可用。
+
 ## 运行维护 2026-07-12 12:25
 
 - 小目标：清理仓库内已确认零调用的 P0 遗留代码，不触碰动态 chunk、Telegram 和可能对外兼容的 facade。
