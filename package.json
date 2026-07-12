@@ -40,6 +40,7 @@
   "scripts": {
     "start": "node index.js",
     "start:post-reply-worker": "node scripts/post-reply-worker.js",
+    "check:node": "node scripts/check-node-version.js",
     "lint": "node scripts/lint.js",
     "test": "node scripts/run-tests.js",
     "smoke:napcat-ingress": "node scripts/run-tests.js tests/napcatWsIngressSmoke.test.js tests/napcatHttpReverseServer.test.js tests/messageIngressDispatcher.test.js tests/messageIngressAsyncEntrypointSource.test.js",
@@ -84,6 +85,7 @@
     "memory:v3:import-file": "node scripts/import-memory-file.js",
     "check:prompts": "node scripts/check-prompts.js",
     "check:secrets": "node scripts/check-staged-secrets.js",
+    "check:secrets:all": "node scripts/check-staged-secrets.js --all",
     "linux:install": "bash scripts/install-linux.sh",
     "linux:check": "bash scripts/check-linux.sh",
     "linux:start": "bash scripts/mizukibot.sh start",
@@ -127,6 +129,6 @@
     "husky": "^9.1.7"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20 <21"
   }
 }

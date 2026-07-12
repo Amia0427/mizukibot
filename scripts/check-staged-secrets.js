@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('fs');
 const { execFileSync } = require('child_process');
 
 const MAX_SCAN_BYTES = 1024 * 1024;
@@ -38,6 +39,11 @@ function getStagedFiles() {
   return output.split('\0').filter(Boolean);
 }
 
+function getTrackedFiles() {
+  const output = git(['ls-files', '-z']);
+  return output.split('\0').filter(Boolean);
+}
+
 function isSafeExamplePath(file) {
   return SAFE_EXAMPLE_FILES.has(file.replace(/\\/g, '/'));
 }
@@ -62,12 +68,20 @@ function getStagedContent(file) {
   }
 }
 
+function getTrackedContent(file) {
+  try {
+    return fs.readFileSync(file);
+  } catch (error) {
+    throw new Error(`failed to read tracked content for ${file}: ${error.message}`);
+  }
+}
+
 function findLine(text, index) {
   const before = text.slice(0, index);
   return before.split(/\r?\n/).length;
 }
 
-function scanFile(file) {
+function scanFile(file, readContent) {
   const findings = [];
 
   if (!isSafeExamplePath(file)) {
@@ -78,7 +92,7 @@ function scanFile(file) {
     }
   }
 
-  const buffer = getStagedContent(file);
+  const buffer = readContent(file);
   if (buffer.includes(0)) {
     return findings;
   }
@@ -110,19 +124,22 @@ function scanFile(file) {
 }
 
 function main() {
-  const stagedFiles = getStagedFiles();
-  const findings = stagedFiles.flatMap(scanFile);
+  const scanAll = process.argv.includes('--all');
+  const files = scanAll ? getTrackedFiles() : getStagedFiles();
+  const readContent = scanAll ? getTrackedContent : getStagedContent;
+  const findings = files.flatMap((file) => scanFile(file, readContent));
+  const scope = scanAll ? 'tracked' : 'staged';
 
   if (findings.length === 0) {
-    console.log('[secrets] staged secret scan passed');
+    console.log(`[secrets] ${scope} secret scan passed`);
     return;
   }
 
-  console.error('[secrets] staged secret scan blocked this commit:');
+  console.error(`[secrets] ${scope} secret scan found sensitive content:`);
   for (const finding of findings) {
     console.error(`- ${finding.file}:${finding.line} ${finding.rule}`);
   }
-  console.error('Remove the secret from staged content, or move local credentials into untracked .env files.');
+  console.error(`Remove the secret from ${scope} content, or move local credentials into untracked .env files.`);
   process.exit(1);
 }
 

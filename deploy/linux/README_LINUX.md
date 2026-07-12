@@ -4,7 +4,7 @@
 
 ## 1. 环境要求
 - Ubuntu/Debian/CentOS 等 Linux 发行版
-- Node.js >= 18
+- Node.js 20.x（以项目根目录 `.nvmrc` 为准）
 - npm
 - 已可访问你的 `API_BASE_URL`
 - NapCat OneBot WebSocket 已部署并可连接

@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+  AGENT_PROMPT_EXTRA_ROOTS: ''
+  DATA_DIR: ${{ runner.temp }}/mizuki-data
+  MIZUKIBOT_ENV_FILE: ${{ runner.temp }}/mizukibot-ci.env
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check Node.js version
+        run: npm run check:node
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check prompts
+        run: npm run check:prompts
+
+      - name: Check tracked secrets
+        run: npm run check:secrets:all
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          npm test 2>&1 | Tee-Object -FilePath test-output.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload failed test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output-${{ github.run_id }}
+          path: test-output.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  linux-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Check Node.js version and Linux scripts
+        run: |
+          node scripts/check-node-version.js
+          bash -n scripts/bootstrap-debian12.sh scripts/install-linux.sh scripts/check-linux.sh
+
+      - name: Check repository policies
+        run: node scripts/run-tests.js tests/nodeVersionPolicy.test.js tests/ciWorkflow.test.js tests/checkSecretsAllMode.test.js

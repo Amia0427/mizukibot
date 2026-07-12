@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODE_MAJOR="$(tr -d '[:space:]' < "$ROOT_DIR/.nvmrc")"
 
 echo "[linux-install] project root: $ROOT_DIR"
 
@@ -41,7 +42,7 @@ install_node_if_missing() {
     exit 1
   fi
 
-  echo "[linux-install] Node.js/npm missing, bootstrapping Node.js 20 LTS for Debian 12"
+  echo "[linux-install] Node.js/npm missing, bootstrapping Node.js ${NODE_MAJOR}.x for Debian 12"
   bash "$ROOT_DIR/scripts/bootstrap-debian12.sh"
 }
 
@@ -54,6 +55,7 @@ echo "[linux-install] node: $NODE_VER"
 echo "[linux-install] npm : $NPM_VER"
 
 cd "$ROOT_DIR"
+npm run -s check:node
 
 if [[ ! -f "$ROOT_DIR/.env" ]]; then
   cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"

@@ -14,7 +14,7 @@
 
 第一次部署建议按这个顺序来：
 
-1. 在本机或服务器装好 Node.js 20+ 和 npm。
+1. 在本机或服务器装好 Node.js 20.x 和 npm（以项目根目录 `.nvmrc` 为准）。
 2. 拉代码，安装依赖。
 3. 复制 `.env.example` 为 `.env`，填最少配置。
 4. 创建私有 prompt 文件。
@@ -30,7 +30,7 @@
 
 安装：
 
-- Node.js 20 或更高版本
+- Node.js 20.x
 - Git
 - npm，通常会随 Node.js 一起安装
 
@@ -65,7 +65,7 @@ npm -v
 git --version
 ```
 
-Node.js 版本必须是 20 或更高。
+Node.js 版本必须是项目 `.nvmrc` 声明的 20.x。
 
 ## 第二步：获取代码并安装依赖
 

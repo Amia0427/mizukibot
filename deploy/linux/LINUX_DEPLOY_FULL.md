@@ -31,9 +31,9 @@
 
 ## 1. 服务器准备
 
-### 1.1 安装 Node.js 18+
+### 1.1 安装 Node.js 20.x
 
-建议 Node.js 20 LTS（或更高）。
+项目只支持 `.nvmrc` 声明的 Node.js 20.x，避免在不同环境使用未验证的主版本。
 
 Ubuntu/Debian 示例：
 
