@@ -1457,3 +1457,4 @@
 - 技术边界：技术、代码、工具和任务场景仍允许完成必要判断，但必须从瑞希主观视角表达；最终正文仍只输出用户可见回复，QQ 仍直接转发 provider 原始 `reasoningText`，不增加第二次模型调用或本地清洗。
 - 验收：`node scripts/run-tests.js tests/promptGoldenSnapshots.test.js tests/runtimePromptCache.test.js tests/promptSecurity.test.js tests/userFacingTextCot.test.js tests/userFacingReplyGuards.test.js tests/mainReplyPromptAssemblyDiagnostics.test.js tests/reasoningForwardPersonaPrompt.test.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js`、`npm run check:prompts`、`npm run lint` 和 `git diff --check` 通过。
 - 小目标已完成：主回复 reasoning 的高优先级提示词已收紧为瑞希第一人称沉浸思考，同时保留原始 reasoning 直接发送机制。
+- 提交后记录：功能提交 `4ea51e0` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
