@@ -1552,3 +1552,11 @@
 - 热路径：主进程 embedding backfill 通过可调用边界验证关闭时不加载、开启时按原延迟参数调度；行为测试发现旧源码断言是假绿，`queryDiagnostics`、`semanticDedup` 改为需要时加载 embeddingIndex，`queryRanking` 直接依赖 LanceDB rows 叶子模块，查询入口不再加载完整 store。
 - 验收：6项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 98.7秒自然通过。
 - 路线图状态：目标23继续部分完成；下一批优先将 CI/Compose 改为 YAML 结构解析，并用 PowerShell AST/安全 ValidateOnly 替代部署脚本字符串断言。
+
+## 运行维护 2026-07-13 03:32 +08:00
+
+- 实现提交 `f2cd4b8`：`ciWorkflow.test.js` 使用显式 devDependency `js-yaml` 解析工作流，按对象路径验证最小权限、隔离环境、并发取消、Windows/Ubuntu job、Node版本、完整质量命令、失败日志上传和 checkout 凭据策略，不再依赖缩进或字段顺序。
+- Compose/Dockerfile：Compose 解析后验证 loopback 端口、worker无端口、health依赖、non-root、只读根、cap drop、no-new-privileges、资源/PID/停止限制、tmpfs、卷和有界日志；Dockerfile按逻辑指令验证最终USER/CMD和运行目录权限初始化。
+- PowerShell：新增 tracked-only AST 语法门禁，通过 `Parser::ParseFile` 一次解析 `scripts` 下全部15个`.ps1/.psm1`，返回结构化错误位置且不dot-source、不执行任何脚本；非Windows缺少pwsh时明确跳过，Windows质量任务强制执行。
+- 验收：3项定向结构测试、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 97.2秒自然通过。
+- 路线图状态：目标23继续部分完成。结构测试不替代真实 GitHub Actions、Docker容器UID/只读根/SIGTERM与宿主监听验收，因此目标8、17、18状态不变；`.env:/app/runtime.env:rw` 仍是容器秘密回写风险，等待配置域拆分后收口。
