@@ -8,6 +8,7 @@ const {
   normalizeText
 } = require('./memory-v3/helpers');
 const { isMemoryNotRecallable, lifecycleStatusOf } = require('./memory-v3/recallFilter');
+const { openSqliteDatabase } = require('./sqliteConnection');
 
 const SCHEMA_VERSION = 'memory_storage_overlap_v1';
 const DEFAULT_SAMPLE_LIMIT = 10;
@@ -234,7 +235,7 @@ function loadSqliteSnapshot(options = {}, deps = {}) {
         return normalizeSqliteSnapshot({ ok: false, dbFile, reason: 'sqlite_file_missing' });
       }
       const Database = require('better-sqlite3');
-      db = new Database(dbFile, { readonly: true, fileMustExist: true });
+      db = openSqliteDatabase(Database, dbFile, { readonly: true, fileMustExist: true });
       shouldClose = true;
     }
   } catch (error) {

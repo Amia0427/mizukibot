@@ -2,6 +2,7 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const { openSqliteDatabase, runQuickCheck, runWalCheckpoint } = require('../utils/sqliteConnection');
 
 function formatSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1);
@@ -33,7 +34,7 @@ async function optimizeStorageSafe() {
   // 连接数据库
   let db;
   try {
-    db = new Database(dbPath);
+    db = openSqliteDatabase(Database, dbPath);
   } catch (error) {
     console.error(`❌ 无法打开数据库: ${error.message}`);
     return;
@@ -93,6 +94,10 @@ async function optimizeStorageSafe() {
     console.log('\n🔍 [步骤 5/5] 优化数据库...');
     db.exec('PRAGMA optimize;');
     console.log('  ✓ 数据库优化完成');
+
+    const integrity = runQuickCheck(db);
+    if (!integrity.ok) throw new Error(`SQLite quick_check failed: ${integrity.messages.join('; ')}`);
+    runWalCheckpoint(db, 'TRUNCATE');
 
   } catch (error) {
     console.error(`❌ 优化过程出错: ${error.message}`);

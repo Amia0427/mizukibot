@@ -9,6 +9,7 @@ const {
   isEmbeddingConfigured,
   hashText
 } = require('./memoryEmbeddingClient');
+const { openSqliteDatabase } = require('./sqliteConnection');
 
 const SCHEMA_VERSION = 1;
 const ITEM_TYPES = new Set(['example', 'module']);
@@ -208,8 +209,6 @@ function loadSourceItems(options = {}) {
 }
 
 function initSchema(db) {
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE IF NOT EXISTS recall_meta (
       key TEXT PRIMARY KEY,
@@ -274,7 +273,7 @@ function getDb(options = {}) {
   if (!Database) return null;
   try {
     ensureDir(dbFile);
-    const db = new Database(dbFile);
+    const db = openSqliteDatabase(Database, dbFile);
     initSchema(db);
     dbInstance = db;
     dbFileForInstance = dbFile;
