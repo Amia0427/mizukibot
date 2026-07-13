@@ -1595,3 +1595,10 @@
 - 边界验证：普通生产文件确认 correctness 规则为 error 且 no-unused 关闭；10 个 typecheck include 文件逐一确认 no-unused 为 error、保留 `@ts-check` 且不存在 ignore/nocheck/JSDoc any；实际 unused probe 必须报错。
 - 验收：两次独立只读审查 Approve；quality/chunk 定向测试、lint、typecheck、prompt、secrets、production audit 和 diff check 全部通过；并发4全量105.2秒通过。
 - 路线图状态：目标23继续部分完成，质量工具配置源码断言已迁移；剩余主要是 restart/daemon 大型脚本策略守卫，需要先结合目标14/27抽取安全生命周期边界。
+
+## 运行维护 2026-07-13 18:20 +08:00
+
+- 实现提交 `0b89296`：`getDatePartsInTz` 将部分 Node 20/ICU 组合在午夜产生的 hour=24 归一化为0，避免凌晨查询不再命中“今天同时包含前一自然日”的图片记忆策略。
+- 回归覆盖：新增固定 Asia/Shanghai 午夜时间测试，验证 00:16 的日期部件及 00:15/00:17 时间判断；`imageMemoryIndex` 与 `memoryCliImageRecall` 在 Node 20.20.2、Node 24.14.1 下均通过。
+- 验收：lint、typecheck、prompt、secrets、production audit、cached diff 全部退出0；Node 24并发4全量90.6秒通过。Node 20全量覆盖率复验仍等待获批清理c8原始数据目录，不在本提交宣称完成。
+- 路线图状态：目标31继续部分完成，但已取得真实 Node 20 运行证据并修复一个跨版本行为差异；目标21覆盖率门禁批次仍未提交。
