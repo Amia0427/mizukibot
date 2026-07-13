@@ -1602,3 +1602,10 @@
 - 回归覆盖：新增固定 Asia/Shanghai 午夜时间测试，验证 00:16 的日期部件及 00:15/00:17 时间判断；`imageMemoryIndex` 与 `memoryCliImageRecall` 在 Node 20.20.2、Node 24.14.1 下均通过。
 - 验收：lint、typecheck、prompt、secrets、production audit、cached diff 全部退出0；Node 24并发4全量90.6秒通过。Node 20全量覆盖率复验仍等待获批清理c8原始数据目录，不在本提交宣称完成。
 - 路线图状态：目标31继续部分完成，但已取得真实 Node 20 运行证据并修复一个跨版本行为差异；目标21覆盖率门禁批次仍未提交。
+
+## 运行维护 2026-07-13 19:09 +08:00
+
+- 实现提交 `5160912`：新增统一 SQLite 连接层，生产写连接统一启用 5 秒 `busy_timeout`、WAL 和外键，readonly 工具连接复用相同等待策略；`profileJournalDb`、`worldbookDb`、本地 prompt recall、存储重叠诊断和两项维护脚本不再各自直接创建连接。
+- 并发根因：首次四进程同时初始化共享 `profile_journal.sqlite` 时，`journal_mode=WAL` 会在 schema 锁竞争下直接返回 `SQLITE_BUSY`；连接层现仅在未处于 WAL 时切换，并在既定等待窗口内只重试该锁错误。
+- 完整性入口：新增 `node scripts/check-sqlite-integrity.js [db...]`，对已存在数据库执行 `quick_check` 和 PASSIVE checkpoint，损坏库返回非零状态；安全优化脚本在 VACUUM/optimize 后执行 `quick_check` 与 TRUNCATE checkpoint。
+- 验收：Node 20.20.2 与 Node 24.14.1 的 6 项 SQLite/召回/迁移定向测试通过；lint、typecheck、prompt、全仓 secrets、production audit 和 diff check 全部退出0；Node 24并发4全量93.9秒通过。目标25完成，备份恢复与进程退出时统一关闭连接仍分别属于目标26、27。

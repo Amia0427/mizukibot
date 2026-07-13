@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-13 19:09 +08:00
+
+- 实现提交 `5160912`：SQLite 生产/维护连接统一到单一工厂，启用 5 秒 `busy_timeout`、WAL、外键和首次 WAL 切换的定向 `SQLITE_BUSY` 重试；新增 `quick_check`、checkpoint 与结构化完整性 CLI。
+- 验收：四进程同时写共享 `profile_journal.sqlite` 无丢写，最终 `quick_check=ok`、TRUNCATE checkpoint 无 busy；Node 20/24 定向测试、全部静态门禁和 Node 24并发4全量通过，全量耗时93.9秒。
+- 路线图状态：目标25完成；一致性备份/恢复演练和进程退出时统一关闭数据库仍由目标26、27继续处理。
+
 ## 运行维护 2026-07-13 04:23 +08:00
 
 - 实现提交 `c973fe2`：chunk lint 新增结构化完整覆盖报告；消息与 src facade 测试由旧/新函数引用恒等迁为公开导出、canonical 接线和代表性纯行为；executable plan 测试改为 canonical planning sanitize 契约。
@@ -48,9 +54,9 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-13 18:20 +08:00。
+更新时间：2026-07-13 19:09 +08:00。
 
-- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 62 个提交。
+- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 64 个提交。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
 - 已确认的完整基线：`npm run lint` 覆盖 724 个文件；`TEST_CONCURRENCY=4 node scripts/run-tests.js` 最近一次自然结束用时 93 秒。
 - 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
@@ -81,7 +87,7 @@
 - [x] **22. 测试运行器并发和超时** — 已完成。提交 `d44d051`、`be32669` 完成tracked-only发现、有限并发、串行barrier、进程树终止、慢测榜和慢测网络/生产等待治理；视觉文本预算裁剪改为等价二分查找，`TEST_CONCURRENCY=4`全量连续三轮100.6/97.6/103.6秒自然通过。
 - [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced`、`f0e472d`、`269078f`、`f2cd4b8`、`c973fe2`、`a2ccc94`、`9e11252`、`289035a` 已迁移 DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress、configureNapcat、noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands、mainBotEarlyExitDiagnostics、hotpathRequireGuard、CI Workflow、Docker Compose、chunk lint 映射、主要 facade identity、周期重启、日志保留调用点和质量工具配置守卫；15 个 PowerShell 脚本已由 AST 统一校验语法。剩余危险 restart/daemon 大型策略守卫待先结合目标14/27抽取安全生命周期边界后行为化。
 - [x] **24. 强化提示词清单检查** — 已完成。提交 `d44d051` 已建立版本化exact allowlist，覆盖tracked/package/private边界、39个worldbook、7个runtime模板和4组冲突标签；新增、删除、过期、未知字段或标签成员漂移均失败，默认warning为0。
-- [ ] **25. SQLite 多进程并发与完整性检查** — 未完成。缺少统一连接工厂、`busy_timeout`、checkpoint、`quick_check` 和多进程压测门禁。
+- [x] **25. SQLite 多进程并发与完整性检查** — 已完成。提交 `5160912` 将全部生产和维护 SQLite 打开路径收口到统一连接工厂，启用 5 秒 `busy_timeout`、WAL、外键及首次 WAL 切换的 `SQLITE_BUSY` 定向重试；结构化 CLI、存储优化流程和四进程共享库压测覆盖 PASSIVE/TRUNCATE checkpoint、`quick_check`、损坏库失败和无丢写门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。
 - [ ] **27. 健康、就绪和优雅退出** — 部分完成。已有 `/healthz` 与 `service_healthy`，仍缺 `/live`、`/ready`、排空和完整资源关闭。
 - [x] **28. 扩展安全诊断** — 已完成。提交 `c3ca711`、`d20208b` 已覆盖鉴权/监听组合、direct 与 Compose 宿主边界、Windows ACL、日志无限保留、Docker 最终用户和每服务权限基线；error 状态返回非零退出码，无法可靠解析时降级为 warning。

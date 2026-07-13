@@ -4,6 +4,12 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-13 19:09 +08:00
+
+- SQLite 文件连接已统一使用 5 秒 `busy_timeout`、WAL 与外键策略；多进程首次同时切换 WAL 时只重试 `SQLITE_BUSY`，避免共享 `profile_journal.sqlite` 启动竞争直接降级。
+- 新增 `node scripts/check-sqlite-integrity.js [db...]`，输出 `quick_check` 与被动 checkpoint 结果；存储优化完成后也会执行完整性检查和截断 checkpoint。
+- Node 20/24 的共享库多进程写入、迁移、召回和完整性测试通过，Node 24 并发4全量93.9秒通过。实现提交：`5160912`，目标25已完成。
+
 ## 运行维护 2026-07-13 01:57 +08:00
 
 - planner rich context、Runtime host输出、消息入口和NapCat配置四个源码断言已迁为行为/模块契约；新增共享 planner context 模块，消除三处参数拼装重复。
