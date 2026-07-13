@@ -56,8 +56,23 @@ const {
   validateExternalApiBaseUrl
 } = require('../settingsRuntime');
 
-function handleHealthRequest(_req, res) {
-  return res.status(200).json({ ok: true });
+function getReadinessSnapshot(readiness) {
+  if (readiness && typeof readiness.getSnapshot === 'function') return readiness.getSnapshot();
+  return { live: true, ready: true };
+}
+
+function handleLivenessRequest(_req, res, readiness) {
+  const live = getReadinessSnapshot(readiness).live === true;
+  return res.status(live ? 200 : 503).json({ ok: live });
+}
+
+function handleReadinessRequest(_req, res, readiness) {
+  const ready = getReadinessSnapshot(readiness).ready === true;
+  return res.status(ready ? 200 : 503).json({ ok: ready });
+}
+
+function handleHealthRequest(req, res, readiness) {
+  return handleReadinessRequest(req, res, readiness);
 }
 
 function renderLoginPage(nonce) {
@@ -108,6 +123,7 @@ function renderLoginPage(nonce) {
 
 function createWebApp(options = {}) {
   const app = express();
+  const readiness = options.readiness;
   const port = config.WEB_PORT || 3005;
   const host = config.WEB_BIND_HOST || '127.0.0.1';
   const trustProxyHops = Math.max(0, Math.floor(Number(config.WEB_TRUST_PROXY_HOPS) || 0));
@@ -130,7 +146,9 @@ function createWebApp(options = {}) {
   app.disable('x-powered-by');
   app.use(createSecurityHeaders({ trustProxyHops }));
   app.use(express.json({ limit: '300kb' }));
-  app.get('/healthz', handleHealthRequest);
+  app.get('/live', (req, res) => handleLivenessRequest(req, res, readiness));
+  app.get('/ready', (req, res) => handleReadinessRequest(req, res, readiness));
+  app.get('/healthz', (req, res) => handleHealthRequest(req, res, readiness));
 
   app.get('/login', (req, res) => {
     if (checkWebAuth(req, { host, port, sessionManager, trustProxyHops })) return res.redirect('/');
@@ -1087,8 +1105,8 @@ ${renderMemoryV3NocturneClientScript()}
   return { app, host, loginRateLimiter, port, sessionManager };
 }
 
-function startServer() {
-  const { app, host, port, sessionManager } = createWebApp();
+function startServer(options = {}) {
+  const { app, host, port, sessionManager } = createWebApp(options);
   const server = app.listen(port, host, () => {
     console.log(`Console started: http://${host}:${port}`);
   });
@@ -1104,6 +1122,8 @@ module.exports = {
     checkWebAuth,
     getSettingsEndpointError,
     handleHealthRequest,
+    handleLivenessRequest,
+    handleReadinessRequest,
     isLocalBindHost,
     isLocalIp,
     isStrictSameOrigin,

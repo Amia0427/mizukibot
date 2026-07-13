@@ -222,13 +222,17 @@ function getDb(options = {}) {
   }
 }
 
-function resetDbForTests() {
+function closeDb() {
   if (dbInstance) {
     try {
       dbInstance.close();
     } catch (_) {}
   }
   dbInstance = null;
+}
+
+function resetDbForTests() {
+  closeDb();
   dbError = null;
   fallbackCount = 0;
   lastProfileAutoCleanAt = 0;
@@ -1383,6 +1387,7 @@ module.exports = {
   applyProfileAutoClean,
   cleanJournalEntries,
   cleanProfileFacts,
+  closeDb,
   getDb,
   getDbFile,
   getDiagnostics,

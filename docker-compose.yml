@@ -40,7 +40,7 @@ services:
       - "127.0.0.1:${NAPCAT_HTTP_REVERSE_PORT:-3002}:${NAPCAT_HTTP_REVERSE_PORT:-3002}"
       - "127.0.0.1:${WEB_PORT:-3005}:${WEB_PORT:-3005}"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.WEB_PORT||3005)+'/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.WEB_PORT||3005)+'/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -91,7 +91,14 @@ services:
       MIZUKIBOT_RUNTIME_ROLE: post_reply_worker
       MIZUKIBOT_POST_REPLY_WORKER_PID_FILE: /app/data/runtime/post-reply-worker/worker.pid
       MIZUKIBOT_POST_REPLY_WORKER_LOCK_FILE: /app/data/runtime/post-reply-worker/worker.lock
+      MIZUKIBOT_POST_REPLY_WORKER_STATE_FILE: /app/data/runtime/post-reply-worker/worker-state.json
     command: ["node", "scripts/post-reply-worker.js"]
+    healthcheck:
+      test: ["CMD", "node", "scripts/check-post-reply-worker-ready.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     volumes:
       - mizukibot-data:/app/data
       - ./prompts/persona:/app/prompts/persona:ro

@@ -35,6 +35,9 @@ const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics
 const { maybeSendRestartResultFeedback } = require('./utils/restartResultFeedback');
 const { flushAllHotStoresSync } = require('./utils/jsonHotStore');
 const { sendNapCatActionWithRetry } = require('./utils/napcatActionRetry');
+const { createRuntimeReadiness } = require('./utils/runtimeReadiness');
+const { closeServer, waitForServerListening } = require('./utils/serverLifecycle');
+const { closeLoadedSqliteConnections } = require('./utils/sqliteRuntime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -49,6 +52,7 @@ let preserveSingleInstanceLockOnExit = false;
 let messageIngressDispatcher = null;
 let mainRuntimeHeartbeatTimer = null;
 const mainRuntimeStartedAt = new Date();
+const runtimeReadiness = createRuntimeReadiness();
 
 function configureNodeProcessReports() {
   try {
@@ -677,8 +681,12 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   shutdownInProgress = true;
   shuttingDown = true;
   const reason = String(signal || 'shutdown').trim() || 'shutdown';
+  runtimeReadiness.beginDrain(reason);
   recordExpectedShutdown(reason, { exitCode });
   console.log('[shutdown] begin', { reason, pid: process.pid });
+
+  const webServerClose = closeServer(webServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS });
+  const reverseServerClose = closeServer(httpReverseServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS });
 
   try {
     napcatActionClient.handleDisconnect('MizukiBot shutdown');
@@ -698,8 +706,13 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   try { napcatLogFollower.stop(); } catch (error) {
     console.error('[shutdown] follower stop failed:', error?.message || error);
   }
-  try { postReplyWorkerRuntime?.stop?.(); } catch (error) {
-    console.error('[shutdown] post-reply worker stop failed:', error?.message || error);
+  try {
+    await postReplyWorkerRuntime?.drainAndStop?.({
+      timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS,
+      source: reason
+    });
+  } catch (error) {
+    console.error('[shutdown] post-reply worker drain failed:', error?.message || error);
   }
   try {
     await messageIngressDispatcher?.stop?.({
@@ -712,13 +725,6 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   try { resourceSnapshotLoop.stop(); } catch (error) {
     console.error('[shutdown] resource snapshot stop failed:', error?.message || error);
   }
-  try { webServer?.close?.(); } catch (error) {
-    console.error('[shutdown] web server close failed:', error?.message || error);
-  }
-  try { httpReverseServer?.close?.(); } catch (error) {
-    console.error('[shutdown] http reverse server close failed:', error?.message || error);
-  }
-
   try { clearMcpRuntimeCaches(); } catch (error) {
     console.error('[shutdown] mcp cleanup failed:', error?.message || error);
   }
@@ -732,9 +738,15 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
     console.error('[shutdown] cycletls cleanup failed:', error?.message || error);
   }
 
-  flushAllHotStoresSync();
+  const [webCloseResult, reverseCloseResult] = await Promise.all([webServerClose, reverseServerClose]);
+  if (!webCloseResult.closed) console.error('[shutdown] web server close incomplete:', webCloseResult);
+  if (!reverseCloseResult.closed) console.error('[shutdown] http reverse server close incomplete:', reverseCloseResult);
 
-  cleanupSingleInstanceLock();
+  flushAllHotStoresSync();
+  closeLoadedSqliteConnections();
+
+  cleanupSingleInstanceLock?.();
+  runtimeReadiness.markStopped('shutdown_complete');
   stopMainRuntimeHeartbeat('shutdown_complete', { reason, exitCode });
   console.log('[shutdown] complete', { reason, pid: process.pid });
   process.exit(exitCode);
@@ -756,6 +768,7 @@ function drainForScheduledRestart(meta = {}) {
   if (shuttingDown) return;
   shuttingDown = true;
   const marker = buildScheduledRestartMarker(meta);
+  runtimeReadiness.beginDrain('remote_restart_scheduled');
   recordExpectedShutdown('remote_restart_scheduled', marker);
   console.log('[restart] drain old instance before external restart', {
     pid: process.pid,
@@ -807,11 +820,16 @@ async function startMainProcess() {
   cleanupSingleInstanceLock = await acquireSingleInstanceLock();
   startMainRuntimeHeartbeat('lock_acquired');
   await cleanupStaleTmpFilesOnStartup();
-  webServer = startServer();
+  webServer = startServer({ readiness: runtimeReadiness });
   initializeMemeManager();
   scheduleMainProcessEmbeddingBackfill();
   startResourceSnapshots();
   startNapCatTransport();
+  await Promise.all([
+    waitForServerListening(webServer),
+    waitForServerListening(httpReverseServer)
+  ]);
+  runtimeReadiness.markReady('startup_complete');
   scheduleRestartResultFeedback();
   recordMainRuntimeState('initialized', {
     mode: 'http_reverse'
@@ -865,6 +883,7 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       recordExpectedShutdown,
       recordMainRuntimeState,
       runtimeStateFile: RUNTIME_STATE_FILE,
+      runtimeReadiness,
       scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {
         messageIngressDispatcher = dispatcher;
@@ -877,6 +896,7 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
 } else {
   startMainProcess().catch((error) => {
     preserveSingleInstanceLockOnExit = true;
+    runtimeReadiness.markStopped('startup_failed');
     logFatalStartupError('startup', error);
     process.exit(1);
   });

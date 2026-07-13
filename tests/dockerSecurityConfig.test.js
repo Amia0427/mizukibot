@@ -44,9 +44,10 @@ assert.ok(mainService.ports.includes(
   '127.0.0.1:${NAPCAT_HTTP_REVERSE_PORT:-3002}:${NAPCAT_HTTP_REVERSE_PORT:-3002}'
 ));
 assert.ok(mainService.ports.includes('127.0.0.1:${WEB_PORT:-3005}:${WEB_PORT:-3005}'));
-assert.ok(mainService.healthcheck.test.some((item) => String(item).includes('/healthz')));
+assert.ok(mainService.healthcheck.test.some((item) => String(item).includes('/ready')));
 assert.strictEqual(workerService.depends_on.mizukibot.condition, 'service_healthy');
 assert.ok(!Object.hasOwn(workerService, 'ports'));
+assert.ok(workerService.healthcheck.test.some((item) => String(item).includes('check-post-reply-worker-ready.js')));
 
 const expectedLimits = {
   mizukibot: { cpus: '2.0', memLimit: '2g', pidsLimit: 256 },

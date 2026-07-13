@@ -312,16 +312,20 @@ function getDb(options = {}) {
   }
 }
 
-function resetDbForTests() {
+function closeDb() {
   if (dbInstance) {
     try {
       dbInstance.close();
     } catch (_) {}
   }
   dbInstance = null;
+  ftsAvailable = false;
+}
+
+function resetDbForTests() {
+  closeDb();
   dbError = null;
   fallbackCount = 0;
-  ftsAvailable = false;
 }
 
 function syncFtsRow(db, entry = {}) {
@@ -900,6 +904,7 @@ module.exports = {
   DEFAULT_DOC_MAX_CHARS,
   buildSearchText,
   clearSessionActivations,
+  closeDb,
   getActiveSessionEntries,
   getDb,
   getDbFile,

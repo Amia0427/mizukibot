@@ -92,6 +92,12 @@ function assertSecurityHeaders(response) {
     try {
       const health = await fetch(`${server.baseUrl}/healthz`);
       const healthNonce = assertSecurityHeaders(health);
+      const live = await fetch(`${server.baseUrl}/live`);
+      const liveNonce = assertSecurityHeaders(live);
+      assert.strictEqual(live.status, 200);
+      const ready = await fetch(`${server.baseUrl}/ready`);
+      const readyNonce = assertSecurityHeaders(ready);
+      assert.strictEqual(ready.status, 200);
 
       const unauthorized = await fetch(`${server.baseUrl}/api/bot-thinking`);
       const unauthorizedNonce = assertSecurityHeaders(unauthorized);
@@ -123,7 +129,7 @@ function assertSecurityHeaders(response) {
       const apiNonce = assertSecurityHeaders(api);
       assert.strictEqual(api.status, 200);
 
-      const nonces = [healthNonce, unauthorizedNonce, loginNonce, redirectNonce, loginResponseNonce, rootNonce, apiNonce];
+      const nonces = [healthNonce, liveNonce, readyNonce, unauthorizedNonce, loginNonce, redirectNonce, loginResponseNonce, rootNonce, apiNonce];
       assert.strictEqual(new Set(nonces).size, nonces.length);
       assert.strictEqual(health.headers.has('strict-transport-security'), false);
     } finally {
