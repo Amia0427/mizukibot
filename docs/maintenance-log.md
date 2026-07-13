@@ -1609,3 +1609,10 @@
 - 并发根因：首次四进程同时初始化共享 `profile_journal.sqlite` 时，`journal_mode=WAL` 会在 schema 锁竞争下直接返回 `SQLITE_BUSY`；连接层现仅在未处于 WAL 时切换，并在既定等待窗口内只重试该锁错误。
 - 完整性入口：新增 `node scripts/check-sqlite-integrity.js [db...]`，对已存在数据库执行 `quick_check` 和 PASSIVE checkpoint，损坏库返回非零状态；安全优化脚本在 VACUUM/optimize 后执行 `quick_check` 与 TRUNCATE checkpoint。
 - 验收：Node 20.20.2 与 Node 24.14.1 的 6 项 SQLite/召回/迁移定向测试通过；lint、typecheck、prompt、全仓 secrets、production audit 和 diff check 全部退出0；Node 24并发4全量93.9秒通过。目标25完成，备份恢复与进程退出时统一关闭连接仍分别属于目标26、27。
+
+## 运行维护 2026-07-13 20:54 +08:00
+
+- 实现提交 `fec175e`：新增进程 readiness 状态机，主 Web 暴露 `/live`、`/ready` 和兼容 `/healthz`；只有 Web/NapCat reverse 真正监听并完成启动后进入 ready，退出/计划重启先进入 draining。
+- 关闭边界：主进程停止新入口并等待 message ingress 与内联 post-reply 作业，HTTP server 使用有界 close，完成后 flush 热存储并关闭已加载的 profile/worldbook/local prompt SQLite 单例；外置 worker 停止领取新任务、等待 active job、flush materialize 后写 stopped 状态。
+- 部署探针：Compose 主服务改用 `/ready`，worker 增加基于本地状态文件、PID、stage 和 heartbeat age 的 healthcheck；配置增加统一15秒关闭窗口及 worker 心跳/过期阈值。
+- 验收：Node 20.20.2 的9项定向测试通过；lint覆盖729文件，typecheck、prompt、全仓 secrets、production audit 和 diff check 全部退出0；Node 24并发4全量93秒通过。目标27继续部分完成，真实 Docker stop grace、OS SIGTERM 与资源关闭运行探针仍未取得；目标26实施计划已由 `af5db70` 建立，加密临时明文删除仍等待授权。

@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-13 20:54 +08:00
+
+- 实现提交 `fec175e`：主进程建立 starting/ready/draining/stopped 状态、`/live`/`/ready`、HTTP 有界关闭、热存储 flush 与 SQLite 统一关闭；post-reply worker 增加 active job 排空、状态心跳和 Compose readiness。
+- 验收：Node 20定向测试、全部静态门禁和 Node 24并发4全量通过，全量耗时93秒；新测试已进入 tracked-only 默认发现。
+- 路线图状态：目标27继续部分完成，尚缺真实 Docker stop grace/OS SIGTERM 运行探针；目标26已有 `af5db70` 实施计划，但加密备份流程删除本次生成的明文临时快照仍需用户授权。
+
 ## 运行维护 2026-07-13 19:09 +08:00
 
 - 实现提交 `5160912`：SQLite 生产/维护连接统一到单一工厂，启用 5 秒 `busy_timeout`、WAL、外键和首次 WAL 切换的定向 `SQLITE_BUSY` 重试；新增 `quick_check`、checkpoint 与结构化完整性 CLI。
@@ -54,9 +60,9 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-13 19:09 +08:00。
+更新时间：2026-07-13 20:54 +08:00。
 
-- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 64 个提交。
+- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 67 个提交。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
 - 已确认的完整基线：`npm run lint` 覆盖 724 个文件；`TEST_CONCURRENCY=4 node scripts/run-tests.js` 最近一次自然结束用时 93 秒。
 - 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
@@ -88,8 +94,8 @@
 - [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced`、`f0e472d`、`269078f`、`f2cd4b8`、`c973fe2`、`a2ccc94`、`9e11252`、`289035a` 已迁移 DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress、configureNapcat、noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands、mainBotEarlyExitDiagnostics、hotpathRequireGuard、CI Workflow、Docker Compose、chunk lint 映射、主要 facade identity、周期重启、日志保留调用点和质量工具配置守卫；15 个 PowerShell 脚本已由 AST 统一校验语法。剩余危险 restart/daemon 大型策略守卫待先结合目标14/27抽取安全生命周期边界后行为化。
 - [x] **24. 强化提示词清单检查** — 已完成。提交 `d44d051` 已建立版本化exact allowlist，覆盖tracked/package/private边界、39个worldbook、7个runtime模板和4组冲突标签；新增、删除、过期、未知字段或标签成员漂移均失败，默认warning为0。
 - [x] **25. SQLite 多进程并发与完整性检查** — 已完成。提交 `5160912` 将全部生产和维护 SQLite 打开路径收口到统一连接工厂，启用 5 秒 `busy_timeout`、WAL、外键及首次 WAL 切换的 `SQLITE_BUSY` 定向重试；结构化 CLI、存储优化流程和四进程共享库压测覆盖 PASSIVE/TRUNCATE checkpoint、`quick_check`、损坏库失败和无丢写门禁。
-- [ ] **26. 可恢复备份体系** — 未完成。无统一 RPO/RTO、加密异地副本和恢复演练证据。
-- [ ] **27. 健康、就绪和优雅退出** — 部分完成。已有 `/healthz` 与 `service_healthy`，仍缺 `/live`、`/ready`、排空和完整资源关闭。
+- [ ] **26. 可恢复备份体系** — 未完成。提交 `af5db70` 已形成 SQLite 在线一致性快照、AES-256-GCM 异地副本、RPO/RTO 与恢复演练实施计划；实际加密备份/恢复门禁尚未落地，且删除操作生成的明文临时快照需先获授权。
+- [ ] **27. 健康、就绪和优雅退出** — 部分完成。提交 `fec175e` 已实现主进程 `/live`/`/ready`、启动/排空状态、message ingress 与内联 worker drain、HTTP 有界关闭、热存储 flush、SQLite 统一关闭，以及外置 worker active job 排空/状态心跳/Compose readiness；真实 Docker stop grace、OS SIGTERM 和资源关闭运行探针仍待验收。
 - [x] **28. 扩展安全诊断** — 已完成。提交 `c3ca711`、`d20208b` 已覆盖鉴权/监听组合、direct 与 Compose 宿主边界、Windows ACL、日志无限保留、Docker 最终用户和每服务权限基线；error 状态返回非零退出码，无法可靠解析时降级为 warning。
 - [ ] **29. 供应链安全门禁** — 未完成。无固定镜像 digest、SBOM、gitleaks、OSV/Trivy/Grype 和许可证门禁。
 - [x] **30. 会话研究缓存全局容量限制** — 已完成。提交 `5e7e168` 已加入每进程全局会话上限、确定性 LRU、主动/惰性 TTL、size/eviction/expired 指标和可停止的 unref 定时器；10,000 会话压力测试稳定回落到配置上限。

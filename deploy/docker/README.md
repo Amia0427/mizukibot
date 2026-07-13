@@ -101,7 +101,7 @@ docker inspect mizukibot-post-reply-worker --format '{{json .HostConfig}}'
 
 运行探针应确认 `ReadonlyRootfs=true`、`CapDrop=[ALL]`、`SecurityOpt` 含 `no-new-privileges:true`，并核对 `NanoCpus`、`Memory`、`PidsLimit`。上述探针会在数据卷和临时目录留下小型 `.write-probe` 文件，验收后由部署人员确认路径再清理。
 
-主服务提供无需令牌且只返回 `{ "ok": true }` 的 `/healthz` 容器探针；post-reply worker 使用 `service_healthy` 门控，主服务未通过健康检查前不会启动。
+主服务提供无需令牌且只返回 `{ "ok": true|false }` 的 `/live`、`/ready` 和兼容 `/healthz`：`/live` 表示进程仍存活，`/ready`/`/healthz` 只在启动完成且未排空时返回200。Compose 主服务使用 `/ready`；post-reply worker 通过 `scripts/check-post-reply-worker-ready.js` 检查本地状态心跳、PID 和 ready stage，并继续等待主服务 `service_healthy`。
 
 Web 面板默认访问：
 
@@ -138,4 +138,4 @@ curl -i http://127.0.0.1:3002/ \
 
 更新 2026-07-12 16:51 +08:00：NapCat reverse 验证说明已从 Bearer-only/空对象探针更新为 HMAC 签名和显式兼容模式；本轮仅更新文档，未声称容器运行态已重新验收。
 
-当前仍未拆分主服务和 worker 的只读秘密集合：worker 的后处理流程依赖模型、记忆和图片等多组配置，未经逐项契约验证直接拆分 `.env` 容易造成隐性运行失败。后续应先建立角色所需环境变量清单与启动回归，再改为独立 env/secret 注入。worker 自身 readiness 探针属于目标 27，本轮未实现。
+当前仍未拆分主服务和 worker 的只读秘密集合：worker 的后处理流程依赖模型、记忆和图片等多组配置，未经逐项契约验证直接拆分 `.env` 容易造成隐性运行失败。后续应先建立角色所需环境变量清单与启动回归，再改为独立 env/secret 注入。更新 2026-07-13 20:54 +08:00：worker readiness 与排空逻辑已实现并通过 Node 20/24 行为测试，真实容器 stop grace、只读根和资源上限仍需 Docker 运行验收。
