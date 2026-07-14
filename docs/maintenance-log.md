@@ -1,3 +1,10 @@
+## 运行维护 2026-07-14 16:50 +08:00
+
+- 小目标：完成目标29中不依赖外部网络的生产许可证与 CycloneDX SBOM 门禁批次。
+- 最小实现：提交 `c12ec87` 新增版本化许可证策略、精确包例外/override、缺版本与 drift/stale/过期检查，以及调用 npm 内置 SBOM、验证根身份和直接生产依赖、输出 SHA-256 的 wrapper；未修改并行覆盖率和 CI 文件。
+- 验收：330个生产 lock 条目全部归类，真实 SBOM 为 CycloneDX 1.5、275个组件、276条依赖；目标测试、729文件 lint、typecheck、prompt、tracked/staged secrets、production audit（0漏洞）和 diff check 通过。串行替代全量515文件中498个通过，17个仅因沙箱子进程 `EPERM` 失败，不能记录为完整全量通过。
+- 小目标已完成：本地确定性许可证/SBOM批次已提交；目标29整体仍为部分完成，Node 20、并发4全量、gitleaks、OSV、Trivy、固定 Action SHA 和基础镜像 digest 等待可信网络与可创建子进程的环境验收。
+
 ## 运行维护 2026-07-12 19:21
 
 - 小目标：清理没有 CLI、脚本、测试或运行入口的 OpenViking backfill 分支。

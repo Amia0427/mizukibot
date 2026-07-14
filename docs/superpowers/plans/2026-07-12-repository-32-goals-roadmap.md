@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-14 16:50 +08:00
+
+- 实现提交 `c12ec87`：新增生产许可证策略与门禁，覆盖精确批准表达式、版本锁定例外/override、HTTPS 来源、不完整元数据和 drift/stale/过期失败；新增 npm CycloneDX SBOM wrapper，验证根身份、直接生产依赖并输出 SHA-256。
+- 验收：330个生产 lock 条目全部归类；真实 npm SBOM 为 CycloneDX 1.5、275个组件、276条依赖记录；目标测试、729文件 lint、typecheck、prompt、tracked/staged secrets、production audit 和 diff check 通过。串行替代全量515文件中498个通过，17个均被当前沙箱的子进程 `EPERM` 阻断，不能标记完整全量通过。
+- 路线图状态：目标29由未完成推进为部分完成；Node 20、并发4全量、gitleaks、OSV、Trivy、所有 Action commit SHA 与 `node:20-bookworm-slim` digest 仍需权威远端和真实运行证据。
+
 ## 运行维护 2026-07-13 20:54 +08:00
 
 - 实现提交 `fec175e`：主进程建立 starting/ready/draining/stopped 状态、`/live`/`/ready`、HTTP 有界关闭、热存储 flush 与 SQLite 统一关闭；post-reply worker 增加 active job 排空、状态心跳和 Compose readiness。
@@ -60,11 +66,11 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-13 20:54 +08:00。
+更新时间：2026-07-14 16:50 +08:00。
 
-- 当前分支 `amia/dev` 已领先 `origin/amia/dev` 67 个提交。
+- 当前分支未推送；目标29本地实现提交 `c12ec87` 已生成，远端 CI 尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
-- 已确认的完整基线：`npm run lint` 覆盖 724 个文件；`TEST_CONCURRENCY=4 node scripts/run-tests.js` 最近一次自然结束用时 93 秒。
+- 当前静态基线：`npm run lint` 覆盖729个文件；最近一次已确认的 `TEST_CONCURRENCY=4` 完整基线仍是目标27的93秒，本轮目标29因沙箱子进程限制未取得新的并发4全量通过证据。
 - 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
 
 ## 32 项状态
@@ -97,7 +103,7 @@
 - [ ] **26. 可恢复备份体系** — 未完成。提交 `af5db70` 已形成 SQLite 在线一致性快照、AES-256-GCM 异地副本、RPO/RTO 与恢复演练实施计划；实际加密备份/恢复门禁尚未落地，且删除操作生成的明文临时快照需先获授权。
 - [ ] **27. 健康、就绪和优雅退出** — 部分完成。提交 `fec175e` 已实现主进程 `/live`/`/ready`、启动/排空状态、message ingress 与内联 worker drain、HTTP 有界关闭、热存储 flush、SQLite 统一关闭，以及外置 worker active job 排空/状态心跳/Compose readiness；真实 Docker stop grace、OS SIGTERM 和资源关闭运行探针仍待验收。
 - [x] **28. 扩展安全诊断** — 已完成。提交 `c3ca711`、`d20208b` 已覆盖鉴权/监听组合、direct 与 Compose 宿主边界、Windows ACL、日志无限保留、Docker 最终用户和每服务权限基线；error 状态返回非零退出码，无法可靠解析时降级为 warning。
-- [ ] **29. 供应链安全门禁** — 未完成。无固定镜像 digest、SBOM、gitleaks、OSV/Trivy/Grype 和许可证门禁。
+- [ ] **29. 供应链安全门禁** — 部分完成。提交 `c12ec87` 已加入覆盖330个生产 lock 条目的精确许可证门禁和 npm CycloneDX SBOM wrapper，真实产物为1.5规范、275个组件、276条依赖记录；仍缺 gitleaks、OSV、Trivy 的真实扫描、全部 Action commit SHA、基础镜像 digest、Node 20 与并发4全量证据。
 - [x] **30. 会话研究缓存全局容量限制** — 已完成。提交 `5e7e168` 已加入每进程全局会话上限、确定性 LRU、主动/惰性 TTL、size/eviction/expired 指标和可停止的 unref 定时器；10,000 会话压力测试稳定回落到配置上限。
 - [ ] **31. 统一 Node 版本** — 部分完成。提交 `5e7e168` 已将 `.nvmrc`、`package.json`/lock、Docker、CI、Linux 安装检查脚本和用户部署文档统一为 Node 20.x；提交 `0b89296` 已在真实 Node 20.20.2 下修复并验证午夜 hour=24 的跨版本行为差异，time/image memory/memory CLI 定向测试通过。完整 Node 20 全量与原生依赖隔离安装仍需最终复验后标记完成。
 - [ ] **32. 建立依赖升级节奏** — 未完成。无自动补丁升级、月度窗口和大版本 smoke 流程。
