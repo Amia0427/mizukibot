@@ -131,8 +131,10 @@ Run lint、typecheck、prompt、secrets、npm audit、diff check 和并发4全�
 
 目标29只有在 gitleaks、OSV、Trivy、SBOM、许可证和 digest 固定均由真实 CI/本地命令成功执行时才能完成；仅存在 workflow YAML 不算运行证据。
 
-- [ ] **Step 4: Commit implementation and documentation separately**
+- [x] **Step 4: Commit implementation and documentation separately**
 
 本地策略/SBOM可以先独立提交；外部 action/digest 在权威网络恢复后单独提交，避免用未验证值污染可信链。
 
 **2026-07-15 12:17 +08:00 验收：** Node 20.20.2与当前 Node的 CI/Supply Chain定向测试通过；729文件 lint、typecheck、prompt、tracked secrets、production audit（0漏洞）、diff check和 Node 24并发4全量通过，全量耗时105.2秒。workflow尚未推送，因此 gitleaks与OSV只有结构/配置证据，仍不能替代真实 GitHub Actions扫描结果。
+
+实现提交：`a4ce6cc`。README、维护日志与32目标路线图在后续独立文档提交中记录该批次。

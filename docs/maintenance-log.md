@@ -1,3 +1,10 @@
+## 运行维护 2026-07-15 12:17 +08:00
+
+- 小目标：完成目标29的不可变 GitHub Action引用、Git历史泄漏扫描和依赖漏洞扫描配置批次。
+- 最小实现：提交 `a4ce6cc` 将现有 CI和新 workflow的外部 `uses:` 全部固定到官方 release解引用 commit；新增 `source-history`、`dependency-policy`、`dependency-vulnerabilities` 三个独立最小权限作业，分别运行 gitleaks、许可证/SBOM与 OSV，失败不降级，产物保留7天。
+- 验收：GitHub API权威解析并记录 checkout/setup-node/upload-artifact/gitleaks/OSV SHA；当前仓库为个人账号，官方 gitleaks文档确认无需组织许可证。可信 Node 20.20.2与当前 Node定向测试、729文件 lint、typecheck、prompt、tracked/staged secrets、production audit、diff check和 Node 24并发4全量通过，全量耗时105.2秒。
+- 小目标已完成：Action固定与源/依赖扫描 workflow已提交；目标29整体仍为部分完成，workflow未推送所以没有真实 gitleaks/OSV运行结果，Docker Hub官方域名当前异常超时，基础镜像 digest与 Trivy仍待验收。
+
 ## 运行维护 2026-07-14 16:50 +08:00
 
 - 小目标：完成目标29中不依赖外部网络的生产许可证与 CycloneDX SBOM 门禁批次。
