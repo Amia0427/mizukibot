@@ -30,8 +30,8 @@ assert.strictEqual(quality['timeout-minutes'], 15);
 assert.strictEqual(linuxPolicy['runs-on'], 'ubuntu-latest');
 
 for (const job of [quality, linuxPolicy]) {
-  const checkout = findStep(job, (step) => step.uses === 'actions/checkout@v4');
-  const setupNode = findStep(job, (step) => step.uses === 'actions/setup-node@v4');
+  const checkout = findStep(job, (step) => String(step.uses || '').startsWith('actions/checkout@'));
+  const setupNode = findStep(job, (step) => String(step.uses || '').startsWith('actions/setup-node@'));
   assert.strictEqual(checkout.with['persist-credentials'], false);
   assert.strictEqual(setupNode.with['node-version-file'], '.nvmrc');
 }

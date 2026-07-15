@@ -72,19 +72,21 @@ Expected: exit 0 and a valid CycloneDX JSON artifact.
 - Modify: `tests/ciWorkflow.test.js`
 - Test: `tests/supplyChainPolicy.test.js`
 
-- [ ] **Step 1: Resolve official immutable SHAs**
+- [x] **Step 1: Resolve official immutable SHAs**
 
 从 GitHub 官方仓库解析 `actions/checkout`、`actions/setup-node`、`actions/upload-artifact`、gitleaks 和 OSV-Scanner 的 tag dereference commit；网络不可用时停止本任务，禁止凭记忆填写。
 
-- [ ] **Step 2: Pin every `uses:` reference**
+**2026-07-15 12:17 +08:00 权威解析：** `actions/checkout@v4.3.1=34e114876b0b11c390a56381ad16ebd13914f8d5`、`actions/setup-node@v4.4.0=49933ea5288caeca8642d1e84afbd3f7d6820020`、`actions/upload-artifact@v4.6.2=ea165f8d65b6e75b540449e92b4886f43607fa02`、`gitleaks/gitleaks-action@v3.0.0=e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e`、`google/osv-scanner-action@v2.3.8=9a498708959aeaef5ef730655706c5a1df1edbc2`，均由 GitHub API release/tag ref 解引用到40位 commit。仓库归属个人账号，官方 gitleaks v3 文档确认无需组织许可证密钥。
+
+- [x] **Step 2: Pin every `uses:` reference**
 
 所有 workflow `uses:` 必须是40位 commit SHA，并在行尾保留可读版本注释。结构测试拒绝 tag、branch、短 SHA 和未知 action owner。
 
-- [ ] **Step 3: Add gitleaks and OSV jobs**
+- [x] **Step 3: Add gitleaks and OSV jobs**
 
 gitleaks 扫描完整 Git 历史；OSV 扫描 `package-lock.json`。workflow 使用 `contents: read`，只在确需上传 SARIF 时授予 `security-events: write`，PR fork 不获取项目 secrets。
 
-- [ ] **Step 4: Generate/upload SBOM and license report**
+- [x] **Step 4: Generate/upload SBOM and license report**
 
 CI 运行本地 checker/SBOM wrapper并上传7天 artifact；扫描失败不使用 `continue-on-error`。
 
@@ -117,11 +119,11 @@ CI 构建本地镜像后运行 Trivy vulnerability 和 misconfiguration 扫描�
 - Modify: `docs/maintenance-log.md`
 - Modify: `docs/superpowers/plans/2026-07-12-repository-32-goals-roadmap.md`
 
-- [ ] **Step 1: Run local policy tests under Node 20/current Node**
+- [x] **Step 1: Run local policy tests under Node 20/current Node**
 
 Run license/SBOM/CI/Docker policy tests in both runtimes.
 
-- [ ] **Step 2: Run repository gates and full tests**
+- [x] **Step 2: Run repository gates and full tests**
 
 Run lint、typecheck、prompt、secrets、npm audit、diff check 和并发4全量测试。
 
@@ -132,3 +134,5 @@ Run lint、typecheck、prompt、secrets、npm audit、diff check 和并发4全�
 - [ ] **Step 4: Commit implementation and documentation separately**
 
 本地策略/SBOM可以先独立提交；外部 action/digest 在权威网络恢复后单独提交，避免用未验证值污染可信链。
+
+**2026-07-15 12:17 +08:00 验收：** Node 20.20.2与当前 Node的 CI/Supply Chain定向测试通过；729文件 lint、typecheck、prompt、tracked secrets、production audit（0漏洞）、diff check和 Node 24并发4全量通过，全量耗时105.2秒。workflow尚未推送，因此 gitleaks与OSV只有结构/配置证据，仍不能替代真实 GitHub Actions扫描结果。

@@ -1,0 +1,104 @@
+name: Supply Chain
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan Git history with Gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  dependency-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare supply-chain artifacts
+        if: ${{ !cancelled() }}
+        run: mkdir -p artifacts/supply-chain
+
+      - name: Check production licenses
+        if: ${{ !cancelled() }}
+        run: node scripts/check-production-licenses.js --json > artifacts/supply-chain/licenses.json
+
+      - name: Generate CycloneDX SBOM
+        if: ${{ !cancelled() }}
+        run: node scripts/generate-sbom.js --output artifacts/supply-chain/mizukibot.cdx.json
+
+      - name: Upload dependency policy artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-policy-${{ github.run_id }}
+          path: artifacts/supply-chain
+          if-no-files-found: warn
+          retention-days: 7
+
+  dependency-vulnerabilities:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare OSV artifact directory
+        run: mkdir -p artifacts/supply-chain
+
+      - name: Scan dependencies with OSV-Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --format=json
+            --output=artifacts/supply-chain/osv-results.json
+            --recursive
+            ./
+
+      - name: Upload OSV results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: osv-results-${{ github.run_id }}
+          path: artifacts/supply-chain/osv-results.json
+          if-no-files-found: warn
+          retention-days: 7
