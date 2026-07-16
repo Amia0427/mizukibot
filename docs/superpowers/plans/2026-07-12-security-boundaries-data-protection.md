@@ -247,21 +247,21 @@ git commit -m "fix: expand security diagnostics"
 - Create: `tests/localAclScriptSource.test.js`
 - Modify: `scripts/README.md`
 
-- [ ] **Step 1: 写脚本安全约束测试**
+- [x] **Step 1: 写脚本安全约束测试**
 
 测试脚本必须显式接收 `-ServiceIdentity`，默认只预览；应用前导出 `.env` 和 `data` ACL 快照，不接受空路径或工作区外路径，不删除文件。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `node scripts/run-tests.js tests/localAclScriptSource.test.js`
 
 Expected: FAIL，脚本尚不存在。
 
-- [ ] **Step 3: 实现幂等 ACL 脚本**
+- [x] **Step 3: 实现幂等 ACL 脚本**
 
 保留服务账号、`NT AUTHORITY\SYSTEM` 和 `BUILTIN\Administrators`；移除 `Authenticated Users`、`BUILTIN\Users` 和无关 SID 的继承访问。脚本先输出差异，只有显式 `-Apply` 才修改。
 
-- [ ] **Step 4: 识别真实服务身份**
+- [x] **Step 4: 识别真实服务身份**
 
 Run: `npm run win:daemon:status`
 

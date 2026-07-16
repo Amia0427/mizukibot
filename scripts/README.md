@@ -58,6 +58,7 @@
 - `install-periodic-restart.ps1`
 - `uninstall-windows-daemon.ps1`
 - `install-skill-deps.ps1`
+- `harden-local-acl.ps1`：Windows 敏感路径 ACL 收口；必须显式提供 `-ServiceIdentity`，默认只预览，确认快照后再使用 `-Apply` 修改仓库 `.env`、`data` 及其子项，仅保留服务账号、SYSTEM 和 Administrators。
 
 ## Migration / Maintenance
 

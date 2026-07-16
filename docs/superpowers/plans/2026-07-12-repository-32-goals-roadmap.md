@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-16 23:46 +08:00
+
+- 实现：新增默认预览、显式 `-Apply`、递归快照和路径边界的Windows ACL工具，临时目录行为测试确认Apply后 `.env`、`data`及子项不再授予 `Authenticated Users`/`Users`。
+- 真实证据：Bot主进程和计划任务身份为 `MIZUKI\Administrator`；仓库预览覆盖 `.env` 1项和 `data` 49,147项，前后SDDL不变；安全定向、PowerShell AST、全部静态门禁及并发4全量通过，全量耗时108.8秒。
+- 路线图状态：目标4推进为部分完成；为保护并行代理，尚未对真实工作区执行Apply和凭据轮换。
+
 ## 运行维护 2026-07-16 22:52 +08:00
 
 - 验收：官方 Node 20.20.2 Windows x64运行时使用隔离 ABI 115 `better-sqlite3` 依赖完成原生模块与 SQLite `quick_check=ok` 探针；归档此前按 nodejs.org SHA-256 `dc3700fdd57a63eedb8fd7e3c7baaa32e6a740a1b904167ff4204bc68ed8bf77` 校验。
@@ -78,19 +84,19 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-16 22:52 +08:00。
+更新时间：2026-07-16 23:46 +08:00。
 
 - 当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端 CI 尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
 - 当前静态基线：`npm run lint` 覆盖729个文件；Node 20.20.2的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-16自然结束，耗时151.7秒，Node 24完整全量基线为105.2秒。
-- 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
+- 当前 `.env` 与 `data` ACL仍允许 `Authenticated Users`修改、`Users`读取；收口工具和真实身份预览已完成，但Apply需等待并行工作收口。
 
 ## 32 项状态
 
 - [ ] **1. NapCat HTTP 入口认证与防重放** — 部分完成。提交 `c3ca711` 已加入 HMAC、时间戳、nonce、防重放、事件校验、请求体限制、鉴权后限流和真实配置链测试；NapCat 原生客户端仍需静态 token 兼容模式，安全诊断会将该模式标为 warning，后续需通过受控签名代理完成 signed-only 收口。
 - [x] **2. 图片缓存 SSRF** — 已完成。提交 `c3ca711` 已接入逐跳 DNS/重定向校验、固定解析地址、IPv4-mapped IPv6 拒绝和 8 MiB 响应限制，并有本地真实 HTTP 集成测试。
 - [x] **3. `skill_summarize` SSRF** — 已完成。提交 `c3ca711` 已统一使用安全请求边界并限制 2 MiB 响应，覆盖私网、重定向和固定 DNS 行为测试。
-- [ ] **4. `.env` 与 `data` ACL** — 未完成。当前 ACL 仍对普通认证用户开放修改或读取。
+- [ ] **4. `.env` 与 `data` ACL** — 部分完成。ACL工具已实现默认预览、递归快照、显式Apply和服务身份约束，并在临时目录验证可移除 `Authenticated Users`/`Users`；真实服务身份为 `MIZUKI\Administrator`，但为保护并行代理尚未对工作区应用或轮换凭据。
 - [ ] **5. 取消源码拼接式模块加载** — 未完成。`src/shared/chunkedModule.js` 仍通过 `new Function` 执行共享作用域 chunk，至少 6 个入口依赖。
 - [ ] **6. 消除生产依赖环** — 未完成。必须在 chunk 模块化后重新生成权威依赖图并将循环数降为 0。
 - [ ] **7. 拆除 `legacy/aiHost` 上帝模块** — 未完成。`api/legacy/aiHost.js` 仍约 2096 行，并被 planning、image generation 和测试引用。
