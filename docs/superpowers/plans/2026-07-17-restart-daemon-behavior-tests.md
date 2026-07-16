@@ -120,13 +120,13 @@ Expected: 全部退出0；若公网DNS失败，必须记录失败并在网络恢
 
 仅当两项大型源码测试已迁为行为测试且全量通过时，将目标23标记完成；记录仍保留的最小CMD包装结构检查及原因。
 
-- [ ] **Step 3: 提交实现**
+- [x] **Step 3: 提交实现**
 
 ```powershell
 git add -- scripts/restart-bot.ps1 scripts/run-bot-daemon.ps1 tests/restartBotBehavior.js tests/restartBotScript.test.js tests/windowsDaemonBehavior.js tests/windowsDaemonScript.test.js README.md docs/maintenance-log.md docs/superpowers/plans/2026-07-12-repository-32-goals-roadmap.md docs/superpowers/plans/2026-07-17-restart-daemon-behavior-tests.md
 git commit -m "test: behaviorize restart daemon policies"
 ```
 
-- [ ] **Step 4: 提交后追加完成记录**
+- [x] **Step 4: 提交后追加完成记录**
 
 在 `docs/maintenance-log.md` 追加实现提交哈希、验收结果和未推送说明，再单独提交文档。

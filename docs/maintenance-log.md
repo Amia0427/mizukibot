@@ -1669,3 +1669,4 @@
 - 实现：两个生产PowerShell脚本被dot-source时只导出真实函数；重启WMI命令行构造、daemon早退恢复动作和外置worker启动原因被抽为主流程复用的纯策略。原测试改为独立PowerShell进程、临时目录、进程快照和命令trap，不执行真实默认重启。
 - 行为覆盖：确认门、主进程/worker/launcher识别、调用者PID保护、期望停机marker先于停止、重启结果落盘、marker消费/来源保留、早退计数/冷却、HTTP reverse恢复仅绕过一次、锁成功/超时/进程提前退出、日志归档和worker原因优先级。仅 `restart-bot.cmd` 保留4项最小结构契约。
 - 验收：10项关联测试、730文件lint、typecheck、prompt、全仓secrets、PowerShell AST、production audit（0漏洞）、diff check和 `TEST_CONCURRENCY=4 npm test`（142.5秒）全部退出0；目标23完成。本轮未暂存并行代理的CI、覆盖率、依赖和安全诊断改动，未推送远端。
+- 提交后记录：目标23重启/daemon行为化实现提交 `84e534b` 已完成，README、维护日志、聚焦实施计划和32项目标路线图均已更新；当前分支未推送。
