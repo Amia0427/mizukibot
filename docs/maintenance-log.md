@@ -1654,6 +1654,7 @@
 - 关闭边界：主进程停止新入口并等待 message ingress 与内联 post-reply 作业，HTTP server 使用有界 close，完成后 flush 热存储并关闭已加载的 profile/worldbook/local prompt SQLite 单例；外置 worker 停止领取新任务、等待 active job、flush materialize 后写 stopped 状态。
 - 部署探针：Compose 主服务改用 `/ready`，worker 增加基于本地状态文件、PID、stage 和 heartbeat age 的 healthcheck；配置增加统一15秒关闭窗口及 worker 心跳/过期阈值。
 - 验收：Node 20.20.2 的9项定向测试通过；lint覆盖729文件，typecheck、prompt、全仓 secrets、production audit 和 diff check 全部退出0；Node 24并发4全量93秒通过。目标27继续部分完成，真实 Docker stop grace、OS SIGTERM 与资源关闭运行探针仍未取得；目标26实施计划已由 `af5db70` 建立，加密临时明文删除仍等待授权。
+
 ## 运行维护 2026-07-17 01:27 +08:00
 
 - 实现：新增主进程生命周期协调器，正常信号退出和远程重启统一关闭HTTP/NapCat入口、停止调度运行时、排空消息入口与post-reply worker、清理MCP/create-agent/Minecraft/CycleTLS、落盘热存储、关闭SQLite并释放单实例锁。
@@ -1661,3 +1662,10 @@
 - 验收：10项生命周期关联测试、730文件lint、typecheck、prompt、全仓secrets、production audit（0漏洞）通过；第一次并发4全量因 `example.com` 与 `api.anthropic.com` DNS失败退出1，两项单测复跑通过，第二次完整全量125.3秒自然退出0。
 - 路线图：目标14完成；目标27保持部分完成，真实Docker stop grace与OS SIGTERM运行探针未执行。本轮未修改或暂存并行代理的CI、覆盖率和安全诊断文件，未推送远端。
 - 提交后记录：目标14生命周期统一实现提交 `607fe5c` 已完成，验收结果已保留在README、维护日志和32项目标路线图；当前分支未推送。
+
+## 运行维护 2026-07-17 02:58 +08:00
+
+- 小目标：完成目标23剩余的 `restartBotScript` 与 `windowsDaemonScript` 大型源码文本守卫迁移。
+- 实现：两个生产PowerShell脚本被dot-source时只导出真实函数；重启WMI命令行构造、daemon早退恢复动作和外置worker启动原因被抽为主流程复用的纯策略。原测试改为独立PowerShell进程、临时目录、进程快照和命令trap，不执行真实默认重启。
+- 行为覆盖：确认门、主进程/worker/launcher识别、调用者PID保护、期望停机marker先于停止、重启结果落盘、marker消费/来源保留、早退计数/冷却、HTTP reverse恢复仅绕过一次、锁成功/超时/进程提前退出、日志归档和worker原因优先级。仅 `restart-bot.cmd` 保留4项最小结构契约。
+- 验收：10项关联测试、730文件lint、typecheck、prompt、全仓secrets、PowerShell AST、production audit（0漏洞）、diff check和 `TEST_CONCURRENCY=4 npm test`（142.5秒）全部退出0；目标23完成。本轮未暂存并行代理的CI、覆盖率、依赖和安全诊断改动，未推送远端。

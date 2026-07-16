@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-17 02:58 +08:00
+
+- 实现：`restartBotScript`、`windowsDaemonScript` 的大型源码字符串清单迁为真实PowerShell行为测试；生产脚本支持dot-source函数库模式，并抽取重启WMI命令行、daemon早退恢复动作和外置worker启动原因供主流程与测试共用。
+- 行为证据：覆盖确认门、进程/launcher识别、调用者PID保护、期望停机marker先于停止、重启结果、marker消费与来源保留、早退计数/冷却、HTTP reverse单次恢复、锁成功/超时/进程提前退出、日志归档和worker优先级。CMD默认无参数会真实重启，因此只保留4项最小包装结构契约。
+- 验收：10项重启/daemon关联测试、730文件lint、typecheck、prompt、全仓secrets、PowerShell AST、production audit（0漏洞）、diff check和并发4完整全量通过，全量耗时142.5秒。目标23完成。
+
 ## 运行维护 2026-07-17 01:27 +08:00
 
 - 实现：正常信号退出与远程重启统一使用主进程生命周期协调器；远程重启通过 `waitUntil` 等待HTTP入口、消息入口、worker、外部资源、热存储、SQLite和单实例锁完成收尾，再执行外部重启命令。
@@ -96,11 +102,11 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-17 01:27 +08:00。
+更新时间：2026-07-17 02:58 +08:00。
 
 - 当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端 CI 尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
-- 当前静态基线：`npm run lint` 覆盖730个文件；Node 20.20.2的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-16自然结束，耗时151.7秒；当前Node 24完整全量于2026-07-17自然结束，耗时125.3秒。
+- 当前静态基线：`npm run lint` 覆盖730个文件；Node 20.20.2的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-16自然结束，耗时151.7秒；当前Node 24完整全量于2026-07-17自然结束，耗时142.5秒。
 - 当前 `.env` 与 `data` ACL仍允许 `Authenticated Users`修改、`Users`读取；收口工具和真实身份预览已完成，但Apply需等待并行工作收口。
 
 ## 32 项状态
@@ -127,7 +133,7 @@
 - [x] **20. 限制请求追踪日志内容** — 已完成。提交 `d20208b` 已使用真实消费者契约收口字段；本批次将 `userId/groupId/messageId` 及 `model-calls.user_id` 迁移为带域分隔的 HMAC 摘要，并将 `requestId` 生成改为 keyed hash。既有历史日志不改写。
 - [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
 - [x] **22. 测试运行器并发和超时** — 已完成。提交 `d44d051`、`be32669` 完成tracked-only发现、有限并发、串行barrier、进程树终止、慢测榜和慢测网络/生产等待治理；视觉文本预算裁剪改为等价二分查找，`TEST_CONCURRENCY=4`全量连续三轮100.6/97.6/103.6秒自然通过。
-- [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced`、`f0e472d`、`269078f`、`f2cd4b8`、`c973fe2`、`a2ccc94`、`9e11252`、`289035a` 已迁移 DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress、configureNapcat、noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands、mainBotEarlyExitDiagnostics、hotpathRequireGuard、CI Workflow、Docker Compose、chunk lint 映射、主要 facade identity、周期重启、日志保留调用点和质量工具配置守卫；15 个 PowerShell 脚本已由 AST 统一校验语法。剩余危险 restart/daemon 大型策略守卫待先结合目标14/27抽取安全生命周期边界后行为化。
+- [x] **23. 减少源码文本断言测试** — 已完成。提交 `be32669`、`6692ced`、`f0e472d`、`269078f`、`f2cd4b8`、`c973fe2`、`a2ccc94`、`9e11252`、`289035a` 已迁移消息、Runtime、CI/Compose、chunk、周期重启、日志和质量工具守卫；本批次进一步将 `restartBotScript`、`windowsDaemonScript` 的大型字符串清单迁为真实PowerShell函数与无副作用策略行为。仅六行CMD包装器因无参数执行会真实重启而保留4项最小结构契约；其余静态检查限定为配置、清单、秘密扫描或PowerShell AST等本就属于结构策略的边界。
 - [x] **24. 强化提示词清单检查** — 已完成。提交 `d44d051` 已建立版本化exact allowlist，覆盖tracked/package/private边界、39个worldbook、7个runtime模板和4组冲突标签；新增、删除、过期、未知字段或标签成员漂移均失败，默认warning为0。
 - [x] **25. SQLite 多进程并发与完整性检查** — 已完成。提交 `5160912` 将全部生产和维护 SQLite 打开路径收口到统一连接工厂，启用 5 秒 `busy_timeout`、WAL、外键及首次 WAL 切换的 `SQLITE_BUSY` 定向重试；结构化 CLI、存储优化流程和四进程共享库压测覆盖 PASSIVE/TRUNCATE checkpoint、`quick_check`、损坏库失败和无丢写门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。提交 `af5db70` 已形成 SQLite 在线一致性快照、AES-256-GCM 异地副本、RPO/RTO 与恢复演练实施计划；实际加密备份/恢复门禁尚未落地，且删除操作生成的明文临时快照需先获授权。

@@ -242,6 +242,22 @@ function ConvertTo-CmdQuotedArgument {
   return '"' + ($Value -replace '"', '\"') + '"'
 }
 
+function New-NodeRestartCommandLine {
+  param(
+    [Parameter(Mandatory = $true)][string]$NodeExe,
+    [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+    [Parameter(Mandatory = $true)][string]$StdoutLog,
+    [Parameter(Mandatory = $true)][string]$StderrLog
+  )
+
+  $commandParts = @((ConvertTo-CmdQuotedArgument -Value $NodeExe))
+  foreach ($argument in $ArgumentList) {
+    $commandParts += (ConvertTo-CmdQuotedArgument -Value $argument)
+  }
+  $innerCommand = ($commandParts -join ' ') + ' 1>>' + (ConvertTo-CmdQuotedArgument -Value $StdoutLog) + ' 2>>' + (ConvertTo-CmdQuotedArgument -Value $StderrLog)
+  return 'cmd.exe /d /s /c "' + $innerCommand + '"'
+}
+
 function Start-NodeRestartProcess {
   param(
     [Parameter(Mandatory = $true)][string]$NodeExe,
@@ -252,13 +268,7 @@ function Start-NodeRestartProcess {
 
   $resolvedStdoutLog = Resolve-RestartWritableLogPath -Path $StdoutLog
   $resolvedStderrLog = Resolve-RestartWritableLogPath -Path $StderrLog
-
-  $commandParts = @((ConvertTo-CmdQuotedArgument -Value $NodeExe))
-  foreach ($argument in $ArgumentList) {
-    $commandParts += (ConvertTo-CmdQuotedArgument -Value $argument)
-  }
-  $innerCommand = ($commandParts -join ' ') + ' 1>>' + (ConvertTo-CmdQuotedArgument -Value $resolvedStdoutLog) + ' 2>>' + (ConvertTo-CmdQuotedArgument -Value $resolvedStderrLog)
-  $commandLine = 'cmd.exe /d /s /c "' + $innerCommand + '"'
+  $commandLine = New-NodeRestartCommandLine -NodeExe $NodeExe -ArgumentList $ArgumentList -StdoutLog $resolvedStdoutLog -StderrLog $resolvedStderrLog
   $startup = ([wmiclass]'Win32_ProcessStartup').CreateInstance()
   $startup.ShowWindow = 0
   $result = ([wmiclass]'Win32_Process').Create($commandLine, [string]$repoRoot, $startup)
@@ -1137,6 +1147,8 @@ function Resolve-RestartCommand {
     default { return $first }
   }
 }
+
+if ($MyInvocation.InvocationName -eq '.') { return }
 
 [void](Import-DotEnv -FilePath (Join-Path $repoRoot '.env'))
 
