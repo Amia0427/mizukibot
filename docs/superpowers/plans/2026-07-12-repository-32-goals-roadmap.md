@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-17 01:27 +08:00
+
+- 实现：正常信号退出与远程重启统一使用主进程生命周期协调器；远程重启通过 `waitUntil` 等待HTTP入口、消息入口、worker、外部资源、热存储、SQLite和单实例锁完成收尾，再执行外部重启命令。
+- 验收：10项生命周期关联测试、730文件lint、typecheck、prompt、全仓secrets和production audit（0漏洞）通过；首次全量因 `example.com`、`api.anthropic.com` DNS失败退出1，两项单测复跑通过，第二次并发4完整全量125.3秒自然退出0。
+- 路线图状态：目标14完成；目标27继续部分完成，统一生命周期与资源关闭行为已有测试证据，但真实Docker stop grace和OS SIGTERM运行探针仍未取得。
+
 ## 运行维护 2026-07-17 00:19 +08:00
 
 - 实现：`request-trace.ndjson` 与 `model-calls.ndjson` 的用户、群组、消息标识统一改为 keyed HMAC 摘要；`requestId` 生成从无密钥 SHA-1迁移为同一密钥域分隔 HMAC，新增 `REQUEST_TRACE_HASH_SECRET` 配置。
@@ -90,11 +96,11 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-17 00:19 +08:00。
+更新时间：2026-07-17 01:27 +08:00。
 
 - 当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端 CI 尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
-- 当前静态基线：`npm run lint` 覆盖729个文件；Node 20.20.2的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-16自然结束，耗时151.7秒，Node 24完整全量基线为105.2秒。
+- 当前静态基线：`npm run lint` 覆盖730个文件；Node 20.20.2的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-16自然结束，耗时151.7秒；当前Node 24完整全量于2026-07-17自然结束，耗时125.3秒。
 - 当前 `.env` 与 `data` ACL仍允许 `Authenticated Users`修改、`Users`读取；收口工具和真实身份预览已完成，但Apply需等待并行工作收口。
 
 ## 32 项状态
@@ -112,7 +118,7 @@
 - [x] **11. 删除未使用的 Runtime V1** — 已完成。`api/legacy/agentGraphV1Runtime.js` 已删除，依赖与失效检查已清理。
 - [ ] **12. 拆分高扇出编排器** — 未完成。Runtime host、router、prepare 仍分别约 1447、1325、1313 行。
 - [ ] **13. 按领域拆分配置并集中校验环境变量** — 未完成。`config/index.js` 约 1258 行，生产域仍有约 186 处 `process.env` 读取。
-- [ ] **14. 统一正常停机与远程重启** — 部分完成。JSON 热存储已移交信号所有权，仍需统一 server、worker、数据库和远程重启的 lifecycle coordinator。
+- [x] **14. 统一正常停机与远程重启** — 已完成。正常信号退出与远程重启共用单一生命周期协调器，统一关闭HTTP与NapCat入口、停止运行时、排空消息入口和post-reply worker、清理外部资源、落盘热存储、关闭SQLite并释放单实例锁；并发退出请求复用同一Promise，远程重启在完整排空后才执行外部重启命令。
 - [x] **15. 重构 Web 控制台认证** — 已完成。提交 `39b5428` 将 `WEB_TOKEN` 收口为常量时间登录校验，使用短期可撤销 HttpOnly 会话、登录限流、严格同源 CSRF 和受控代理链；旧 Bearer/header/query/localStorage 认证已移除。
 - [x] **16. 增加 Web 安全响应头** — 已完成。提交 `39b5428` 集中设置逐响应 nonce CSP、`frame-ancestors 'none'`、nosniff、Referrer Policy、Cache-Control，并仅在可信 HTTPS 链路发送 HSTS/Secure cookie。
 - [ ] **17. 容器最小权限运行** — 部分完成。提交 `9e5f0e8` 已实现 non-root、只读根、cap_drop ALL、no-new-privileges、init、资源/PID/停止限制、角色锁目录和 Docker 日志轮转；真实 UID、旧命名卷权限、只读根写路径、SIGTERM 与资源上限仍因 Docker snapshot 损坏未完成运行验收，env秘密也尚未按角色拆分。
@@ -125,7 +131,7 @@
 - [x] **24. 强化提示词清单检查** — 已完成。提交 `d44d051` 已建立版本化exact allowlist，覆盖tracked/package/private边界、39个worldbook、7个runtime模板和4组冲突标签；新增、删除、过期、未知字段或标签成员漂移均失败，默认warning为0。
 - [x] **25. SQLite 多进程并发与完整性检查** — 已完成。提交 `5160912` 将全部生产和维护 SQLite 打开路径收口到统一连接工厂，启用 5 秒 `busy_timeout`、WAL、外键及首次 WAL 切换的 `SQLITE_BUSY` 定向重试；结构化 CLI、存储优化流程和四进程共享库压测覆盖 PASSIVE/TRUNCATE checkpoint、`quick_check`、损坏库失败和无丢写门禁。
 - [ ] **26. 可恢复备份体系** — 未完成。提交 `af5db70` 已形成 SQLite 在线一致性快照、AES-256-GCM 异地副本、RPO/RTO 与恢复演练实施计划；实际加密备份/恢复门禁尚未落地，且删除操作生成的明文临时快照需先获授权。
-- [ ] **27. 健康、就绪和优雅退出** — 部分完成。提交 `fec175e` 已实现主进程 `/live`/`/ready`、启动/排空状态、message ingress 与内联 worker drain、HTTP 有界关闭、热存储 flush、SQLite 统一关闭，以及外置 worker active job 排空/状态心跳/Compose readiness；真实 Docker stop grace、OS SIGTERM 和资源关闭运行探针仍待验收。
+- [ ] **27. 健康、就绪和优雅退出** — 部分完成。提交 `fec175e` 已实现主进程 `/live`/`/ready`、启动/排空状态、message ingress 与内联 worker drain、HTTP 有界关闭、热存储 flush、SQLite 统一关闭，以及外置 worker active job 排空/状态心跳/Compose readiness；本批次进一步统一正常退出、远程重启和全部资源关闭顺序。真实Docker stop grace与OS SIGTERM运行探针仍待验收。
 - [x] **28. 扩展安全诊断** — 已完成。提交 `c3ca711`、`d20208b` 已覆盖鉴权/监听组合、direct 与 Compose 宿主边界、Windows ACL、日志无限保留、Docker 最终用户和每服务权限基线；error 状态返回非零退出码，无法可靠解析时降级为 warning。
 - [ ] **29. 供应链安全门禁** — 部分完成。提交 `c12ec87` 已加入覆盖330个生产 lock 条目的精确许可证门禁和 npm CycloneDX SBOM wrapper；提交 `a4ce6cc` 已固定全部 workflow Action SHA，并新增完整 Git历史 gitleaks、许可证/SBOM与 OSV三作业门禁。Node 20定向、静态门禁和 Node 24并发4全量已通过；仍缺真实 GitHub Actions扫描、基础镜像 digest和 Trivy image/config证据。
 - [x] **30. 会话研究缓存全局容量限制** — 已完成。提交 `5e7e168` 已加入每进程全局会话上限、确定性 LRU、主动/惰性 TTL、size/eviction/expired 指标和可停止的 unref 定时器；10,000 会话压力测试稳定回落到配置上限。

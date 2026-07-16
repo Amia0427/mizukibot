@@ -24,7 +24,14 @@ module.exports = (async () => {
 
   const spawned = [];
   const restartEvents = [];
-  const onRestartScheduled = (event) => restartEvents.push(event);
+  let releasePreparation;
+  const preparation = new Promise((resolve) => {
+    releasePreparation = resolve;
+  });
+  const onRestartScheduled = (event) => {
+    restartEvents.push(event);
+    event.waitUntil(preparation);
+  };
   process.on('mizuki:restartScheduled', onRestartScheduled);
   const first = triggerRemoteRestart({
     platform: 'win32',
@@ -52,6 +59,10 @@ module.exports = (async () => {
   assert.strictEqual(restartEvents.length, 1);
   assert.strictEqual(restartEvents[0].delayMs, 1);
 
+  await wait(20);
+
+  assert.strictEqual(spawned.length, 0, 'restart command must wait for lifecycle drain');
+  releasePreparation();
   await wait(20);
 
   assert.strictEqual(spawned.length, 1);

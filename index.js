@@ -37,6 +37,7 @@ const { flushAllHotStoresSync } = require('./utils/jsonHotStore');
 const { sendNapCatActionWithRetry } = require('./utils/napcatActionRetry');
 const { createRuntimeReadiness } = require('./utils/runtimeReadiness');
 const { closeServer, waitForServerListening } = require('./utils/serverLifecycle');
+const { createMainProcessLifecycle } = require('./utils/mainProcessLifecycle');
 const { closeLoadedSqliteConnections } = require('./utils/sqliteRuntime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
@@ -413,7 +414,6 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 
 let shuttingDown = false;
-let shutdownInProgress = false;
 let tickStarted = false;
 let tickRuntime = null;
 let dailyJournalSummaryStarted = false;
@@ -676,80 +676,80 @@ function scheduleRestartResultFeedback(attempt = 1) {
   }, 4000).unref?.();
 }
 
-async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
-  if (shutdownInProgress) return;
-  shutdownInProgress = true;
-  shuttingDown = true;
-  const reason = String(signal || 'shutdown').trim() || 'shutdown';
-  runtimeReadiness.beginDrain(reason);
-  recordExpectedShutdown(reason, { exitCode });
-  console.log('[shutdown] begin', { reason, pid: process.pid });
+const mainProcessLifecycle = createMainProcessLifecycle({
+  begin: ({ reason, exitCode, marker }) => {
+    shuttingDown = true;
+    runtimeReadiness.beginDrain(reason);
+    recordExpectedShutdown(reason, { exitCode, ...marker });
+    console.log('[shutdown] begin', { reason, pid: process.pid });
+  },
+  stopAccepting: async () => {
+    const serverClose = Promise.all([
+      closeServer(webServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS }),
+      closeServer(httpReverseServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS })
+    ]);
+    let disconnectError = null;
+    try {
+      napcatActionClient.handleDisconnect('MizukiBot shutdown');
+      napcatActionClient.setWebSocket(null);
+    } catch (error) {
+      disconnectError = error;
+    } finally {
+      closeNapCatWebSocket();
+    }
+    const [webCloseResult, reverseCloseResult] = await serverClose;
+    if (!webCloseResult.closed) console.error('[shutdown] web server close incomplete:', webCloseResult);
+    if (!reverseCloseResult.closed) console.error('[shutdown] http reverse server close incomplete:', reverseCloseResult);
+    if (disconnectError) throw disconnectError;
+  },
+  stopRuntimes: [
+    { name: 'scheduler', run: () => schedulerRuntime.stop() },
+    { name: 'tick', run: () => tickRuntime?.stop?.() },
+    { name: 'daily_journal_summary', run: () => dailyJournalSummaryRuntime?.stop?.() },
+    { name: 'napcat_follower', run: () => napcatLogFollower.stop() },
+    { name: 'resource_snapshots', run: () => resourceSnapshotLoop?.stop?.() }
+  ],
+  drainWorkers: [
+    {
+      name: 'post_reply_worker',
+      run: ({ reason }) => postReplyWorkerRuntime?.drainAndStop?.({
+        timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS,
+        source: reason
+      })
+    },
+    {
+      name: 'message_ingress',
+      run: () => messageIngressDispatcher?.stop?.({
+        drain: true,
+        timeoutMs: config.MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS
+      })
+    }
+  ],
+  cleanupExternal: [
+    { name: 'mcp_runtime', run: () => clearMcpRuntimeCaches() },
+    { name: 'create_agent_runtime', run: () => clearRuntimeSlotsForCurrentProcess() },
+    { name: 'minecraft', run: () => shutdownMinecraftAgent() },
+    { name: 'cycletls', run: () => shutdownCycleTLS() }
+  ],
+  finalize: [
+    { name: 'hot_stores', run: () => flushAllHotStoresSync() },
+    { name: 'sqlite', run: () => closeLoadedSqliteConnections() },
+    { name: 'single_instance_lock', run: () => cleanupSingleInstanceLock?.() }
+  ],
+  complete: ({ reason, exitCode }) => {
+    runtimeReadiness.markStopped('shutdown_complete');
+    stopMainRuntimeHeartbeat('shutdown_complete', { reason, exitCode });
+    console.log('[shutdown] complete', { reason, pid: process.pid });
+  },
+  exit: (exitCode) => process.exit(exitCode)
+});
 
-  const webServerClose = closeServer(webServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS });
-  const reverseServerClose = closeServer(httpReverseServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS });
-
-  try {
-    napcatActionClient.handleDisconnect('MizukiBot shutdown');
-    napcatActionClient.setWebSocket(null);
-  } catch (_) {}
-  closeNapCatWebSocket();
-
-  try { schedulerRuntime.stop(); } catch (error) {
-    console.error('[shutdown] scheduler stop failed:', error?.message || error);
-  }
-  try { tickRuntime?.stop?.(); } catch (error) {
-    console.error('[shutdown] tick stop failed:', error?.message || error);
-  }
-  try { dailyJournalSummaryRuntime?.stop?.(); } catch (error) {
-    console.error('[shutdown] daily journal summary stop failed:', error?.message || error);
-  }
-  try { napcatLogFollower.stop(); } catch (error) {
-    console.error('[shutdown] follower stop failed:', error?.message || error);
-  }
-  try {
-    await postReplyWorkerRuntime?.drainAndStop?.({
-      timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS,
-      source: reason
-    });
-  } catch (error) {
-    console.error('[shutdown] post-reply worker drain failed:', error?.message || error);
-  }
-  try {
-    await messageIngressDispatcher?.stop?.({
-      drain: true,
-      timeoutMs: config.MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS
-    });
-  } catch (error) {
-    console.error('[shutdown] message ingress drain failed:', error?.message || error);
-  }
-  try { resourceSnapshotLoop.stop(); } catch (error) {
-    console.error('[shutdown] resource snapshot stop failed:', error?.message || error);
-  }
-  try { clearMcpRuntimeCaches(); } catch (error) {
-    console.error('[shutdown] mcp cleanup failed:', error?.message || error);
-  }
-  try { clearRuntimeSlotsForCurrentProcess(); } catch (error) {
-    console.error('[shutdown] create-agent runtime cleanup failed:', error?.message || error);
-  }
-  try { await shutdownMinecraftAgent(); } catch (error) {
-    console.error('[shutdown] minecraft cleanup failed:', error?.message || error);
-  }
-  try { await shutdownCycleTLS(); } catch (error) {
-    console.error('[shutdown] cycletls cleanup failed:', error?.message || error);
-  }
-
-  const [webCloseResult, reverseCloseResult] = await Promise.all([webServerClose, reverseServerClose]);
-  if (!webCloseResult.closed) console.error('[shutdown] web server close incomplete:', webCloseResult);
-  if (!reverseCloseResult.closed) console.error('[shutdown] http reverse server close incomplete:', reverseCloseResult);
-
-  flushAllHotStoresSync();
-  closeLoadedSqliteConnections();
-
-  cleanupSingleInstanceLock?.();
-  runtimeReadiness.markStopped('shutdown_complete');
-  stopMainRuntimeHeartbeat('shutdown_complete', { reason, exitCode });
-  console.log('[shutdown] complete', { reason, pid: process.pid });
-  process.exit(exitCode);
+function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
+  return mainProcessLifecycle.drain({
+    reason: String(signal || 'shutdown').trim() || 'shutdown',
+    exitCode,
+    exitProcess: true
+  });
 }
 
 function buildScheduledRestartMarker(meta = {}) {
@@ -765,32 +765,18 @@ function buildScheduledRestartMarker(meta = {}) {
 }
 
 function drainForScheduledRestart(meta = {}) {
-  if (shuttingDown) return;
-  shuttingDown = true;
   const marker = buildScheduledRestartMarker(meta);
-  runtimeReadiness.beginDrain('remote_restart_scheduled');
-  recordExpectedShutdown('remote_restart_scheduled', marker);
   console.log('[restart] drain old instance before external restart', {
     pid: process.pid,
     delayMs: marker.delayMs,
-    source: String(meta?.source || '').trim(),
-    requestedBy: String(meta?.userId || '').trim(),
-    requestId: String(meta?.requestId || '').trim(),
-    messageId: String(meta?.messageId || '').trim(),
-    groupId: String(meta?.groupId || '').trim()
+    source: marker.source
   });
-  try { schedulerRuntime.stop(); } catch (_) {}
-  try { tickRuntime?.stop?.(); } catch (_) {}
-  try { dailyJournalSummaryRuntime?.stop?.(); } catch (_) {}
-  try { napcatLogFollower.stop(); } catch (_) {}
-  try { postReplyWorkerRuntime?.stop?.(); } catch (_) {}
-  try { messageIngressDispatcher?.stop?.({ drain: false }); } catch (_) {}
-  try { resourceSnapshotLoop.stop(); } catch (_) {}
-  try {
-    napcatActionClient.handleDisconnect('MizukiBot restart draining');
-    napcatActionClient.setWebSocket(null);
-  } catch (_) {}
-  closeNapCatWebSocket();
+  const drain = mainProcessLifecycle.drain({
+    reason: 'remote_restart_scheduled',
+    marker
+  });
+  if (typeof meta.waitUntil === 'function') meta.waitUntil(drain);
+  return drain;
 }
 
 process.on('mizuki:restartScheduled', drainForScheduledRestart);

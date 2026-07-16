@@ -33,15 +33,22 @@ function triggerRemoteRestart(options = {}) {
 
   restartScheduled = true;
   const meta = options.meta && typeof options.meta === 'object' ? options.meta : {};
+  const preparation = [];
   try {
-    process.emit('mizuki:restartScheduled', { delayMs: options.delayMs ?? 800, ...meta });
+    process.emit('mizuki:restartScheduled', {
+      delayMs: options.delayMs ?? 800,
+      ...meta,
+      waitUntil(promise) {
+        if (promise && typeof promise.then === 'function') preparation.push(Promise.resolve(promise));
+      }
+    });
   } catch (_) {}
   const spawn = options.spawn || defaultSpawn;
   const platform = options.platform || process.platform;
   const delayMs = Math.max(0, Number(options.delayMs ?? 800) || 0);
   const commandSpec = resolveRestartCommand(platform);
 
-  const timer = setTimeout(() => {
+  const spawnRestart = () => {
     const spawnOptions = {
       cwd: commandSpec.cwd,
       detached: true,
@@ -77,9 +84,11 @@ function triggerRemoteRestart(options = {}) {
     } catch (error) {
       onSpawnError(error);
     }
+  };
+  setTimeout(() => {
+    void Promise.allSettled(preparation).then(spawnRestart);
   }, delayMs);
 
-  if (timer && typeof timer.unref === 'function') timer.unref();
   return { scheduled: true, alreadyScheduled: false, delayMs, ...commandSpec };
 }
 

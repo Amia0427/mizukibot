@@ -1654,3 +1654,9 @@
 - 关闭边界：主进程停止新入口并等待 message ingress 与内联 post-reply 作业，HTTP server 使用有界 close，完成后 flush 热存储并关闭已加载的 profile/worldbook/local prompt SQLite 单例；外置 worker 停止领取新任务、等待 active job、flush materialize 后写 stopped 状态。
 - 部署探针：Compose 主服务改用 `/ready`，worker 增加基于本地状态文件、PID、stage 和 heartbeat age 的 healthcheck；配置增加统一15秒关闭窗口及 worker 心跳/过期阈值。
 - 验收：Node 20.20.2 的9项定向测试通过；lint覆盖729文件，typecheck、prompt、全仓 secrets、production audit 和 diff check 全部退出0；Node 24并发4全量93秒通过。目标27继续部分完成，真实 Docker stop grace、OS SIGTERM 与资源关闭运行探针仍未取得；目标26实施计划已由 `af5db70` 建立，加密临时明文删除仍等待授权。
+## 运行维护 2026-07-17 01:27 +08:00
+
+- 实现：新增主进程生命周期协调器，正常信号退出和远程重启统一关闭HTTP/NapCat入口、停止调度运行时、排空消息入口与post-reply worker、清理MCP/create-agent/Minecraft/CycleTLS、落盘热存储、关闭SQLite并释放单实例锁。
+- 重启边界：`mizuki:restartScheduled` 通过 `waitUntil` 把完整排空Promise交给远程重启定时器；后续SIGTERM复用正在执行的排空并在完成后退出，定时器保持进程存活直到重启命令执行。
+- 验收：10项生命周期关联测试、730文件lint、typecheck、prompt、全仓secrets、production audit（0漏洞）通过；第一次并发4全量因 `example.com` 与 `api.anthropic.com` DNS失败退出1，两项单测复跑通过，第二次完整全量125.3秒自然退出0。
+- 路线图：目标14完成；目标27保持部分完成，真实Docker stop grace与OS SIGTERM运行探针未执行。本轮未修改或暂存并行代理的CI、覆盖率和安全诊断文件，未推送远端。
