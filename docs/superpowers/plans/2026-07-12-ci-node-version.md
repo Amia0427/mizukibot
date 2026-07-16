@@ -44,3 +44,9 @@
 - [x] 执行 `npm ci`、版本检查、lint、prompt、secrets、production audit 和全量测试。
 - [x] 为约 340 秒的全量测试设置合理上限，并仅在失败时上传日志。
 - [x] 运行定向测试、静态检查和差异检查。
+
+## 验收补记 2026-07-16 22:52 +08:00
+
+- 官方 Node 20.20.2 Windows x64运行时确认 `process.versions.modules=115`；通过 `NODE_OPTIONS` 将 `better-sqlite3` 定向到独立 Node 20依赖目录，SQLite原生模块探针返回 `quick_check=ok`，未覆盖当前 Node 24依赖安装。
+- `TEST_CONCURRENCY=4` 的 tracked完整全量自然退出0，耗时151.7秒；729文件 lint、typecheck、prompt、tracked/staged secrets、production audit和diff check均通过。
+- Node 20归档此前按 nodejs.org SHA-256 `dc3700fdd57a63eedb8fd7e3c7baaa32e6a740a1b904167ff4204bc68ed8bf77` 校验，目标31完成；GitHub Actions真实远端运行仍属于目标8，不影响Node版本统一结论。

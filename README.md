@@ -4,6 +4,12 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-16 22:52 +08:00
+
+- 目标31已完成：仓库继续以 Node 20.x 为唯一运行边界，真实 Node 20.20.2 使用隔离的 ABI 115 `better-sqlite3` 依赖完成原生模块探针，SQLite `quick_check=ok`。
+- `TEST_CONCURRENCY=4` 的 tracked 全量测试在 Node 20.20.2 下自然退出0，耗时151.7秒；官方 Windows x64归档此前按 nodejs.org SHA-256 `dc3700fdd57a63eedb8fd7e3c7baaa32e6a740a1b904167ff4204bc68ed8bf77` 校验。
+- 729文件 lint、typecheck、prompt、tracked/staged secrets、production audit和diff check均通过；本轮只补验收文档，不包含并行中的覆盖率改动，未推送远端。
+
 ## 运行维护 2026-07-15 12:17 +08:00
 
 - 所有 GitHub workflow外部 `uses:` 已固定为官方 release解引用后的40位 commit SHA，并由结构测试拒绝 tag、短 SHA、未知 Action owner和缺少版本注释的引用。
@@ -392,7 +398,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-15 12:17 +08:00
+更新时间：2026-07-16 22:52 +08:00
+维护记录：2026-07-16 22:52 +08:00，真实 Node 20.20.2 通过隔离 ABI 115原生依赖探针与并发4 tracked全量测试，SQLite `quick_check=ok`，全量耗时151.7秒；目标31完成。
 维护记录：2026-07-15 12:17 +08:00，提交 `a4ce6cc` 固定全部 workflow Action SHA并新增 gitleaks、许可证/SBOM与 OSV三作业门禁；Node 20定向、静态门禁和 Node 24并发4全量105.2秒通过，目标29仍待真实远端扫描、Docker digest和 Trivy验收。
 维护记录：2026-07-14 16:50 +08:00，提交 `c12ec87` 新增精确生产许可证策略与 npm CycloneDX SBOM wrapper；330个生产 lock 条目和真实275组件/276依赖 SBOM 已验收，目标29保持部分完成，外部扫描、不可变摘要、Node 20 与并发4全量仍待真实证据。
 维护记录：2026-07-13 20:54 +08:00，提交 `fec175e` 增加主进程 `/live`/`/ready`、HTTP 有界关闭、热存储/SQLite 收尾和 post-reply worker 在途作业排空/状态探针；Node 20 定向、静态门禁和并发4全量93秒通过，目标27保持部分完成等待真实 Docker/SIGTERM 验收。

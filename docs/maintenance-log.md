@@ -1,3 +1,10 @@
+## 运行维护 2026-07-16 22:52 +08:00
+
+- 小目标：补齐目标31的真实 Node 20运行时、原生模块与完整全量测试证据。
+- 隔离方式：使用官方 Node 20.20.2 Windows x64运行时，通过 `NODE_OPTIONS=--require=D:\waifu-test-temp\node20-better-sqlite3-hook.js` 仅将 `better-sqlite3` 解析到独立 Node 20依赖目录，不改仓库依赖、不覆盖当前 Node 24安装；探针确认 Node ABI 115且 SQLite `quick_check=ok`。
+- 验收：`TEST_CONCURRENCY=4` 的 tracked完整全量在 Node 20.20.2下自然退出0，耗时151.7秒；729文件 lint、typecheck、prompt、tracked/staged secrets、production audit和diff check均通过。官方归档此前按 nodejs.org SHA-256 `dc3700fdd57a63eedb8fd7e3c7baaa32e6a740a1b904167ff4204bc68ed8bf77` 校验。
+- 小目标已完成：目标31由部分完成更新为完成；本轮仅更新验收文档，未纳入并行覆盖率改动，未推送远端。
+
 ## 运行维护 2026-07-15 12:17 +08:00
 
 - 小目标：完成目标29的不可变 GitHub Action引用、Git历史泄漏扫描和依赖漏洞扫描配置批次。

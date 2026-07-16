@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-16 22:52 +08:00
+
+- 验收：官方 Node 20.20.2 Windows x64运行时使用隔离 ABI 115 `better-sqlite3` 依赖完成原生模块与 SQLite `quick_check=ok` 探针；归档此前按 nodejs.org SHA-256 `dc3700fdd57a63eedb8fd7e3c7baaa32e6a740a1b904167ff4204bc68ed8bf77` 校验。
+- 全量证据：`TEST_CONCURRENCY=4` 的 tracked完整全量自然退出0，耗时151.7秒；729文件 lint、typecheck、prompt、tracked/staged secrets、production audit和diff check均通过。
+- 路线图状态：目标31完成；版本声明、安装/部署入口、CI与真实 Node 20运行时行为已统一并完成全量复验。
+
 ## 运行维护 2026-07-15 12:17 +08:00
 
 - 实现提交 `a4ce6cc`：所有 workflow外部 Action固定到官方 release解引用的40位 commit；新增完整 Git历史 gitleaks、生产许可证/CycloneDX SBOM和 OSV依赖扫描三作业 workflow，统一只读权限、无项目 secrets、无 `continue-on-error`与7天产物保留。
@@ -72,11 +78,11 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-15 12:17 +08:00。
+更新时间：2026-07-16 22:52 +08:00。
 
 - 当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端 CI 尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
-- 当前静态基线：`npm run lint` 覆盖729个文件；目标29在可信 Node 20.20.2下定向通过，Node 24的 `TEST_CONCURRENCY=4` 完整全量于2026-07-15自然结束，耗时105.2秒。
+- 当前静态基线：`npm run lint` 覆盖729个文件；Node 20.20.2的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-16自然结束，耗时151.7秒，Node 24完整全量基线为105.2秒。
 - 当前 `.env` 与 `data` ACL 仍允许 `Authenticated Users` 修改、`Users` 读取，数据保护目标未完成。
 
 ## 32 项状态
@@ -111,7 +117,7 @@
 - [x] **28. 扩展安全诊断** — 已完成。提交 `c3ca711`、`d20208b` 已覆盖鉴权/监听组合、direct 与 Compose 宿主边界、Windows ACL、日志无限保留、Docker 最终用户和每服务权限基线；error 状态返回非零退出码，无法可靠解析时降级为 warning。
 - [ ] **29. 供应链安全门禁** — 部分完成。提交 `c12ec87` 已加入覆盖330个生产 lock 条目的精确许可证门禁和 npm CycloneDX SBOM wrapper；提交 `a4ce6cc` 已固定全部 workflow Action SHA，并新增完整 Git历史 gitleaks、许可证/SBOM与 OSV三作业门禁。Node 20定向、静态门禁和 Node 24并发4全量已通过；仍缺真实 GitHub Actions扫描、基础镜像 digest和 Trivy image/config证据。
 - [x] **30. 会话研究缓存全局容量限制** — 已完成。提交 `5e7e168` 已加入每进程全局会话上限、确定性 LRU、主动/惰性 TTL、size/eviction/expired 指标和可停止的 unref 定时器；10,000 会话压力测试稳定回落到配置上限。
-- [ ] **31. 统一 Node 版本** — 部分完成。提交 `5e7e168` 已将 `.nvmrc`、`package.json`/lock、Docker、CI、Linux 安装检查脚本和用户部署文档统一为 Node 20.x；提交 `0b89296` 已在真实 Node 20.20.2 下修复并验证午夜 hour=24 的跨版本行为差异，time/image memory/memory CLI 定向测试通过。完整 Node 20 全量与原生依赖隔离安装仍需最终复验后标记完成。
+- [x] **31. 统一 Node 版本** — 已完成。提交 `5e7e168` 已将 `.nvmrc`、`package.json`/lock、Docker、CI、Linux 安装检查脚本和用户部署文档统一为 Node 20.x；提交 `0b89296` 已修复真实 Node 20.20.2午夜 hour=24的跨版本行为差异。隔离 ABI 115原生依赖探针、SQLite `quick_check=ok`与并发4 tracked完整全量均通过，全量耗时151.7秒。
 - [ ] **32. 建立依赖升级节奏** — 未完成。无自动补丁升级、月度窗口和大版本 smoke 流程。
 
 ## 阶段与计划文件
