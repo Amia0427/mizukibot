@@ -293,7 +293,7 @@ Expected: 普通认证用户不再具有读取或修改权限；bot 仍能读取
 
 轮换 API、Web、NapCat 和本地 bridge 凭据；使用新凭据完成健康探针，使用旧凭据必须返回 401 或连接失败。凭据值不得写入 Git 或维护日志。
 
-- [ ] **Step 8: 提交脚本和文档**
+- [x] **Step 8: 提交脚本和文档**
 
 ```bash
 git add scripts/harden-local-acl.ps1 tests/localAclScriptSource.test.js scripts/README.md

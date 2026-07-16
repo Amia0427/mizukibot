@@ -4,6 +4,7 @@
 - 最小实现：新增 `scripts/harden-local-acl.ps1`，强制显式服务身份，默认只输出JSON计划；`-Apply` 会先递归保存 `.env`、`data` ACL快照，再移除继承和无关规则，仅授予服务账号、SYSTEM、Administrators所需权限，不删除文件。
 - 验收：Bot主进程及三个计划任务实际身份为 `MIZUKI\Administrator`；真实仓库预览扫描 `.env` 1项、`data` 49,147项，前后SDDL完全一致。临时目录Apply行为、安全诊断、PowerShell AST、lint、typecheck、prompt、全仓secrets、production audit均通过；并发4全量108.8秒自然退出0。
 - 范围控制：当前真实ACL仍允许 `Authenticated Users`/`Users`访问；为避免使并行代理失效，本轮不执行Apply、不轮换凭据、不宣称目标4完成，未推送远端。
+- 提交后记录：ACL工具批次提交 `ec9d075` 已完成，当前分支未推送；真实权限应用仍待并行工作收口。
 
 ## 运行维护 2026-07-16 22:52 +08:00
 
