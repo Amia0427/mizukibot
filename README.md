@@ -4,6 +4,12 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-17 00:19 +08:00
+
+- 目标20已完成：`request-trace.ndjson` 与 `model-calls.ndjson` 不再落盘原始 `userId/groupId/messageId`；统一使用带域分隔的 HMAC-SHA256 摘要，`requestId` 生成也改为 keyed hash。
+- 新增 `REQUEST_TRACE_HASH_SECRET` 配置，建议在多进程部署中保持稳定且只存在于本地秘密配置；未显式设置时沿用已有秘密或进程级随机兜底，不把密钥写入日志。
+- keyed hash、消息入口和模型调用隐私测试、729文件 lint、typecheck、prompt、全仓 secrets、production audit（0漏洞）及并发4全量104.6秒通过；目标20完成。
+
 ## 运行维护 2026-07-16 23:46 +08:00
 
 - 新增 Windows 敏感路径 ACL 工具：必须显式提供服务身份，默认只预览；只有 `-Apply` 才会先导出递归 ACL 快照，再限制 `.env`、`data` 及子项为服务账号、SYSTEM 和 Administrators。
@@ -404,7 +410,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-16 23:46 +08:00
+更新时间：2026-07-17 00:19 +08:00
+维护记录：2026-07-17 00:19 +08:00，目标20完成请求追踪标识 keyed hash 迁移；request-trace/model-calls 隐私测试、全量静态门禁和并发4全量104.6秒通过。
 维护记录：2026-07-16 23:46 +08:00，新增默认预览、显式Apply、递归快照的Windows敏感路径ACL工具；真实服务身份、49,147项数据预览及并发4全量108.8秒已验收，实际ACL因并行工作未应用，目标4保持部分完成。
 维护记录：2026-07-16 22:52 +08:00，真实 Node 20.20.2 通过隔离 ABI 115原生依赖探针与并发4 tracked全量测试，SQLite `quick_check=ok`，全量耗时151.7秒；目标31完成。
 维护记录：2026-07-15 12:17 +08:00，提交 `a4ce6cc` 固定全部 workflow Action SHA并新增 gitleaks、许可证/SBOM与 OSV三作业门禁；Node 20定向、静态门禁和 Node 24并发4全量105.2秒通过，目标29仍待真实远端扫描、Docker digest和 Trivy验收。

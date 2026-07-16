@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-17 00:19 +08:00
+
+- 实现：`request-trace.ndjson` 与 `model-calls.ndjson` 的用户、群组、消息标识统一改为 keyed HMAC 摘要；`requestId` 生成从无密钥 SHA-1迁移为同一密钥域分隔 HMAC，新增 `REQUEST_TRACE_HASH_SECRET` 配置。
+- 验收：request trace、消息入口和模型调用隐私测试通过；729文件 lint、typecheck、prompt、全仓 secrets、production audit（0漏洞）和并发4全量104.6秒通过。
+- 路线图状态：目标20完成；既有历史日志不改写，后续日志查询继续使用不含原始标识的 requestId/摘要字段。
+
 ## 运行维护 2026-07-16 23:46 +08:00
 
 - 实现：新增默认预览、显式 `-Apply`、递归快照和路径边界的Windows ACL工具，临时目录行为测试确认Apply后 `.env`、`data`及子项不再授予 `Authenticated Users`/`Users`。
@@ -84,7 +90,7 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-16 23:46 +08:00。
+更新时间：2026-07-17 00:19 +08:00。
 
 - 当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端 CI 尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
@@ -112,7 +118,7 @@
 - [ ] **17. 容器最小权限运行** — 部分完成。提交 `9e5f0e8` 已实现 non-root、只读根、cap_drop ALL、no-new-privileges、init、资源/PID/停止限制、角色锁目录和 Docker 日志轮转；真实 UID、旧命名卷权限、只读根写路径、SIGTERM 与资源上限仍因 Docker snapshot 损坏未完成运行验收，env秘密也尚未按角色拆分。
 - [x] **18. 收缩 Compose 网络暴露面** — 已完成默认 loopback 绑定；跨主机部署仍需受控代理和鉴权说明。
 - [ ] **19. 日志脱敏、保留和容量限制** — 部分完成。提交 `9e5f0e8` 已实现默认10份/30天、显式日志注册、同目录 active+archive 容量、85/95%水位告警、共享日志跨进程轮转锁和Windows daemon allowlist；不同进程写不同target时的目录硬上限尚非事务级一致，当前磁盘约99%占用仍需运维处理。
-- [ ] **20. 限制请求追踪日志内容** — 部分完成。提交 `d20208b` 已使用真实消费者契约收口字段，正文、headers、未知嵌套和 URL 凭据不再落盘；`userId/groupId/messageId` 的 keyed hash 迁移仍未完成。
+- [x] **20. 限制请求追踪日志内容** — 已完成。提交 `d20208b` 已使用真实消费者契约收口字段；本批次将 `userId/groupId/messageId` 及 `model-calls.user_id` 迁移为带域分隔的 HMAC 摘要，并将 `requestId` 生成改为 keyed hash。既有历史日志不改写。
 - [ ] **21. 覆盖率基线与不倒退门禁** — 未完成。无 line/branch/function 覆盖率报告和关键域阈值。
 - [x] **22. 测试运行器并发和超时** — 已完成。提交 `d44d051`、`be32669` 完成tracked-only发现、有限并发、串行barrier、进程树终止、慢测榜和慢测网络/生产等待治理；视觉文本预算裁剪改为等价二分查找，`TEST_CONCURRENCY=4`全量连续三轮100.6/97.6/103.6秒自然通过。
 - [ ] **23. 减少源码文本断言测试** — 部分完成。提交 `be32669`、`6692ced`、`f0e472d`、`269078f`、`f2cd4b8`、`c973fe2`、`a2ccc94`、`9e11252`、`289035a` 已迁移 DirectAnchor、ReasoningForward、NormalFastReplyHandler、plannerRichContext、runtimeHostCot、messageIngress、configureNapcat、noExternalProcessSkills、runtimeHostShortTermBatchWiring、messageAdminCommands、mainBotEarlyExitDiagnostics、hotpathRequireGuard、CI Workflow、Docker Compose、chunk lint 映射、主要 facade identity、周期重启、日志保留调用点和质量工具配置守卫；15 个 PowerShell 脚本已由 AST 统一校验语法。剩余危险 restart/daemon 大型策略守卫待先结合目标14/27抽取安全生命周期边界后行为化。

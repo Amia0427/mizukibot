@@ -1,3 +1,10 @@
+## 运行维护 2026-07-17 00:19 +08:00
+
+- 小目标：完成目标20中请求追踪标识的 keyed hash 迁移，避免诊断日志直接保存用户、群组和消息标识。
+- 最小实现：`utils/requestTrace.js` 使用 `REQUEST_TRACE_HASH_SECRET` 优先、既有秘密回退和进程随机兜底的 HMAC-SHA256 摘要；`messageId/groupId/userId` 改写为对应 `*Hash` 字段，`buildRequestId` 不再使用无密钥 SHA-1；`model-calls.user_id` 复用同一摘要函数。
+- 验收：新增模型调用日志隐私测试，request trace、消息入口和模型调用定向测试通过；729文件 lint、typecheck、prompt、全仓secrets、production audit（0漏洞）和 `TEST_CONCURRENCY=4 npm test`（104.6秒）通过。
+- 小目标已完成：新写入的 request-trace/model-calls 日志不再暴露原始用户、群组或消息标识；既有历史日志未改写，未推送远端。
+
 ## 运行维护 2026-07-16 23:46 +08:00
 
 - 小目标：完成目标4中可在并行工作期间安全落地的Windows ACL工具与预览验收批次。

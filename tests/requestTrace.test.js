@@ -37,6 +37,7 @@ module.exports = (async () => {
   try {
     process.env.DATA_DIR = tempDir;
     process.env.API_KEY = 'test-key';
+    process.env.REQUEST_TRACE_HASH_SECRET = 'trace-hash-test-secret';
     process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
     process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     clearProjectCache();
@@ -46,6 +47,7 @@ module.exports = (async () => {
       createRequestTrace,
       appendRequestTraceEvent,
       flushRequestTraceEventsSync,
+      hashTraceIdentifier,
       nextTracePhase,
       resetRequestTraceStateForTests
     } = require('../utils/requestTrace');
@@ -59,6 +61,8 @@ module.exports = (async () => {
       phaseSeq: 1,
       stage: 'privacy_test',
       userId: 'u-safe',
+      groupId: 'g-safe',
+      messageId: 'm-safe',
       authorization: 'Bearer exposed-authorization',
       apiKey: 'exposed-api-key',
       token: 'exposed-token',
@@ -75,7 +79,12 @@ module.exports = (async () => {
     const privacyEvent = readJsonLines(path.join(tempDir, 'request-trace.ndjson'))
       .find((event) => event.requestId === 'req_privacy_boundary');
     assert.ok(privacyEvent);
-    assert.strictEqual(privacyEvent.userId, 'u-safe');
+    assert.strictEqual(privacyEvent.userIdHash, hashTraceIdentifier('userId', 'u-safe'));
+    assert.strictEqual(privacyEvent.groupIdHash, hashTraceIdentifier('groupId', 'g-safe'));
+    assert.strictEqual(privacyEvent.messageIdHash, hashTraceIdentifier('messageId', 'm-safe'));
+    assert.ok(!('userId' in privacyEvent));
+    assert.ok(!('groupId' in privacyEvent));
+    assert.ok(!('messageId' in privacyEvent));
     assert.strictEqual(privacyEvent.error, 'request failed authorization=[REDACTED] token=[REDACTED]');
     for (const forbidden of ['authorization', 'apiKey', 'token', 'password', 'prompt', 'message', 'arbitrary']) {
       assert.ok(!(forbidden in privacyEvent), `${forbidden} must not be persisted`);
@@ -196,6 +205,9 @@ module.exports = (async () => {
       userId: 'u1',
       messageId: 'm1'
     }));
+    assert.ok(!requestId.includes('g1'));
+    assert.ok(!requestId.includes('u1'));
+    assert.ok(!requestId.includes('m1'));
 
     const trace = createRequestTrace({
       source: 'message_ingress',

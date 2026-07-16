@@ -7,11 +7,12 @@ const {
 } = require('./logRotation');
 
 let sequence = 0;
+let traceHashSecret = null;
 const phaseSeqByRequestId = new Map();
 const MAX_TRACKED_REQUEST_PHASES = 5000;
 const MAX_TRACE_TEXT_LENGTH = 400;
 const TRACE_TEXT_FIELDS = new Set([
-  'requestId', 'tracePhase', 'stage', 'source', 'messageId', 'groupId', 'userId', 'chatType',
+  'requestId', 'tracePhase', 'stage', 'source', 'chatType',
   'category', 'type', 'node', 'threadId', 'routePolicyKey', 'routeDebugKey', 'topRouteType',
   'dispatchBranch', 'triggerBranch', 'purpose', 'provider', 'model', 'protocol', 'channel',
   'reason', 'triggerReason', 'action', 'failureType', 'failureStage', 'fallbackSource', 'fallbackReason', 'fallbackScope',
@@ -41,6 +42,11 @@ const TRACE_BOOLEAN_FIELDS = new Set([
   'stream', 'sent', 'streamDoneSeen', 'allowTools', 'shouldUseTools', 'plannerFallbackUsed',
   'hasContext', 'needsMemory', 'forceMemoryContext'
 ]);
+const TRACE_IDENTITY_FIELDS = new Map([
+  ['messageId', ['messageId', 'message_id']],
+  ['groupId', ['groupId', 'group_id']],
+  ['userId', ['userId', 'user_id']]
+]);
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -58,6 +64,40 @@ function sanitizeTraceText(value) {
   return text;
 }
 
+function resolveTraceHashSecret() {
+  if (traceHashSecret) return traceHashSecret;
+  const configured = normalizeText(process.env.REQUEST_TRACE_HASH_SECRET);
+  if (configured) {
+    traceHashSecret = configured;
+    return traceHashSecret;
+  }
+  try {
+    const config = require('../config');
+    const configSecret = normalizeText(
+      config.REQUEST_TRACE_HASH_SECRET
+      || config.API_KEY
+      || config.NAPCAT_HTTP_REVERSE_SECRET
+    );
+    if (configSecret) {
+      traceHashSecret = configSecret;
+      return traceHashSecret;
+    }
+  } catch (_) {}
+  traceHashSecret = crypto.randomBytes(32).toString('hex');
+  return traceHashSecret;
+}
+
+function hashTraceIdentifier(field = '', value = '') {
+  const normalizedField = normalizeText(field);
+  const normalizedValue = normalizeText(value);
+  if (!normalizedField || !normalizedValue) return '';
+  return crypto
+    .createHmac('sha256', resolveTraceHashSecret())
+    .update(`${normalizedField}\0${normalizedValue}`, 'utf8')
+    .digest('hex')
+    .slice(0, 16);
+}
+
 function sanitizeTraceUrl(value) {
   try {
     const parsed = new URL(normalizeText(value));
@@ -70,6 +110,11 @@ function sanitizeTraceUrl(value) {
 
 function serializeRequestTraceEvent(payload = {}) {
   const serialized = {};
+  for (const [field, aliases] of TRACE_IDENTITY_FIELDS.entries()) {
+    const value = aliases.map((alias) => payload[alias]).find((item) => item !== undefined && item !== null);
+    const hash = hashTraceIdentifier(field, value);
+    if (hash) serialized[`${field}Hash`] = hash;
+  }
   for (const field of TRACE_TEXT_FIELDS) {
     if (payload[field] === undefined || payload[field] === null) continue;
     const value = sanitizeTraceText(payload[field]);
@@ -119,11 +164,7 @@ function serializeRequestTraceEvent(payload = {}) {
 }
 
 function stableHash(value = '') {
-  return crypto
-    .createHash('sha1')
-    .update(String(value || ''))
-    .digest('hex')
-    .slice(0, 16);
+  return hashTraceIdentifier('requestId', value);
 }
 
 function rememberRequestPhaseSeq(requestId = '', phaseSeq = 0) {
@@ -268,6 +309,7 @@ function flushRequestTraceEventsSync() {
 
 function resetRequestTraceStateForTests() {
   sequence = 0;
+  traceHashSecret = null;
   phaseSeqByRequestId.clear();
 }
 
@@ -309,6 +351,7 @@ module.exports = {
   extractErrorCode,
   extractHttpStatus,
   getTraceFromContainer,
+  hashTraceIdentifier,
   nextTracePhase,
   normalizeRequestTrace,
   resetRequestTraceStateForTests,

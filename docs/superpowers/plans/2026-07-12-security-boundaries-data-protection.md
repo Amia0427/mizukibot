@@ -203,6 +203,12 @@ git add utils/requestTrace.js tests/requestTrace.test.js tests/requestTracePrefl
 git commit -m "fix: whitelist request trace fields"
 ```
 
+### Task 5 follow-up: 标识 keyed hash
+
+- [x] 使用 `REQUEST_TRACE_HASH_SECRET` 优先、既有秘密回退和进程随机兜底的 HMAC-SHA256 摘要，禁止 request trace 新写入原始 `userId/groupId/messageId`。
+- [x] 将 `buildRequestId` 和 `model-calls.user_id` 接入同一摘要函数；新增消息入口、request trace 和 model call 隐私回归。
+- [x] 验收：`node scripts/run-tests.js tests/requestTrace.test.js tests/messageHandlerRequestTrace.test.js tests/modelCallTrackerPrivacy.test.js`、全部静态门禁和并发4全量通过。
+
 ### Task 6: 扩展安全诊断并返回失败退出码
 
 **Files:**

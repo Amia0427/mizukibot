@@ -66,6 +66,7 @@ module.exports = (async () => {
     const { createMessageHandler } = require('../core/messageHandler');
     const {
       flushRequestTraceEventsSync,
+      hashTraceIdentifier,
       resetRequestTraceStateForTests
     } = require('../utils/requestTrace');
 
@@ -96,8 +97,10 @@ module.exports = (async () => {
     const traceEvents = readJsonLines(traceFile);
     const startEvent = traceEvents.find((event) => event.stage === 'handle_incoming_start');
     assert.ok(startEvent, 'formal private messages should still create ingress trace rows');
-    assert.strictEqual(startEvent.messageId, 'trace_msg_1');
-    assert.strictEqual(startEvent.userId, 'trace_user');
+    assert.strictEqual(startEvent.messageIdHash, hashTraceIdentifier('messageId', 'trace_msg_1'));
+    assert.strictEqual(startEvent.userIdHash, hashTraceIdentifier('userId', 'trace_user'));
+    assert.ok(!('messageId' in startEvent));
+    assert.ok(!('userId' in startEvent));
     assert.strictEqual(startEvent.chatType, 'private');
 
     console.log('messageHandlerRequestTrace.test.js passed');
