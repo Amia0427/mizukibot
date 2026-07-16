@@ -1660,3 +1660,4 @@
 - 重启边界：`mizuki:restartScheduled` 通过 `waitUntil` 把完整排空Promise交给远程重启定时器；后续SIGTERM复用正在执行的排空并在完成后退出，定时器保持进程存活直到重启命令执行。
 - 验收：10项生命周期关联测试、730文件lint、typecheck、prompt、全仓secrets、production audit（0漏洞）通过；第一次并发4全量因 `example.com` 与 `api.anthropic.com` DNS失败退出1，两项单测复跑通过，第二次完整全量125.3秒自然退出0。
 - 路线图：目标14完成；目标27保持部分完成，真实Docker stop grace与OS SIGTERM运行探针未执行。本轮未修改或暂存并行代理的CI、覆盖率和安全诊断文件，未推送远端。
+- 提交后记录：目标14生命周期统一实现提交 `607fe5c` 已完成，验收结果已保留在README、维护日志和32项目标路线图；当前分支未推送。
