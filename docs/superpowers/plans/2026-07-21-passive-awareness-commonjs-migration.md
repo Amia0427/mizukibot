@@ -143,11 +143,11 @@ Expected: PASS。
 
 Run: `npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`、`TEST_CONCURRENCY=4 npm test`、`git diff --check`。
 
-- [ ] **Step 2: 更新路线图**
+- [x] **Step 2: 更新路线图**
 
 目标5保持部分完成并更新为2/6；剩余动态入口为 `meme`、`memory/vector`、`message/handler`、`runtime-v2/context`，目标6仍等待全部入口完成。
 
-- [ ] **Step 3: 路径限定提交与提交后记录**
+- [x] **Step 3: 路径限定提交与提交后记录**
 
 只暂存本计划列出的passive-awareness、边界测试和文档文件；提交实现后追加实现哈希并单独提交文档，不推送远端。
 
@@ -158,3 +158,4 @@ Run: `npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run c
 - 完整性：六组新旧模块共78个函数完成AST对照，无缺失、重复或新增；新模块本地依赖图为0循环，旧6个chunk保留但生产入口不再执行。
 - 门禁：`npm run lint`覆盖737个文件，typecheck、prompt、全仓secrets、diff check及Node 24并发4完整全量通过，全量耗时130.4秒；三次独立只读审查均为Approved。
 - 例外：`npm audit --omit=dev`仅报告既有 `body-parser@1.20.5` 低危项，本批未修改并行中的依赖文件。
+- 完成：实现提交 `b01491d` 已生成，目标5第二批记录为部分完成（2/6），当前分支未推送。
