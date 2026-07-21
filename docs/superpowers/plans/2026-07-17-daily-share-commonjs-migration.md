@@ -102,7 +102,7 @@ Run: `npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run c
 
 目标5保持部分完成，证据写明 `daily-share` 已迁移、剩余5个动态入口；目标6仍等待所有入口完成后生成权威依赖图。
 
-- [ ] **Step 3: 提交实现与提交后记录**
+- [x] **Step 3: 提交实现与提交后记录**
 
 只暂存本计划列出的daily-share、测试和文档文件；提交后追加实现哈希并单独提交文档，不推送远端。
 
@@ -112,3 +112,4 @@ Run: `npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run c
 - 绿灯：Node 20.20.2运行边界与8项既有行为测试全部通过；`npm run lint`覆盖732文件，typecheck、prompt、全仓secrets和diff check通过。
 - 全量：当前Node 24的 `TEST_CONCURRENCY=4 npm test` 自然退出0，耗时123.4秒；动态loader生产入口由6个降为5个。
 - 例外：`npm audit --omit=dev`报告既有 `body-parser@1.20.5` 低危项，本批未修改并行中的 `package.json`/lock文件。
+- 完成：实现提交 `5b36f86` 已生成，目标5首批记录为部分完成（1/6），当前分支未推送。

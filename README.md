@@ -6,7 +6,7 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 运行维护 2026-07-21 20:52 +08:00
 
-- 目标5首批完成：`daily-share` 从共享词法作用域 chunk 迁为显式 CommonJS 依赖，公开入口保持不变，生产路径不再读取或执行 `dailyShareEngine.*.chunk.js`。
+- 目标5首批完成：提交 `5b36f86` 将 `daily-share` 从共享词法作用域 chunk 迁为显式 CommonJS 依赖，公开入口保持不变，生产路径不再读取或执行 `dailyShareEngine.*.chunk.js`。
 - 核心、调度、QZone、记忆预取、窗口和引擎编排已按职责拆分；两个旧 runtime fragment 收口为静态兼容导出，动态 chunk 入口由6个降为5个，目标5保持部分完成。
 - Node 20.20.2 的8项定向回归、732文件 lint、typecheck、prompt、全仓 secrets、diff check和 Node 24并发4全量123.4秒通过；production audit报告既有 `body-parser@1.20.5` 低危项，本批未改并行依赖文件。
 

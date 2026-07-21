@@ -12,7 +12,7 @@
 
 ## 运行维护 2026-07-21 20:52 +08:00
 
-- 实现：`daily-share` 的核心、调度、QZone、记忆预取、窗口和引擎编排改为显式CommonJS依赖；稳定入口不再读取或执行 `dailyShareEngine.*.chunk.js`，两个旧runtime fragment仅保留静态兼容导出。
+- 实现提交 `5b36f86`：`daily-share` 的核心、调度、QZone、记忆预取、窗口和引擎编排改为显式CommonJS依赖；稳定入口不再读取或执行 `dailyShareEngine.*.chunk.js`，两个旧runtime fragment仅保留静态兼容导出。
 - 验收：Node 20.20.2的8项定向回归、732文件lint、typecheck、prompt、全仓secrets、diff check和Node 24并发4完整全量通过，全量耗时123.4秒；production audit报告既有 `body-parser@1.20.5` 低危项，本批未修改并行依赖文件。
 - 路线图状态：目标5推进为部分完成（1/6），动态chunk入口由6个降为5个；目标6仍等待全部入口迁移后生成权威依赖图。
 
