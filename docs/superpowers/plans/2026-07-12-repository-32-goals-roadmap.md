@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-21 20:52 +08:00
+
+- 实现：`daily-share` 的核心、调度、QZone、记忆预取、窗口和引擎编排改为显式CommonJS依赖；稳定入口不再读取或执行 `dailyShareEngine.*.chunk.js`，两个旧runtime fragment仅保留静态兼容导出。
+- 验收：Node 20.20.2的8项定向回归、732文件lint、typecheck、prompt、全仓secrets、diff check和Node 24并发4完整全量通过，全量耗时123.4秒；production audit报告既有 `body-parser@1.20.5` 低危项，本批未修改并行依赖文件。
+- 路线图状态：目标5推进为部分完成（1/6），动态chunk入口由6个降为5个；目标6仍等待全部入口迁移后生成权威依赖图。
+
 ## 运行维护 2026-07-17 02:58 +08:00
 
 - 实现：`restartBotScript`、`windowsDaemonScript` 的大型源码字符串清单迁为真实PowerShell行为测试；生产脚本支持dot-source函数库模式，并抽取重启WMI命令行、daemon早退恢复动作和外置worker启动原因供主流程与测试共用。
@@ -102,11 +108,11 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-17 02:58 +08:00。
+更新时间：2026-07-21 20:52 +08:00。
 
 - 当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端 CI 尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
-- 当前静态基线：`npm run lint` 覆盖730个文件；Node 20.20.2的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-16自然结束，耗时151.7秒；当前Node 24完整全量于2026-07-17自然结束，耗时142.5秒。
+- 当前静态基线：`npm run lint` 覆盖732个文件；Node 20.20.2的 `daily-share` 8项定向回归通过，当前Node 24的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-21自然结束，耗时123.4秒。
 - 当前 `.env` 与 `data` ACL仍允许 `Authenticated Users`修改、`Users`读取；收口工具和真实身份预览已完成，但Apply需等待并行工作收口。
 
 ## 32 项状态
@@ -115,7 +121,7 @@
 - [x] **2. 图片缓存 SSRF** — 已完成。提交 `c3ca711` 已接入逐跳 DNS/重定向校验、固定解析地址、IPv4-mapped IPv6 拒绝和 8 MiB 响应限制，并有本地真实 HTTP 集成测试。
 - [x] **3. `skill_summarize` SSRF** — 已完成。提交 `c3ca711` 已统一使用安全请求边界并限制 2 MiB 响应，覆盖私网、重定向和固定 DNS 行为测试。
 - [ ] **4. `.env` 与 `data` ACL** — 部分完成。ACL工具已实现默认预览、递归快照、显式Apply和服务身份约束，并在临时目录验证可移除 `Authenticated Users`/`Users`；真实服务身份为 `MIZUKI\Administrator`，但为保护并行代理尚未对工作区应用或轮换凭据。
-- [ ] **5. 取消源码拼接式模块加载** — 未完成。`src/shared/chunkedModule.js` 仍通过 `new Function` 执行共享作用域 chunk，至少 6 个入口依赖。
+- [ ] **5. 取消源码拼接式模块加载** — 部分完成（1/6）。`daily-share` 已迁为显式CommonJS模块，生产入口不再读取或执行对应chunk；`meme`、`passive-awareness`、`memory/vector`、`message/handler`和`runtime-v2/context`仍依赖 `runCommonJsChunks`。
 - [ ] **6. 消除生产依赖环** — 未完成。必须在 chunk 模块化后重新生成权威依赖图并将循环数降为 0。
 - [ ] **7. 拆除 `legacy/aiHost` 上帝模块** — 未完成。`api/legacy/aiHost.js` 仍约 2096 行，并被 planning、image generation 和测试引用。
 - [ ] **8. 建立最小 CI 门禁** — 部分完成。提交 `5e7e168` 已新增 Windows Node 20 全量门禁和 Ubuntu Node 20 Linux 策略门禁，覆盖安装、版本、lint、prompt、tracked secrets、production audit 与测试，并隔离 `.env`、`data` 和本地 prompt roots；尚未在远端 GitHub Actions 真实运行，不能标记完成。

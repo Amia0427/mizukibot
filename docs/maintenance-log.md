@@ -1,3 +1,10 @@
+## 运行维护 2026-07-21 20:52 +08:00
+
+- 小目标：完成目标5的首个生产入口迁移，取消 `daily-share` 的源码拼接和共享词法作用域执行。
+- 最小实现：按核心、调度、QZone、记忆预取、窗口和引擎编排拆为显式CommonJS模块，`index.js`只维护稳定singleton；两个不可独立解析的旧runtime fragment改为静态兼容导出，不删除文件，不改其余5个动态入口。
+- 验收：边界测试先确认旧入口会触发 `daily-share must not execute chunk loader`；迁移后Node 20.20.2的8项定向回归、732文件lint、typecheck、prompt、全仓secrets、diff check和Node 24 `TEST_CONCURRENCY=4 npm test`均通过，全量耗时123.4秒。`npm audit --omit=dev`报告既有 `body-parser@1.20.5` 低危项，本批未改并行中的依赖文件。
+- 小目标已完成：动态chunk入口由6个降为5个，目标5记录为部分完成（1/6）；目标6继续等待全部入口迁移后生成权威依赖图，未推送远端。
+
 ## 运行维护 2026-07-17 00:19 +08:00
 
 - 小目标：完成目标20中请求追踪标识的 keyed hash 迁移，避免诊断日志直接保存用户、群组和消息标识。
