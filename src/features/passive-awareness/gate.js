@@ -1,9 +1,15 @@
-const passiveAwareness = require('./index');
+const {
+  isEnabledForGroup,
+  isNoiseText,
+  scoreMessageTrigger,
+  shouldGatePassiveReply
+} = require('./core');
+const { cheapRuleGate } = require('./model-runtime');
 
 module.exports = {
-  cheapRuleGate: passiveAwareness.cheapRuleGate,
-  isEnabledForGroup: passiveAwareness.isEnabledForGroup,
-  isNoiseText: passiveAwareness.isNoiseText,
-  scoreMessageTrigger: passiveAwareness.scoreMessageTrigger,
-  shouldGatePassiveReply: passiveAwareness.shouldGatePassiveReply
+  cheapRuleGate,
+  isEnabledForGroup,
+  isNoiseText,
+  scoreMessageTrigger,
+  shouldGatePassiveReply
 };

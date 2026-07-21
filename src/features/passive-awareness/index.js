@@ -1,16 +1,31 @@
-const path = require('path');
-const { createRequire } = require('module');
-const { runCommonJsChunks } = require('../../shared/chunkedModule');
+'use strict';
 
-const legacyCoreDir = path.resolve(__dirname, '../../../core');
-const legacyPassiveFile = path.join(legacyCoreDir, 'passiveGroupAwareness.js');
-const legacyRequire = createRequire(legacyPassiveFile);
+const core = require('./core');
+const presence = require('./presence-runtime');
+const prompt = require('./prompt-runtime');
+const model = require('./model-runtime');
+const reply = require('./reply');
 
-module.exports = runCommonJsChunks(legacyCoreDir, module, [
-  'passiveGroupAwareness.core.chunk.js',
-  'passiveGroupAwareness.presence.chunk.js',
-  'passiveGroupAwareness.prompts.chunk.js',
-  'passiveGroupAwareness.model.chunk.js',
-  'passiveGroupAwareness.runtime.chunk.js',
-  'passiveGroupAwareness.force.chunk.js',
-], { require: legacyRequire, filename: legacyPassiveFile });
+module.exports = {
+  forcePassiveGroupInterjection: reply.forcePassiveGroupInterjection,
+  handlePassiveGroupAwareness: reply.handlePassiveGroupAwareness,
+  isEnabledForGroup: core.isEnabledForGroup,
+  getPresenceConfig: presence.getPresenceConfig,
+  decidePresenceAction: presence.decidePresenceAction,
+  scoreMessageTrigger: core.scoreMessageTrigger,
+  parseDecision: prompt.parseDecision,
+  buildDecisionPrompt: prompt.buildDecisionPrompt,
+  buildReplyPrompt: prompt.buildReplyPrompt,
+  buildPassiveReplySystemMessages: model.buildPassiveReplySystemMessages,
+  buildCompactPersonaPrompt: core.buildCompactPersonaPrompt,
+  buildConversationWindow: core.buildConversationWindow,
+  analyzeConversationWindow: core.analyzeConversationWindow,
+  detectPassiveAddressee: core.detectPassiveAddressee,
+  classifyPassiveReplyType: core.classifyPassiveReplyType,
+  shouldGatePassiveReply: core.shouldGatePassiveReply,
+  shouldSuppressPresenceAck: core.shouldSuppressPresenceAck,
+  shouldSuppressTrivialPresenceReply: core.shouldSuppressTrivialPresenceReply,
+  cheapRuleGate: model.cheapRuleGate,
+  isNoiseText: core.isNoiseText,
+  trimReplyText: core.trimReplyText
+};

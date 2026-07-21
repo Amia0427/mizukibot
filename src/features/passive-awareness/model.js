@@ -1,5 +1,5 @@
-const passiveAwareness = require('./index');
+const { cheapRuleGate } = require('./model-runtime');
 
 module.exports = {
-  cheapRuleGate: passiveAwareness.cheapRuleGate
+  cheapRuleGate
 };
