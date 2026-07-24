@@ -410,7 +410,7 @@ Actual（2026-07-24 08:10 +08:00）：全量测试结束时 `git status --short 
 - Create: `tests/memeManagerMonkeyPatch.test.js`
 - Create: `docs/superpowers/plans/2026-07-22-meme-commonjs-migration.md`
 
-- [ ] **Step 1: 只暂存实现、测试与计划**
+- [x] **Step 1: 只暂存实现、测试与计划**
 
 Run:
 
@@ -421,7 +421,7 @@ git diff --cached --name-only
 
 Expected: cached清单精确为上述14个文件，包含本计划且不包含任何并行文件。
 
-- [ ] **Step 2: 创建实现提交**
+- [x] **Step 2: 创建实现提交**
 
 Run:
 
@@ -440,15 +440,15 @@ Expected: commit成功；保存实现短哈希供文档记录。不得推送远�
 - Modify: `docs/superpowers/plans/2026-07-12-repository-32-goals-roadmap.md`
 - Modify: `docs/superpowers/plans/2026-07-22-meme-commonjs-migration.md`
 
-- [ ] **Step 1: 写入带时区的简短时间戳与验收证据**
+- [x] **Step 1: 写入带时区的简短时间戳与验收证据**
 
 本计划已随实现提交首次纳入版本控制；本步骤再次修改本计划并追加实现哈希与验收记录。在4个文档中记录 `YYYY-MM-DD HH:mm +08:00`、实现哈希、93/93 AST、16项API/5子门面身份、6项singleton归属、0本地循环、Node 20/24定向结果、全门禁结果、完整测试耗时和audit例外。
 
-- [ ] **Step 2: 将目标5更新为部分完成3/6**
+- [x] **Step 2: 将目标5更新为部分完成3/6**
 
 路线图写明 `daily-share`、`passive-awareness`、`meme` 已迁移；剩余动态入口精确为 `memory/vector`、`message/handler`、`runtime-v2/context`。目标6仍未完成，必须等待全部入口迁移后生成全仓权威生产依赖图。
 
-- [ ] **Step 3: 只暂存4个文档并提交**
+- [x] **Step 3: 只暂存4个文档并提交**
 
 Run:
 
@@ -460,7 +460,7 @@ git commit -m "docs: record meme migration"
 
 Expected: cached清单精确为4个文档；提交成功且不包含并行文件。不得推送远端。
 
-- [ ] **Step 4: 提交后最终核对**
+- [x] **Step 4: 提交后最终核对**
 
 Run:
 
@@ -470,3 +470,12 @@ git log -2 --oneline
 ```
 
 Expected: 两个新提交依次为实现与文档；工作树只保留任务开始前的并行改动，meme计划内文件无未提交差异。
+
+## 验收记录 2026-07-24 08:21 +08:00
+
+- 实现：提交 `bc1d10f` 将 `meme` 的9个共享词法作用域chunk迁为10个显式CommonJS模块，旧chunk保持未修改，生产入口不再执行。
+- 契约：93/93个函数完成AST对账；16项主入口API、legacy facade与5个子门面的对象/函数身份保持不变，6项singleton各归唯一模块，本地依赖图为0循环。
+- 聚焦：Node 20.20.2与Node 24.14.1的 `memeModuleBoundary`、`memeManagerMonkeyPatch`、`memeManagerSecurity`、`passiveAwarenessModuleBoundary`、`messageBackgroundTasks`、`privateChatAdminRouting`、`messageCopyMojibake` 七项回归全部通过。
+- 门禁：`npm run lint`覆盖747个文件，typecheck、prompt、全仓secrets和diff check均通过；Node 24并发4的521个tracked测试自然退出0，全量耗时150.957秒。
+- 例外：`npm audit --omit=dev`退出1；`sharp@0.33.5` 高危项与 `body-parser@1.20.5` 低危项均为HEAD既存，本批未修改 `package.json` 或 `package-lock.json`。
+- 完成：动态chunk入口由4个降为3个，仅余 `memory/vector`、`message/handler`、`runtime-v2/context`；目标5记录为部分完成（3/6），目标6仍等待全部入口迁移，实现提交 `bc1d10f` 已生成，当前分支未推送。

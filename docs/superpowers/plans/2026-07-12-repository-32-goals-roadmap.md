@@ -10,6 +10,12 @@
 
 ---
 
+## 运行维护 2026-07-24 08:21 +08:00
+
+- 实现提交 `bc1d10f`：`meme` 的9个共享词法作用域chunk按模型配置、上下文、运行状态、门控、素材分析、索引重建、选择器、管理命令、跟发和生命周期迁为显式CommonJS模块；93/93个函数、16项主入口API、legacy facade与5个子门面身份、6项singleton归属及0本地循环均已验收。
+- 验收：Node 20.20.2与Node 24.14.1的七项聚焦回归通过；747文件lint、typecheck、prompt、全仓secrets、diff check及Node 24并发4全量521个tracked测试通过，全量耗时150.957秒。production audit退出1的 `sharp@0.33.5` 高危项和 `body-parser@1.20.5` 低危项均为HEAD既存，本批未修改依赖。
+- 路线图状态：目标5推进为部分完成（3/6），动态chunk入口由4个降为3个，仅余 `memory/vector`、`message/handler`、`runtime-v2/context`；目标6仍等待全部入口迁移后生成权威生产依赖图。
+
 ## 运行维护 2026-07-21 21:42 +08:00
 
 - 实现提交 `b01491d`：`passive-awareness` 改为显式CommonJS依赖，21项主入口API、legacy facade及5个子门面契约保持不变，生产路径不再执行对应chunk。
@@ -114,11 +120,11 @@
 
 ## 当前证据快照
 
-更新时间：2026-07-21 21:42 +08:00。
+更新时间：2026-07-24 08:21 +08:00。
 
-- 当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端 CI 尚无对应运行证据。
+- 目标5的 `meme` 实现提交 `bc1d10f` 已生成，当前分支未推送；目标29实现提交 `c12ec87`、`a4ce6cc` 已生成，远端CI尚无对应运行证据。
 - 本计划创建时，安全相关实现仍在共享工作区中并行修改；未提交代码不能标记为完成，必须以最终 diff 和测试结果重新验收。
-- 当前静态基线：`npm run lint` 覆盖737个文件；Node 20.20.2的 `passive-awareness` 21项定向回归通过，当前Node 24的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-21自然结束，耗时130.4秒。
+- 当前静态基线：`npm run lint`覆盖747个文件，typecheck、prompt、全仓secrets和diff check通过；Node 20.20.2与Node 24.14.1的七项 `meme` 聚焦回归通过，Node 24的 `TEST_CONCURRENCY=4` tracked完整全量于2026-07-24自然结束，521个文件全部通过，耗时150.957秒。
 - 当前 `.env` 与 `data` ACL仍允许 `Authenticated Users`修改、`Users`读取；收口工具和真实身份预览已完成，但Apply需等待并行工作收口。
 
 ## 32 项状态
@@ -127,7 +133,7 @@
 - [x] **2. 图片缓存 SSRF** — 已完成。提交 `c3ca711` 已接入逐跳 DNS/重定向校验、固定解析地址、IPv4-mapped IPv6 拒绝和 8 MiB 响应限制，并有本地真实 HTTP 集成测试。
 - [x] **3. `skill_summarize` SSRF** — 已完成。提交 `c3ca711` 已统一使用安全请求边界并限制 2 MiB 响应，覆盖私网、重定向和固定 DNS 行为测试。
 - [ ] **4. `.env` 与 `data` ACL** — 部分完成。ACL工具已实现默认预览、递归快照、显式Apply和服务身份约束，并在临时目录验证可移除 `Authenticated Users`/`Users`；真实服务身份为 `MIZUKI\Administrator`，但为保护并行代理尚未对工作区应用或轮换凭据。
-- [ ] **5. 取消源码拼接式模块加载** — 部分完成（2/6）。`daily-share` 与 `passive-awareness` 已迁为显式CommonJS模块，生产入口不再读取或执行对应chunk；`meme`、`memory/vector`、`message/handler`和`runtime-v2/context`仍依赖 `runCommonJsChunks`。
+- [ ] **5. 取消源码拼接式模块加载** — 部分完成（3/6）。`daily-share`、`passive-awareness`与`meme`已迁为显式CommonJS模块，生产入口不再读取或执行对应chunk；`memory/vector`、`message/handler`和`runtime-v2/context`仍依赖 `runCommonJsChunks`。
 - [ ] **6. 消除生产依赖环** — 未完成。必须在 chunk 模块化后重新生成权威依赖图并将循环数降为 0。
 - [ ] **7. 拆除 `legacy/aiHost` 上帝模块** — 未完成。`api/legacy/aiHost.js` 仍约 2096 行，并被 planning、image generation 和测试引用。
 - [ ] **8. 建立最小 CI 门禁** — 部分完成。提交 `5e7e168` 已新增 Windows Node 20 全量门禁和 Ubuntu Node 20 Linux 策略门禁，覆盖安装、版本、lint、prompt、tracked secrets、production audit 与测试，并隔离 `.env`、`data` 和本地 prompt roots；尚未在远端 GitHub Actions 真实运行，不能标记完成。
