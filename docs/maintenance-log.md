@@ -1,3 +1,12 @@
+## 运行维护 2026-07-25 13:52 +08:00
+
+- 小目标：完成目标5的第四个生产入口迁移，取消 `memory/vector` 的源码拼接和共享词法作用域执行。
+- 最小实现：将7个legacy chunk的169个函数按40/55/28/2/24/14/6拆入规范化、存储、写入、统计、评分核心、评分选择和召回编排模块；旧chunk保持未修改，生产入口不再读取或执行。
+- 契约保持：23项主入口API、5个门面和legacy facade身份不变；3项store状态与 `writePipelineActive` 各归唯一owner，未知自由变量为0，依赖图为15条本地边加3条embedding边且0循环，lazy/native加载与semantic、embedding、LanceDB singleton边界保持不变。
+- 验收：Node 20.20.2与Node 24.14.1的九项聚焦回归均为9/9；754文件lint、typecheck、107项prompt清单、全仓secrets和diff check通过，Node 24设置并发4后523/523个tracked测试自然退出0，全量耗时98.992秒。`npm audit --omit=dev`退出1，仅报告HEAD既有 `body-parser`低危项和 `sharp`高危项。
+- 小目标已完成：动态chunk入口由3个降为2个，仅余 `message/handler`与`runtime-v2/context`；目标5记录为部分完成（4/6），目标6继续等待两个剩余入口迁移后生成权威生产依赖图，未推送远端。
+- 提交后记录：目标5的 `memory/vector` 迁移提交 `4d87c55` 已完成，当前分支未推送。
+
 ## 运行维护 2026-07-24 08:21 +08:00
 
 - 小目标：完成目标5的第三个生产入口迁移，取消 `meme` 的源码拼接和共享词法作用域执行。

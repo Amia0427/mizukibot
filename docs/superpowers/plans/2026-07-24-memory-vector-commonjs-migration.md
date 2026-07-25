@@ -10,6 +10,13 @@
 
 ---
 
+## 实施验收 2026-07-25 13:52 +08:00
+
+- 实现提交 `4d87c55`：7个实现模块承接169个函数，分布为40/55/28/2/24/14/6；23项主入口API、5个门面与legacy身份保持不变，3项store状态和 `writePipelineActive` 各归唯一owner。
+- 结构验收：未知自由变量为0，依赖图精确为15条本地边加3条embedding边且0循环；lazy/native加载、semantic/embedding/LanceDB singleton与动态patch边界保持不变，生产动态chunk入口仅余 `message/handler`与`runtime-v2/context`。
+- 运行验收：Node 20.20.2与Node 24.14.1的九项聚焦回归均为9/9；754文件lint、typecheck、107项prompt清单、全仓secrets和diff check通过；production audit退出1，仅报告HEAD既有 `body-parser`低危项和 `sharp`高危项；Node 24并发4全量523/523通过，耗时98.992秒。
+- 路线图：目标5为部分完成（4/6），目标6继续等待两个剩余入口迁移后生成权威生产依赖图；当前分支未推送。
+
 ## 文件职责与不变量
 
 7个legacy chunk共3243行，TypeScript Compiler API实测得到169个顶层具名函数、46个顶层变量绑定和215个唯一顶层绑定；169个函数名全部唯一。现有7个chunk在文件级依赖图中属于同一个强连通分量，禁止机械地将每个chunk原样改为一个CommonJS模块。
@@ -77,7 +84,7 @@ const LEGACY_CHUNKS = [
 **Files:**
 - Create: `tests/memoryVectorModuleBoundary.test.js`
 
-- [ ] **Step 1: 固定23项主入口和5个门面契约**
+- [x] **Step 1: 固定23项主入口和5个门面契约**
 
 在测试中固定精确主入口键：
 
@@ -140,13 +147,13 @@ const FACADE_EXPORTS = {
 
 断言主入口只有23项；`retrieval/store/write/stats` 每一项都与主入口对应函数严格相等。`embedding` 的 `cosineArray/requestEmbedding/shouldUseRemoteEmbedding` 与主入口严格相等，`calcEmbeddingScore` 只属于embedding门面。断言 `require('../utils/vectorMemory') === main`、`require('../src/memory').vector === main`。
 
-- [ ] **Step 2: 注入定向失败的chunk loader并完整恢复cache**
+- [x] **Step 2: 注入定向失败的chunk loader并完整恢复cache**
 
-在加载任何被测模块前保存 `require.cache` 的对象级快照，并从快照中移除测试文件自身。替换 `src/shared/chunkedModule.js` 时，仅当 `chunkFiles` 包含上述7个vector chunk时抛出 `memory/vector must not execute chunk loader`，其他未迁移入口继续委托真实loader。
+在加载任何被测模块前保存 `require.cache` 的对象级快照，并从快照中移除测试文件自身。替换 `src/shared/chunkedModule.js` 时，仅当 `chunkFiles` 包含上述7个vector chunk时抛出 `memory-vector must not execute chunk loader`，其他未迁移入口继续委托真实loader。
 
 `finally` 必须删除测试期间新增的所有cache项并逐项恢复原对象，最后同时断言cache键集合和每个cache对象身份与快照一致；不得只恢复 `chunkedModule.js`。
 
-- [ ] **Step 3: 加入169/169、0未知和singleton归属门禁**
+- [x] **Step 3: 加入169/169、0未知和singleton归属门禁**
 
 使用直接开发依赖 `typescript` 的Compiler API解析7个legacy chunk和7个新实现文件，只统计顶层具名 `FunctionDeclaration`。断言legacy为169项、169个唯一名称；新实现为169项、169个唯一名称；两个排序后的名称集合完全相同。
 
@@ -179,7 +186,7 @@ const SINGLETON_OWNERS = {
 
 `scoring-selection.js` 只从embedding leaf显式绑定实际使用的 `calcEmbeddingScore`。不得把这些符号列入未知变量白名单，也不得导入未使用的embedding符号；`sourceKindRank` 同样必须通过权威模块显式绑定，0未知断言不得用新增全局名规避。
 
-- [ ] **Step 4: 加入精确边集合、0循环和lazy-load门禁**
+- [x] **Step 4: 加入精确边集合、0循环和lazy-load门禁**
 
 从7个实现文件的静态相对 `require()` 构建7节点本地有向图；边 `A -> B` 表示实现模块A依赖实现模块B。先断言实际边集合与TypeScript AST按上述函数归属派生的15条边精确相等：
 
@@ -236,7 +243,7 @@ const MUST_STAY_LAZY = [
 
 另外遍历cache路径，断言不存在 `@lancedb/lancedb`。同时断言 `utils/memorySemanticIndex.js` 与 `utils/memoryEmbeddingClient.js` 各只有一个已解析实例，防止迁移复制其singleton。
 
-- [ ] **Step 5: 运行测试验证定向红灯**
+- [x] **Step 5: 运行测试验证定向红灯**
 
 Run:
 
@@ -244,7 +251,7 @@ Run:
 node scripts/run-tests.js tests/memoryVectorModuleBoundary.test.js
 ```
 
-Expected: FAIL with `memory/vector must not execute chunk loader`；不得因API常量、cache恢复或AST测试自身错误提前失败。
+Expected: FAIL with `memory-vector must not execute chunk loader`；不得因API常量、cache恢复或AST测试自身错误提前失败。
 
 ## Chunk 2: 规范化与唯一存储状态
 
@@ -253,15 +260,15 @@ Expected: FAIL with `memory/vector must not execute chunk loader`；不得因API
 **Files:**
 - Create: `src/memory/vector/normalization.js`
 
-- [ ] **Step 1: 迁移纯规范化与数学函数**
+- [x] **Step 1: 迁移纯规范化与数学函数**
 
 从 `normalize.chunk.js` 迁移除7个存储函数之外的40个顶层函数。7个存储函数精确为 `atomicWriteJson`、`safeReadJson`、`safeWriteJson`、`getCompatItemsStore`、`getCompatIndexStore`、`defaultShardManifest`、`getManifestStore`，它们归下一Task。
 
-- [ ] **Step 2: 将外部依赖放回真实消费者**
+- [x] **Step 2: 将外部依赖放回真实消费者**
 
 `normalization.js` 只导入本文件函数实际使用的config、tier与recall heuristic依赖。memory write pipeline、semantic index、reranker、embedding门面、fs/path与JsonHotStore不得为后续模块继续藏在该文件词法作用域中。
 
-- [ ] **Step 3: 独立解析并保持红灯原因**
+- [x] **Step 3: 独立解析并保持红灯原因**
 
 Run:
 
@@ -277,19 +284,19 @@ Expected: 新模块语法检查退出0；边界测试仍只因生产index执行�
 **Files:**
 - Create: `src/memory/vector/store-runtime.js`
 
-- [ ] **Step 1: 迁移存储基础与分片实现**
+- [x] **Step 1: 迁移存储基础与分片实现**
 
 迁移 `normalize.chunk.js` 的7个存储函数、`store.chunk.js` 的35个函数及其路径/版本常量。`store-runtime.js` 唯一声明 `hotStoreRegistry`、`shardStateHydrated`、`memoryShardState`，保留原有HotStore惰性创建、manifest迁移、分片水合、aggregate dirty和兼容快照语义。
 
-- [ ] **Step 2: 迁移9个归档和索引生命周期函数**
+- [x] **Step 2: 迁移9个归档和索引生命周期函数**
 
 从 `archive-write-helpers.chunk.js` 迁移 `isExpired`、`pruneLibrary`、`getEpisodeArchiveAgeDays`、`isEpisodeMemory`、`getCoveredRollupLevels`、`archiveRolledUpEpisodes`、`buildDocTokens`、`rebuildMemoryIndex`、`ensureIndexFresh`。这些函数归store后，store不得反向依赖write或retrieval。
 
-- [ ] **Step 3: 迁移4个共享存储与查询函数**
+- [x] **Step 3: 迁移4个共享存储与查询函数**
 
 从 `archive-write-helpers.chunk.js` 迁移 `mergeMeta`，从 `retrieval-stats.chunk.js` 迁移 `resolveShardMetasForRecall`、`getMemoryItems` 与 `getMemoryItemsByFilter`。`resolveShardMetasForRecall` 同时服务scoring与retrieval，必须由两者共同依赖的store owner提供；`mergeMeta` 同时服务store与write，归store后write只单向依赖store，不得形成 `store-runtime -> write-runtime` 反向边。保持scope、status、kind、source、limit与cache选项语义，不新增全量扫描fallback。
 
-- [ ] **Step 4: 验证函数分布和状态唯一性**
+- [x] **Step 4: 验证函数分布和状态唯一性**
 
 Run:
 
@@ -307,23 +314,23 @@ Expected: syntax PASS；输出 `55`。
 **Files:**
 - Create: `src/memory/vector/write-runtime.js`
 
-- [ ] **Step 1: 迁移11个冲突、邻居和upsert函数**
+- [x] **Step 1: 迁移11个冲突、邻居和upsert函数**
 
 迁移 `archive-write-helpers.chunk.js` 剩余的 `jaccardFromTokens` 至 `upsertMemoryItem` 共11个函数，但不包含已归store的 `mergeMeta`。显式导入 `normalization.js` 与 `store-runtime.js` 的真实依赖；`findWriteRerankNeighbors` 只使用store的查询接口，不导入retrieval门面。
 
-- [ ] **Step 2: 迁移15个批量写入与向量回填函数**
+- [x] **Step 2: 迁移15个批量写入与向量回填函数**
 
 迁移 `write.chunk.js` 的15个函数。`write-runtime.js` 从 `./embedding` 只显式绑定真实使用的 `shouldUseRemoteEmbedding`；`writePipelineActive` 为模块私有布尔状态，并以原try/finally范围复位，不得继续修改公开函数对象属性。
 
-- [ ] **Step 3: 迁移2个公开写入入口**
+- [x] **Step 3: 迁移2个公开写入入口**
 
 从 `retrieval-stats.chunk.js` 迁移 `rememberExplicitMemory`、`addEpisodeMemory`，直接调用同模块的 `addMemoryItem`，保持原返回值与元数据。
 
-- [ ] **Step 4: 保持optional/native模块惰性与patch能力**
+- [x] **Step 4: 保持optional/native模块惰性与patch能力**
 
 `normalizeRecallTargetIds`、`loadMemoryNodes`、`materializeMemoryViews`、`buildMemoryVectorRow/isLanceDbSyncEnabled/syncMemoryRows` 继续分别在调用函数内 `require()`。不得在文件顶部加载 `utils/lancedbMemoryStore`，不得直接加载 `@lancedb/lancedb`；调用时从当前module exports读取LanceDB方法，以保留测试替换。
 
-- [ ] **Step 5: 独立解析并核对28项**
+- [x] **Step 5: 独立解析并核对28项**
 
 Run:
 
@@ -339,11 +346,11 @@ Expected: syntax PASS；输出 `28`。
 **Files:**
 - Create: `src/memory/vector/stats-runtime.js`
 
-- [ ] **Step 1: 收口访问与汇总统计**
+- [x] **Step 1: 收口访问与汇总统计**
 
 从 `scoring-core.chunk.js` 迁移 `touchAccessStats`，从 `retrieval-stats.chunk.js` 迁移 `getMemoryStats`。显式从 `scoring-core.js` 导入 `calcMemoryStrength`，并依赖 `normalization.js` 与 `store-runtime.js`；不得依赖scoring-selection、retrieval、write、index或公开门面。`scoring-core.js` 不得反向导入stats-runtime。
 
-- [ ] **Step 2: 独立解析并核对2项**
+- [x] **Step 2: 独立解析并核对2项**
 
 Run: `node --check src/memory/vector/stats-runtime.js`
 
@@ -356,11 +363,11 @@ Expected: exit 0；AST顶层函数数为2。
 **Files:**
 - Create: `src/memory/vector/scoring-core.js`
 
-- [ ] **Step 1: 迁移基础评分与过滤函数**
+- [x] **Step 1: 迁移基础评分与过滤函数**
 
 迁移 `scoring-core.chunk.js` 除 `touchAccessStats` 外的24个函数。category metadata继续按现有fallback语义在调用路径解析；store写入只通过 `store-runtime.js` 的显式函数完成。该模块不得依赖 `stats-runtime.js`，由stats单向导入 `calcMemoryStrength`。
 
-- [ ] **Step 2: 验证独立解析与24项数量**
+- [x] **Step 2: 验证独立解析与24项数量**
 
 Run: `node --check src/memory/vector/scoring-core.js`
 
@@ -371,15 +378,15 @@ Expected: exit 0；AST顶层函数数为24。
 **Files:**
 - Create: `src/memory/vector/scoring-selection.js`
 
-- [ ] **Step 1: 迁移原13个selection函数**
+- [x] **Step 1: 迁移原13个selection函数**
 
 迁移 `scoring-selection.chunk.js` 的13个函数，显式依赖normalization、scoring-core、stats-runtime、semantic index、reranker和tier工具，并从 `./embedding` 只绑定真实使用的 `calcEmbeddingScore`；不得导入其他embedding门面函数。
 
-- [ ] **Step 2: 将多样性选择归入selection**
+- [x] **Step 2: 将多样性选择归入selection**
 
 从 `retrieval-stats.chunk.js` 迁移 `selectDiverseHits`，使selection不再反向依赖retrieval。
 
-- [ ] **Step 3: 显式导入权威sourceKindRank**
+- [x] **Step 3: 显式导入权威sourceKindRank**
 
 使用：
 
@@ -389,7 +396,7 @@ const { sourceKindRank } = require('../../../utils/memoryProjection/conflicts');
 
 不得创建同名函数或fallback；迁移后的未知自由变量门禁必须为0。
 
-- [ ] **Step 4: 验证独立解析与14项数量**
+- [x] **Step 4: 验证独立解析与14项数量**
 
 Run: `node --check src/memory/vector/scoring-selection.js`
 
@@ -400,15 +407,15 @@ Expected: exit 0；AST顶层函数数为14。
 **Files:**
 - Create: `src/memory/vector/retrieval-runtime.js`
 
-- [ ] **Step 1: 迁移召回编排**
+- [x] **Step 1: 迁移召回编排**
 
 迁移 `retrieveRelevantMemories`、`retrieveRelevantMemoriesAsync`、`buildUnifiedMemoryOptions`、`retrieveUnifiedMemories`、`retrieveUnifiedMemoriesAsync`、`getCoreMemories`。`resolveShardMetasForRecall` 已归 `store-runtime.js`，`retrieval-runtime.js` 必须显式导入该函数；同时从现有 `embedding.js` 显式导入 `shouldUseRemoteEmbedding`，不得依赖index转发或保留未知自由变量。同步与异步路径继续复用同一store、scoring和embedding singleton。
 
-- [ ] **Step 2: 禁止反向依赖写入与公开门面**
+- [x] **Step 2: 禁止反向依赖写入与公开门面**
 
 召回实现不得导入write-runtime、index或5个门面；写入函数已经归 `write-runtime.js`。
 
-- [ ] **Step 3: 验证独立解析与6项数量**
+- [x] **Step 3: 验证独立解析与6项数量**
 
 Run: `node --check src/memory/vector/retrieval-runtime.js`
 
@@ -425,19 +432,19 @@ Expected: exit 0；AST顶层函数数为6。
 - Modify: `src/memory/vector/write.js`
 - Modify: `src/memory/vector/stats.js`
 
-- [ ] **Step 1: 删除生产动态加载接线**
+- [x] **Step 1: 删除生产动态加载接线**
 
 从 `index.js` 移除 `runCommonJsChunks` 和7个chunk清单，静态导入7个实现模块与现有 `embedding.js`。不得读取旧chunk、调用 `new Function` 或通过包装函数转发。
 
-- [ ] **Step 2: 精确聚合23项公开API**
+- [x] **Step 2: 精确聚合23项公开API**
 
 `module.exports` 只包含Chunk 1的23个键，每个值直接引用所属实现模块或embedding门面的函数对象。不得导出内部helper、状态或 `_test` 接口。
 
-- [ ] **Step 3: 让4个非embedding门面直接引用实现**
+- [x] **Step 3: 让4个非embedding门面直接引用实现**
 
 `retrieval.js`、`store.js`、`write.js`、`stats.js` 直接从对应runtime选择既有键，不再先加载index；这些键与随后加载的index必须保持函数对象相同。`embedding.js` 不修改。
 
-- [ ] **Step 4: 运行边界测试转绿**
+- [x] **Step 4: 运行边界测试转绿**
 
 Run:
 
@@ -462,7 +469,7 @@ Expected: PASS；包含不执行vector chunk loader、23项主API、5门面/lega
 - Test: `tests/lancedbMemoryStore.integration.test.js`
 - Test: `tests/postReplyVectorWatchdog.test.js`
 
-- [ ] **Step 1: 定位或下载经官方SHA验证的Node 20.20.2**
+- [x] **Step 1: 定位或下载经官方SHA验证的Node 20.20.2**
 
 优先复用仓库此前记录的工作树外可信运行时；若不存在，则只下载Node.js官方Windows x64归档到 `%LOCALAPPDATA%\Temp`，先核对官方SHA-256，再解压和使用。不得替换系统Node、不得把运行时放入仓库、不得修改依赖。
 
@@ -501,7 +508,7 @@ $node20Info
 
 Expected: 输出Node `20.20.2`、modules `115` 及工作树外绝对路径；若下载，归档SHA-256精确匹配上述值。
 
-- [ ] **Step 2: 使用Node 20运行9项聚焦测试**
+- [x] **Step 2: 使用Node 20运行9项聚焦测试**
 
 Run:
 
@@ -511,7 +518,7 @@ Run:
 
 Expected: 9/9 PASS；包含真实LanceDB集成、semantic/embedding cache、动态patch和写入/召回回归。
 
-- [ ] **Step 3: 使用当前Node 24运行同一9项测试**
+- [x] **Step 3: 使用当前Node 24运行同一9项测试**
 
 Run:
 
@@ -529,7 +536,7 @@ Expected: version probe报告Node 24；同一9项全部PASS。
 **Files:**
 - Verify only: repository-wide gates
 
-- [ ] **Step 1: 运行静态、prompt、安全和差异门禁**
+- [x] **Step 1: 运行静态、prompt、安全和差异门禁**
 
 Run:
 
@@ -544,7 +551,7 @@ git diff --check
 
 Expected: lint、typecheck、prompt、secrets与diff check退出0。audit记录真实退出码、漏洞链和是否已存在于HEAD；不得在本批修改并行中的 `package.json` 或 `package-lock.json`。
 
-- [ ] **Step 2: 运行Node 24并发4完整测试**
+- [x] **Step 2: 运行Node 24并发4完整测试**
 
 Run:
 
@@ -555,7 +562,7 @@ npm test
 
 Expected: Git跟踪的完整测试集自然结束且退出0；记录测试文件数和耗时，不以分片或9项聚焦结果替代。
 
-- [ ] **Step 3: 核对入口数量和禁止改动范围**
+- [x] **Step 3: 核对入口数量和禁止改动范围**
 
 Run:
 
@@ -586,7 +593,7 @@ Expected: 动态chunk生产入口精确剩2个：`src/message/handler.js` 与 `s
 - Create: `tests/memoryVectorModuleBoundary.test.js`
 - Create: `docs/superpowers/plans/2026-07-24-memory-vector-commonjs-migration.md`
 
-- [ ] **Step 1: 只暂存14个实现范围文件**
+- [x] **Step 1: 只暂存14个实现范围文件**
 
 Run:
 
@@ -597,7 +604,7 @@ git diff --cached --name-only
 
 Expected: cached清单精确为上述14个文件，不包含旧chunk、既有memory文档、依赖、CI、覆盖率、安全诊断或其他并行文件。
 
-- [ ] **Step 2: 创建实现提交**
+- [x] **Step 2: 创建实现提交**
 
 Run:
 
@@ -616,11 +623,11 @@ Expected: commit成功；保存实现短哈希供文档记录。不得推送远�
 - Modify: `docs/superpowers/plans/2026-07-12-repository-32-goals-roadmap.md`
 - Modify: `docs/superpowers/plans/2026-07-24-memory-vector-commonjs-migration.md`
 
-- [ ] **Step 1: 写入带时区的验收证据**
+- [x] **Step 1: 写入带时区的验收证据**
 
 本计划随实现提交首次纳入版本控制；实现提交后只在上述4个文档追加 `YYYY-MM-DD HH:mm +08:00`、实现哈希、169/169 AST、23项API/5门面/legacy身份、3项store状态和writePipelineActive归属、0未知、0循环、lazy/native边界、Node 20/24九项结果、全门禁、audit真实结果以及并发4完整测试文件数和耗时。其他既有memory文档不修改。
 
-- [ ] **Step 2: 将目标5更新为部分完成4/6**
+- [x] **Step 2: 将目标5更新为部分完成4/6**
 
 路线图写明 `daily-share`、`passive-awareness`、`meme`、`memory/vector` 已迁移；动态chunk入口由3个降为2个，仅余 `message/handler` 与 `runtime-v2/context`。目标6仍未完成，必须等待两个剩余入口迁移后生成全仓权威生产依赖图。
 

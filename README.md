@@ -4,6 +4,12 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-25 13:52 +08:00
+
+- 目标5第四批完成：提交 `4d87c55` 将 `memory/vector` 的7个共享词法作用域chunk迁为7个显式CommonJS实现模块，生产入口不再读取或执行旧chunk；`daily-share`、`passive-awareness`、`meme`和`memory/vector`均已迁移，目标5推进至部分完成（4/6），仅余 `message/handler`与`runtime-v2/context`，目标6继续等待。
+- 169/169个函数按40/55/28/2/24/14/6对账，23项主入口API、5个门面及legacy身份保持不变；4项可变状态各归唯一owner，未知自由变量为0，依赖图为15条本地边加3条embedding边且0循环，lazy/native加载与singleton边界保持不变。
+- Node 20.20.2与Node 24.14.1的九项聚焦回归均为9/9；754文件lint、typecheck、107项prompt清单、全仓secrets和diff check通过，Node 24并发4全量523/523通过，耗时98.992秒。production audit退出1，仅报告HEAD既有 `body-parser`低危项和 `sharp`高危项；当前分支未推送。
+
 ## 运行维护 2026-07-24 08:21 +08:00
 
 - 目标5第三批完成：提交 `bc1d10f` 将 `meme` 的9个共享词法作用域chunk迁为10个显式CommonJS模块，生产入口不再读取或执行 `memeManager.*.chunk.js`。
