@@ -1,10 +1,10 @@
-const vectorMemory = require('./index');
+const write = require('./write-runtime');
 
 module.exports = {
-  addEpisodeMemory: vectorMemory.addEpisodeMemory,
-  addMemoryItem: vectorMemory.addMemoryItem,
-  addMemoryItemsBatch: vectorMemory.addMemoryItemsBatch,
-  addMemoryItemsBatchAsync: vectorMemory.addMemoryItemsBatchAsync,
-  addMemoryItemsBatchWithVectorBackfill: vectorMemory.addMemoryItemsBatchWithVectorBackfill,
-  rememberExplicitMemory: vectorMemory.rememberExplicitMemory
+  addEpisodeMemory: write.addEpisodeMemory,
+  addMemoryItem: write.addMemoryItem,
+  addMemoryItemsBatch: write.addMemoryItemsBatch,
+  addMemoryItemsBatchAsync: write.addMemoryItemsBatchAsync,
+  addMemoryItemsBatchWithVectorBackfill: write.addMemoryItemsBatchWithVectorBackfill,
+  rememberExplicitMemory: write.rememberExplicitMemory
 };

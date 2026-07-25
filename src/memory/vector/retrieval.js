@@ -1,9 +1,9 @@
-const vectorMemory = require('./index');
+const retrieval = require('./retrieval-runtime');
 
 module.exports = {
-  getCoreMemories: vectorMemory.getCoreMemories,
-  retrieveRelevantMemories: vectorMemory.retrieveRelevantMemories,
-  retrieveRelevantMemoriesAsync: vectorMemory.retrieveRelevantMemoriesAsync,
-  retrieveUnifiedMemories: vectorMemory.retrieveUnifiedMemories,
-  retrieveUnifiedMemoriesAsync: vectorMemory.retrieveUnifiedMemoriesAsync
+  getCoreMemories: retrieval.getCoreMemories,
+  retrieveRelevantMemories: retrieval.retrieveRelevantMemories,
+  retrieveRelevantMemoriesAsync: retrieval.retrieveRelevantMemoriesAsync,
+  retrieveUnifiedMemories: retrieval.retrieveUnifiedMemories,
+  retrieveUnifiedMemoriesAsync: retrieval.retrieveUnifiedMemoriesAsync
 };
