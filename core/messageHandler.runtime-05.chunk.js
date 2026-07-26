@@ -18,7 +18,13 @@
       directedContext,
       directedContextSummary: routerContextSummary,
       effectiveIntentText: runtimeQuestionText,
-      quotePriority: directedContext?.quotePriority || null
+      quotePriority: directedContext?.quotePriority || null,
+      qqCardUrls: Array.isArray(inboundContext.qqCardUrls) ? inboundContext.qqCardUrls : [],
+      cardContexts: Array.isArray(inboundContext.cardContexts) ? inboundContext.cardContexts : [],
+      cardOnly: inboundContext.cardOnly,
+      ...(Array.isArray(inboundContext.cardContexts) && inboundContext.cardContexts.some((card) => card.primaryUrl)
+        ? { allowedTools: Array.from(new Set([...(route.meta?.allowedTools || []), 'web_fetch'])) }
+        : {})
     };
     if (visualContext) {
       route.meta.visualContext = visualContext;

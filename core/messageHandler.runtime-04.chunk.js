@@ -46,7 +46,8 @@
         effectiveBotQQ,
         resolveReply: Boolean(continuousMeta.replyMessageId),
         resolveForward: Array.isArray(continuousMeta.forwardIds) && continuousMeta.forwardIds.length > 0,
-        resolveCards: Array.isArray(continuousMeta.qqCardUrls) && continuousMeta.qqCardUrls.length > 0
+        resolveCards: (Array.isArray(continuousMeta.cardContexts) && continuousMeta.cardContexts.length > 0)
+          || (Array.isArray(continuousMeta.qqCardUrls) && continuousMeta.qqCardUrls.length > 0)
       });
     }
     if (continuousMeta && typeof continuousMeta === 'object') {
@@ -446,6 +447,15 @@
         presenceReason: passiveResult?.presenceReason || ''
       });
       return;
+    }
+
+    const hasUrlLessInviteCard = inboundContext.cardOnly === true
+      && inboundContext.cardContexts.some((card) => card.kind === 'invite' && !card.primaryUrl);
+    if (hasUrlLessInviteCard) {
+      runtimeQuestionText = '[分享卡片]';
+      inboundContext.effectiveIntentText = runtimeQuestionText;
+      inboundContext.runtimeQuestionText = runtimeQuestionText;
+      inboundContext.cleanText = runtimeQuestionText;
     }
 
     console.log('[message] accepted inbound', {

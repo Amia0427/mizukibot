@@ -186,8 +186,121 @@ function buildSharedLinkPlannerDecision(route = {}, available = {}, options = {}
   );
 }
 
+function getRouteCardContexts(route = {}) {
+  const contexts = Array.isArray(route?.meta?.cardContexts) ? route.meta.cardContexts : [];
+  return contexts.filter((card) => card && typeof card === 'object');
+}
+
+function getOrderedCardUrls(route = {}, cardContexts = []) {
+  const urls = [];
+  const seen = new Set();
+  const primaryUrls = new Set(cardContexts.map((card) => String(card.primaryUrl || '').trim()).filter(Boolean));
+  const candidates = [
+    ...(Array.isArray(route?.meta?.qqCardUrls)
+      ? route.meta.qqCardUrls.filter((url) => primaryUrls.has(String(url || '').trim()))
+      : []),
+    ...cardContexts.map((card) => card.primaryUrl)
+  ];
+  for (const candidate of candidates) {
+    const url = String(candidate || '').trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
+}
+
+function hasExplicitCardReadRequest(text = '') {
+  return /(查看|看看|读一下|读取|总结|摘要|概括|评价|点评|分析|比较|对比|区别|哪个好|怎么样|讲了什么|内容是什么)/i.test(String(text || ''));
+}
+
+function buildCardChatOnlyDecision(route = {}, available = {}, options = {}, details = {}) {
+  return buildChatOnlyPlannerDecision(route, available, {
+    ...options,
+    reason: details.reason,
+    decisionSource: details.decisionSource,
+    intentSummary: details.intentSummary || 'respond to shared card metadata',
+    sourceScope: 'current_card_metadata'
+  });
+}
+
+function buildCardPlannerDecision(route = {}, available = {}, options = {}) {
+  const contract = buildCanonicalRouteContract(route);
+  if (contract.topRouteType !== 'direct_chat') return null;
+  const cardContexts = getRouteCardContexts(route);
+  if (cardContexts.length === 0) return null;
+  if (cardContexts.length > 3) {
+    return buildCardChatOnlyDecision(route, available, options, {
+      reason: 'more than three cards require user narrowing',
+      decisionSource: 'rule_preflight_card_limit',
+      intentSummary: 'ask user to narrow shared cards to at most three'
+    });
+  }
+
+  const urls = getOrderedCardUrls(route, cardContexts);
+  if (urls.length === 0) {
+    return buildCardChatOnlyDecision(route, available, options, {
+      reason: 'card metadata has no readable public url',
+      decisionSource: 'rule_preflight_card_metadata'
+    });
+  }
+
+  const chatType = String(route?.meta?.chatType || '').trim().toLowerCase();
+  const text = route?.question || route?.cleanText || '';
+  const shouldRead = urls.length > 1
+    || hasExplicitCardReadRequest(text)
+    || (chatType === 'private' && route?.meta?.cardOnly === true);
+  if (!shouldRead || !available.allowedToolNames.includes('web_fetch')) {
+    return buildCardChatOnlyDecision(route, available, options, {
+      reason: shouldRead ? 'card fetch tool unavailable' : 'ordinary card share does not require network reading',
+      decisionSource: shouldRead ? 'rule_preflight_card_tool_unavailable' : 'rule_preflight_card_chat_only'
+    });
+  }
+
+  const policyKey = resolvePolicyKey(route);
+  const decision = planning.normalizePlannerDecisionV2({
+    mode: 'tool_plan',
+    taskShape: 'tool_augmented_reply',
+    allowedToolNames: ['web_fetch'],
+    steps: urls.map((url, index) => ({
+      id: `qq_card_fetch_${index + 1}`,
+      tool: 'web_fetch',
+      args: { url },
+      kind: 'tool',
+      dependsOn: [],
+      parallelGroup: urls.length > 1 ? 'qq_card_fetch' : '',
+      sideEffect: false,
+      purpose: `读取第 ${index + 1} 张分享卡片的公开页面，供主回复结合当前对话回应`,
+      successCriteria: '返回公开页面正文或明确的不可用说明'
+    })),
+    plannerMeta: {
+      decisionVersion: planning.PLANNER_DECISION_VERSION,
+      plannerVersion: planning.DIRECT_CHAT_PLANNER_VERSION,
+      reason: urls.length > 1 ? 'read two or three shared cards in parallel' : 'read requested shared card',
+      plannerModel: planning.getPlannerModelName(),
+      decisionSource: 'rule_preflight_qq_card',
+      fallbackUsed: false,
+      semanticConfidence: 1,
+      needsSemanticRefinement: false
+    }
+  }, route, {
+    ...options,
+    toolCatalog: available.toolCatalog,
+    fallbackUsed: false
+  });
+  const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {
+    toolCatalog: available.toolCatalog
+  });
+  return attachExecutablePlanToPlannerDecision(
+    directChatDecision,
+    buildExecutablePlanFromPlannerDecision(directChatDecision, policyKey, route)
+  );
+}
+
 async function planDirectChat(route = {}, options = {}) {
   const available = planning.collectAvailableToolSummary(route, options);
+  const cardDecision = buildCardPlannerDecision(route, available, options);
+  if (cardDecision) return cardDecision;
   const sharedLinkDecision = buildSharedLinkPlannerDecision(route, available, options);
   if (sharedLinkDecision) return sharedLinkDecision;
   if (shouldBypassImageSummaryPlanner(route, available, options)) {

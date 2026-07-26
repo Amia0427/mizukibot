@@ -108,6 +108,34 @@ assert.strictEqual(
 );
 
 assert.strictEqual(isNormalFastReplyEligible(baseInput({ imageUrl: 'https://example.com/a.png' }), config), false, '图片不应命中');
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'private',
+        cardContexts: [{ kind: 'invite', primaryUrl: '' }],
+        cardOnly: true
+      }
+    }
+  }), config),
+  false,
+  '无 URL 卡片不应命中 fast path'
+);
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'private',
+        cardContexts: [{ kind: 'music', primaryUrl: 'https://music.163.com/#/song?id=186016' }],
+        cardOnly: true
+      }
+    }
+  }), config),
+  false,
+  '带 URL 卡片不应命中 fast path'
+);
 
 assert.strictEqual(
   isNormalFastReplyEligible(baseInput({ routeExecutionPlan: { executor: 'direct', topRouteType: 'direct_chat', allowTools: true, allowedTools: ['memory_cli'] } }), config),

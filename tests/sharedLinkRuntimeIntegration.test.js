@@ -17,7 +17,10 @@ const { getToolNames } = require('../api/toolRegistry');
 const { executeGlobalToolBatch } = require('../api/globalToolRuntime');
 const { buildCapabilityRegistry } = require('../api/runtimeV2/capabilities/registry');
 const scheduler = require('../api/runtimeV2/capabilities/scheduler');
+const { normalizePlanStep } = require('../api/runtimeV2/contracts');
+const { buildDirectChatExecutionBatches } = require('../api/runtimeV2/services/directChat');
 const { planDirectChat } = require('../core/directChatPlanner');
+const routeExecution = require('../core/routeExecution');
 
 function route(text, topRouteType = 'direct_chat', chatType = 'private') {
   return {
@@ -32,6 +35,33 @@ function route(text, topRouteType = 'direct_chat', chatType = 'private') {
       toolIntent: 'none',
       responseIntent: 'answer',
       allowedTools: ['read_shared_link']
+    }
+  };
+}
+
+function cardRoute({ text = '', urls = [], cardOnly = false, chatType = 'private', topRouteType = 'direct_chat' } = {}) {
+  return {
+    topRouteType,
+    question: text,
+    cleanText: text,
+    intent: { needsMemory: false, needsPlanning: false, toolNeed: [] },
+    facets: { sourceScope: 'none', domain: 'general', outputKind: 'answer' },
+    meta: {
+      chatType,
+      chatMode: 'text_chat',
+      toolIntent: 'none',
+      responseIntent: 'answer',
+      allowedTools: ['web_fetch'],
+      cardOnly,
+      qqCardUrls: urls,
+      cardContexts: urls.map((url, index) => ({
+        kind: index % 2 === 0 ? 'news' : 'music',
+        title: `卡片 ${index + 1}`,
+        description: '',
+        sourceLabel: '',
+        previewImageUrl: '',
+        primaryUrl: url
+      }))
     }
   };
 }
@@ -57,6 +87,75 @@ module.exports = (async () => {
   const duplicate = await planDirectChat(route('https://b23.tv/abc123 再看 https://music.163.com/#/song?id=186016'));
   assert.strictEqual(duplicate.executionPlan.steps.length, 1);
   assert.strictEqual(duplicate.executionPlan.steps[0].args.url, 'https://b23.tv/abc123');
+
+  const purePrivateCardRoute = cardRoute({
+    text: '[分享链接] https://music.163.com/#/song?id=186016',
+    urls: ['https://music.163.com/#/song?id=186016'],
+    cardOnly: true
+  });
+  const purePrivateCard = await planDirectChat(purePrivateCardRoute);
+  assert.deepStrictEqual(purePrivateCard.allowedToolNames, ['web_fetch']);
+  assert.strictEqual(purePrivateCard.executionPlan.steps[0].action, 'web_fetch');
+  const purePrivateExecution = routeExecution.resolveRouteExecution({
+    ...purePrivateCardRoute,
+    meta: {
+      ...purePrivateCardRoute.meta,
+      toolPlanner: purePrivateCard
+    }
+  }, config);
+  assert.strictEqual(purePrivateExecution.allowTools, true);
+  assert.deepStrictEqual(purePrivateExecution.allowedTools, ['web_fetch']);
+
+  const ordinaryShare = await planDirectChat(cardRoute({
+    text: '分享给你 https://example.com/ordinary',
+    urls: ['https://example.com/ordinary']
+  }));
+  assert.strictEqual(ordinaryShare.executionPlan.mode, 'chat_only');
+
+  const requestedSummary = await planDirectChat(cardRoute({
+    text: '帮我总结一下 https://example.com/summary',
+    urls: ['https://example.com/summary']
+  }));
+  assert.strictEqual(requestedSummary.executionPlan.steps[0].action, 'web_fetch');
+
+  const groupPureCard = await planDirectChat(cardRoute({
+    text: '[分享链接] https://example.com/group',
+    urls: ['https://example.com/group'],
+    cardOnly: true,
+    chatType: 'group'
+  }));
+  assert.strictEqual(groupPureCard.executionPlan.mode, 'chat_only');
+
+  const comparedUrls = [
+    'https://example.com/first',
+    'https://example.com/second',
+    'https://example.com/third'
+  ];
+  const comparedCards = await planDirectChat(cardRoute({
+    text: '比较这三张卡片',
+    urls: comparedUrls
+  }));
+  assert.deepStrictEqual(
+    comparedCards.executionPlan.steps.map((step) => step.args.url),
+    comparedUrls
+  );
+  assert.deepStrictEqual(
+    comparedCards.plannerDecisionV2.steps.map((step) => step.parallelGroup),
+    ['qq_card_fetch', 'qq_card_fetch', 'qq_card_fetch']
+  );
+  const normalizedComparedSteps = comparedCards.plannerDecisionV2.steps
+    .map((step, index) => normalizePlanStep(step, 'direct_chat', index));
+  assert.strictEqual(
+    buildDirectChatExecutionBatches(normalizedComparedSteps).find((batch) => batch.mode === 'parallel').items.length,
+    3
+  );
+
+  const tooManyCards = await planDirectChat(cardRoute({
+    text: '看看这些卡片',
+    urls: Array.from({ length: 4 }, (_, index) => `https://example.com/${index + 1}`)
+  }));
+  assert.strictEqual(tooManyCards.executionPlan.mode, 'chat_only');
+  assert.strictEqual(tooManyCards.decisionSource, 'rule_preflight_card_limit');
 
   const registry = buildCapabilityRegistry();
   assert.strictEqual(registry.byName.get('read_shared_link').timeoutMs, 30000);

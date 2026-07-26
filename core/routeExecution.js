@@ -12,6 +12,7 @@ const {
 } = require('./executablePlan');
 const config = require('../config');
 const { filterCompanionAllowedTools } = require('../utils/companionTools');
+const { routeHasReadableCardContext } = require('../utils/cardContext');
 const { isAdminUserId, isPrivateChatAccessAllowed } = require('../utils/privilegedPrivateChat');
 const {
   WEB_LOOKUP_ALLOWED_TOOLS,
@@ -189,12 +190,15 @@ function filterAllowedToolsForChatType(route = {}, allowedTools = [], runtimeCon
   const rawTools = normalizeToolNames(allowedTools);
   if (isPrivateAdminUser(route, runtimeConfig)) return rawTools;
   const companionTools = filterCompanionAllowedTools(rawTools, runtimeConfig);
+  const cardWebTools = routeHasReadableCardContext(route) && rawTools.includes('web_fetch')
+    ? ['web_fetch']
+    : [];
   const normalizedTools = routeHasExplicitWebSearchRequirement(route)
     ? normalizeToolNames([
         ...companionTools,
         ...rawTools.filter((toolName) => WEB_LOOKUP_ALLOWED_TOOLS.includes(toolName))
       ])
-    : companionTools;
+    : normalizeToolNames([...companionTools, ...cardWebTools]);
   if (normalizeChatType(route) !== 'private') return normalizedTools;
   if (isPrivateActionExempt(route, runtimeConfig)) return normalizedTools;
   return normalizedTools.filter((toolName) => isPrivateSafeTool(toolName));

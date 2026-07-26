@@ -297,7 +297,8 @@
         effectiveBotQQ,
         resolveReply: Boolean(syntheticContinuousMeta.replyMessageId),
         resolveForward: Array.isArray(syntheticContinuousMeta.forwardIds) && syntheticContinuousMeta.forwardIds.length > 0,
-        resolveCards: Array.isArray(syntheticContinuousMeta.qqCardUrls) && syntheticContinuousMeta.qqCardUrls.length > 0
+        resolveCards: (Array.isArray(syntheticContinuousMeta.cardContexts) && syntheticContinuousMeta.cardContexts.length > 0)
+          || (Array.isArray(syntheticContinuousMeta.qqCardUrls) && syntheticContinuousMeta.qqCardUrls.length > 0)
       });
       syntheticContinuousMeta.sessionKey = '';
       syntheticContinuousMeta.freshnessSessionKey = rawInboundFreshnessSessionKey;

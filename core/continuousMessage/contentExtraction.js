@@ -1,6 +1,12 @@
 const config = require('../../config');
 
 const URL_KEY_HINTS = new Set(['jumpurl', 'qqdocurl', 'url', 'musicurl']);
+const MAX_CARD_CONTEXTS = 8;
+const CARD_TEXT_LIMITS = Object.freeze({
+  title: 160,
+  description: 500,
+  sourceLabel: 80
+});
 const KNOWN_CARD_PLATFORM_LABELS = Object.freeze({
   bilibili: 'B站',
   xhs: '小红书',
@@ -146,6 +152,95 @@ function uniqueStrings(items = []) {
   return output;
 }
 
+function truncateCardText(value = '', limit = 0) {
+  const text = normalizeText(value).replace(/\s+/g, ' ');
+  return limit > 0 ? text.slice(0, limit) : text;
+}
+
+function normalizePreviewImageUrl(value = '') {
+  const normalized = normalizeUrl(value);
+  return /^https?:\/\//i.test(normalized) ? normalized : '';
+}
+
+function resolveCardKind(payload = {}) {
+  const app = normalizeText(payload.app).toLowerCase();
+  const view = normalizeText(payload.view).toLowerCase();
+  const meta = payload.meta && typeof payload.meta === 'object' && !Array.isArray(payload.meta)
+    ? payload.meta
+    : {};
+  if (view === 'music' || meta.music) return 'music';
+  if (app.includes('miniapp') || ['notification', 'miniapp'].includes(view) || meta.miniapp || meta.notification) return 'miniapp';
+  if (app.includes('invite') || ['contact', 'invite'].includes(view) || meta.contact || meta.invite) return 'invite';
+  if (view === 'news' || meta.news) return 'news';
+  return 'unknown';
+}
+
+function resolveCardMeta(payload = {}, kind = 'unknown') {
+  const meta = payload.meta && typeof payload.meta === 'object' && !Array.isArray(payload.meta)
+    ? payload.meta
+    : {};
+  const keysByKind = {
+    news: ['news'],
+    music: ['music'],
+    miniapp: ['notification', 'miniapp', 'detail_1'],
+    invite: ['contact', 'invite', 'detail_1'],
+    unknown: ['news', 'music', 'notification', 'miniapp', 'contact', 'detail_1']
+  };
+  for (const key of keysByKind[kind] || keysByKind.unknown) {
+    if (meta[key] && typeof meta[key] === 'object' && !Array.isArray(meta[key])) return meta[key];
+  }
+  return {};
+}
+
+function normalizeCardContexts(contexts = [], limit = MAX_CARD_CONTEXTS) {
+  const output = [];
+  const seen = new Set();
+  const maxItems = Math.max(1, Math.min(MAX_CARD_CONTEXTS, Number(limit) || MAX_CARD_CONTEXTS));
+  for (const context of Array.isArray(contexts) ? contexts : []) {
+    if (!context || typeof context !== 'object') continue;
+    const normalized = {
+      kind: ['news', 'music', 'miniapp', 'invite', 'unknown'].includes(context.kind) ? context.kind : 'unknown',
+      title: truncateCardText(context.title, CARD_TEXT_LIMITS.title),
+      description: truncateCardText(context.description, CARD_TEXT_LIMITS.description),
+      sourceLabel: truncateCardText(context.sourceLabel, CARD_TEXT_LIMITS.sourceLabel),
+      previewImageUrl: normalizePreviewImageUrl(context.previewImageUrl),
+      primaryUrl: normalizeText(context.primaryUrl)
+    };
+    const key = normalized.primaryUrl || [
+      normalized.kind,
+      normalized.title,
+      normalized.description,
+      normalized.sourceLabel
+    ].join('\u0000');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(normalized);
+    if (output.length >= maxItems) break;
+  }
+  return output;
+}
+
+function extractCardContextsFromJsonPayload(payload) {
+  const parsed = safeJsonParse(payload);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+  const kind = resolveCardKind(parsed);
+  const meta = resolveCardMeta(parsed, kind);
+  const primaryUrl = extractUrlsFromJsonPayload(parsed)[0] || '';
+  const title = meta.title || parsed.title || (kind === 'invite' ? parsed.prompt : '');
+  const description = meta.desc || meta.description || parsed.desc || '';
+  const sourceLabel = meta.tag || meta.source || meta.appInfo?.appName || '';
+  const previewImageUrl = meta.preview || meta.previewUrl || meta.cover || meta.image || meta.icon || '';
+  if (kind === 'unknown' && !title && !description && !sourceLabel && !primaryUrl) return [];
+  return normalizeCardContexts([{
+    kind,
+    title,
+    description,
+    sourceLabel,
+    previewImageUrl,
+    primaryUrl
+  }]);
+}
+
 function normalizeImageSummaryText(value = '') {
   const decoded = normalizeText(decodeCqValue(value));
   if (!decoded) return '';
@@ -244,6 +339,20 @@ function extractUrlsFromRawJsonSegments(rawText = '') {
   return uniqueStrings(extracted);
 }
 
+function extractCardContextsFromRawJsonSegments(rawText = '') {
+  const contexts = [];
+  const source = String(rawText || '');
+  const regex = /\[CQ:json,([^\]]+)\]/gi;
+  let match = regex.exec(source);
+  while (match) {
+    const attrs = parseCqSegmentAttributes(match[1]);
+    const payload = attrs.data || attrs.content || '';
+    if (payload) contexts.push(...extractCardContextsFromJsonPayload(payload));
+    match = regex.exec(source);
+  }
+  return normalizeCardContexts(contexts);
+}
+
 function normalizeMessageArray(message) {
   if (Array.isArray(message)) return message;
   if (typeof message === 'string' && message.trim()) {
@@ -328,6 +437,7 @@ function collectMessageContent(message = [], options = {}) {
   const imageUrls = [];
   const forwardIds = [];
   const qqCardUrls = [];
+  const cardContexts = [];
   const seenCardUrls = new Set();
   let replyMessageId = '';
 
@@ -355,6 +465,7 @@ function collectMessageContent(message = [], options = {}) {
     if (type === 'json') {
       if (!qqCardLinksEnabled) continue;
       const payload = data.data || data.content || '';
+      cardContexts.push(...extractCardContextsFromJsonPayload(payload));
       for (const url of extractUrlsFromJsonPayload(payload)) {
         if (!url || seenCardUrls.has(url)) continue;
         seenCardUrls.add(url);
@@ -377,6 +488,7 @@ function collectMessageContent(message = [], options = {}) {
     imageUrls,
     forwardIds,
     qqCardUrls,
+    cardContexts: normalizeCardContexts(cardContexts),
     replyMessageId
   };
 }
@@ -448,14 +560,18 @@ function senderIdFromMessage(msg = {}) {
 }
 
 module.exports = {
+  MAX_CARD_CONTEXTS,
   appendCardUrlsToText,
   appendPromptLine,
   canonicalizeKnownShareUrl,
   collectMessageContent,
+  extractCardContextsFromJsonPayload,
+  extractCardContextsFromRawJsonSegments,
   extractTextAndImagesFromMessage,
   extractUrlsFromJsonPayload,
   extractUrlsFromRawJsonSegments,
   identifyCardPlatform,
+  normalizeCardContexts,
   normalizeText,
   safeJsonParse,
   segmentData,

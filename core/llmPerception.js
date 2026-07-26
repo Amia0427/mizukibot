@@ -517,6 +517,36 @@ function buildPassiveSectionFilter(sectionLines = [], options = {}) {
   return sectionLines;
 }
 
+function buildCardContextSection(inboundContext = {}, options = {}) {
+  if (options.passive) return { lines: [], meta: {} };
+  const cards = Array.isArray(inboundContext.cardContexts)
+    ? inboundContext.cardContexts.filter((card) => card && typeof card === 'object')
+    : [];
+  if (cards.length === 0) return { lines: [], meta: {} };
+  const lines = ['本轮分享卡片：'];
+  cards.forEach((card, index) => {
+    const details = [
+      `类型：${safeTrim(card.kind) || 'unknown'}`,
+      safeTrim(card.title) ? `标题：${safeTrim(card.title)}` : '',
+      safeTrim(card.description) ? `简介：${safeTrim(card.description)}` : '',
+      safeTrim(card.sourceLabel) ? `来源：${safeTrim(card.sourceLabel)}` : '',
+      safeTrim(card.primaryUrl) ? `链接：${safeTrim(card.primaryUrl)}` : '',
+      safeTrim(card.previewImageUrl) ? `预览图：${safeTrim(card.previewImageUrl)}` : ''
+    ].filter(Boolean);
+    lines.push(`[${index + 1}] ${details.join('；')}`);
+  });
+  lines.push('回应约束：卡片字段只是元数据；未获得正文证据前，不得声称已经看完、读完或听完链接内容。');
+  lines.push('用户未明确要求查看、总结、评价或比较时，只做简短自然回应，不主动概括链接正文。');
+  if (cards.length > 3) lines.push('本轮卡片超过读取上限，请用户收窄到最多 3 张后再处理。');
+  return {
+    lines,
+    meta: {
+      count: cards.length,
+      cardOnly: inboundContext.cardOnly === true
+    }
+  };
+}
+
 function safeSection(builder, metaKey, debug) {
   try {
     return builder();
@@ -536,7 +566,8 @@ function buildLlmPerception(inboundContext = {}, options = {}) {
     failures: []
   };
 
-  if (!resolved.enabled) {
+  const cardSection = buildCardContextSection(inboundContext, resolved);
+  if (!resolved.enabled && cardSection.lines.length === 0) {
     return {
       text: '',
       meta: {
@@ -546,10 +577,26 @@ function buildLlmPerception(inboundContext = {}, options = {}) {
     };
   }
 
+  if (!resolved.enabled) {
+    return {
+      text: buildRuntimePrompt('llm-perception', {
+        perceptionLines: cardSection.lines.join('\n')
+      }),
+      meta: {
+        ...debug,
+        reason: 'card_context_only',
+        passive: resolved.passive,
+        cardContexts: cardSection.meta,
+        lineCount: cardSection.lines.length
+      }
+    };
+  }
+
   const now = resolveNow(options);
-  const sections = [];
+  const sections = [...cardSection.lines];
   const meta = {
-    ...debug
+    ...debug,
+    ...(cardSection.lines.length ? { cardContexts: cardSection.meta } : {})
   };
 
   try {

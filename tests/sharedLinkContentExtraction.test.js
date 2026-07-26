@@ -9,6 +9,8 @@ const {
 (() => {
   assert.strictEqual(identifyCardPlatform('https://xhslink.com/a/abc123'), 'xhs');
   assert.strictEqual(identifyCardPlatform('https://b23.tv/abc123'), 'bilibili');
+  assert.strictEqual(identifyCardPlatform('https://www.bilibili.com/video/BV1xx411c7mD'), 'bilibili');
+  assert.strictEqual(identifyCardPlatform('https://www.xiaohongshu.com/explore/abc123'), 'xhs');
   assert.strictEqual(identifyCardPlatform('https://music.163.com/#/album?id=34720827'), 'ncm');
 
   assert.strictEqual(
@@ -18,6 +20,10 @@ const {
   assert.strictEqual(
     canonicalizeKnownShareUrl('https://m.bilibili.com/video/BV1xx411c7mD?p=2&spm_id_from=333'),
     'https://www.bilibili.com/video/BV1xx411c7mD?p=2'
+  );
+  assert.strictEqual(
+    canonicalizeKnownShareUrl('https://www.bilibili.com/video/BV1xx411c7mD?spm_id_from=333'),
+    'https://www.bilibili.com/video/BV1xx411c7mD'
   );
   assert.strictEqual(
     canonicalizeKnownShareUrl('https://music.163.com/#/song?id=186016'),

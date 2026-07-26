@@ -5,6 +5,7 @@ const { recordModelCallParseFailure } = require('../../../utils/modelCallTracker
 const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
+const { routeHasReadableCardContext } = require('../../../utils/cardContext');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
 const {
   WEB_LOOKUP_ALLOWED_TOOLS,
@@ -155,13 +156,16 @@ function getAllowedToolNames(context = {}) {
   if (isAdminPrivateChatContext(context, runtimeConfig)) return normalizedTools;
   const companionTools = filterCompanionAllowedTools(normalizedTools, runtimeConfig);
   const routeMeta = context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {};
+  const cardWebTools = routeHasReadableCardContext({ meta: routeMeta }) && normalizedTools.includes('web_fetch')
+    ? ['web_fetch']
+    : [];
   if (!routeHasExplicitWebSearchRequirement({
     question: context.question || routeMeta.effectiveIntentText || routeMeta.cleanText,
     cleanText: context.cleanText || routeMeta.cleanText || routeMeta.effectiveIntentText,
     rawText: context.rawText || routeMeta.rawText,
     meta: routeMeta
   })) {
-    return companionTools;
+    return normalizeToolNames([...companionTools, ...cardWebTools]);
   }
   return normalizeToolNames([
     ...companionTools,

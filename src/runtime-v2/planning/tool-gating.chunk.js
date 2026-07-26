@@ -60,6 +60,7 @@ const {
   pickMinimalToolAllowlist
 } = require('./tool-selection.chunk');
 const { extractFirstSupportedSharedLink } = require('../../../api/skills_native/sharedLink/url');
+const { routeHasReadableCardContext } = require('../../../utils/cardContext');
 
 function getPromptNormalizer() {
   return require('./prompt-normalizer.chunk');
@@ -109,9 +110,13 @@ function collectAvailableToolSummary(route = {}, options = {}) {
   const explicitWebToolNames = routeHasExplicitWebSearchRequirement(route)
     ? effectiveRouteAllowedTools.filter((toolName) => isWebLookupTool(toolName))
     : [];
+  const cardWebToolNames = routeHasReadableCardContext(route)
+    ? effectiveRouteAllowedTools.filter((toolName) => toolName === 'web_fetch')
+    : [];
   const allowedByCompanionMode = new Set([
     ...companionAllowedToolNames,
-    ...explicitWebToolNames
+    ...explicitWebToolNames,
+    ...cardWebToolNames
   ]);
   const toolCatalog = explicitFilteredCatalog.filter((item) => allowedByCompanionMode.has(normalizeText(item?.name)));
   return {
@@ -147,6 +152,7 @@ function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], optio
   ) {
     return 'allow_safe_explicit_web_search';
   }
+  if (allowed.includes('web_fetch') && routeHasReadableCardContext(route)) return 'allow_safe_card_fetch';
   const unsafe = allowed.filter((toolName) => !isCompanionPlannerSafeReadTool(toolName));
   if (unsafe.length > 0) return `blocked_unsafe_tools:${unsafe.join(',')}`;
   const cleanText = getPlannerRequestText(route);

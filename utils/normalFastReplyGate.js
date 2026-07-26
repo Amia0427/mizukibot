@@ -59,6 +59,15 @@ function getRouteText(input = {}) {
   );
 }
 
+function hasCardInput(input = {}) {
+  const candidates = [
+    input.cardContexts,
+    input.inboundContext?.cardContexts,
+    input.route?.meta?.cardContexts
+  ];
+  return candidates.some((cards) => Array.isArray(cards) && cards.length > 0);
+}
+
 function isGroupChat(input = {}) {
   const route = input.route || {};
   const routeMeta = route.meta && typeof route.meta === 'object' ? route.meta : {};
@@ -117,6 +126,7 @@ const FAST_REPLY_CHECKS = Object.freeze([
   { key: 'tools_not_allowed', reason: 'tools_allowed', label: 'route does not allow tools', exitFlag: 'tools' },
   { key: 'no_tools_present', reason: 'tools_present', label: 'no planner/tool allowlist present', exitFlag: 'tools' },
   { key: 'no_image_input', reason: 'image_present', label: 'no image or visual input', exitFlag: 'image' },
+  { key: 'no_card_input', reason: 'card_present', label: 'no card input', exitFlag: 'continuity' },
   { key: 'no_route_action_or_safety', reason: 'route_action_or_safety', label: 'no action/safety route metadata', exitFlag: 'permission' },
   { key: 'no_memory_cli_turn', reason: 'memory_cli_turn', label: 'no memory_cli turn state', exitFlag: 'continuity' },
   { key: 'text_present', reason: 'empty_text', label: 'text is not empty', exitFlag: 'continuity' },
@@ -192,6 +202,7 @@ function explainNormalFastReplyDecision(input = {}, runtimeConfig = {}, options 
   checks.push(buildCheck('tools_not_allowed', routeExecutionPlan.allowTools !== true));
   checks.push(buildCheck('no_tools_present', !hasAllowedTools(input)));
   checks.push(buildCheck('no_image_input', !hasImageInput(input)));
+  checks.push(buildCheck('no_card_input', !hasCardInput(input)));
 
   const routeMeta = route.meta && typeof route.meta === 'object' ? route.meta : {};
   checks.push(buildCheck('no_route_action_or_safety', !(routeMeta.command || routeMeta.qqActionKey || routeMeta.safetyBoundary === true)));
