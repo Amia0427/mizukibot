@@ -232,3 +232,9 @@ Prompt 从普通系统提示词演进到 manifest、persona worldbook、runtime 
 提交 `eca646d` 为陪伴模式增加只读 `read_shared_link`：现有回复路由通过后，planner 对本轮第一个受支持链接生成单步计划，由独立解析器读取小红书公开图文、网易云单曲/歌单/专辑和B站公开视频信息。平台解析、SSRF与逐跳域名检查、Cookie隔离、响应预算、进程内缓存、视觉降级和自然中文证据分别保持独立边界，第三方内容不进入长期记忆。
 
 验收结果：新增固定夹具、删除/私密/限流/风控、歌词与字幕缺失、前三张图片、响应与图片大小、缓存TTL与并发合并、日志脱敏、非回复路由和30秒独立超时测试；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`npm test`、暂存区秘密扫描与 `git diff --cached --check` 全部通过。网易云公开单曲实时读取完整，B站公开视频实时读取元数据成功且无字幕时按部分结果降级；小红书没有可用公开样本且 `SHARED_LINK_XHS_COOKIE` 未配置，外部验收保持未验证。本地实现小目标已完成，未推送远端。
+
+## Anthropic 工具调用 ID 修复（2026-07-26 11:18 +08:00）
+
+提交 `4216032` 修复分享链接读取完成后主回复请求返回 400：运行时生成的 `shared-link:<contentId>` 被拼入工具调用 ID，冒号不满足 Anthropic 的字符约束。请求整形层现仅对非法 ID 做稳定 SHA-256 摘要映射，同一原始 ID 在 assistant `tool_use` 与 user `tool_result` 两侧得到相同合规值，原有合法 ID 保持不变。
+
+验收结果：非法 ID 合规性、两侧关联一致性及合法 ID 保持测试通过，现有 provider 请求测试、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、暂存区秘密扫描和 diff check 通过。`npm test` 受工作树中其他代理尚未提交的 QQ 卡片/快速回复改动影响失败，本修复未覆盖这些文件；本小目标已完成，未推送远端。
