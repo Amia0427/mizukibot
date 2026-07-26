@@ -5,6 +5,7 @@ const { recordModelCallParseFailure } = require('../../../utils/modelCallTracker
 const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
+const { routeHasReadableCardContext } = require('../../../utils/cardContext');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
 const {
   WEB_LOOKUP_ALLOWED_TOOLS,
@@ -79,6 +80,10 @@ function summarizeMalformedResponse(response = null) {
   const firstChoice = Array.isArray(parsed?.choices) ? parsed.choices[0] : null;
   const firstCandidate = Array.isArray(parsed?.candidates) ? parsed.candidates[0] : null;
   const firstOutput = Array.isArray(parsed?.output) ? parsed.output[0] : null;
+  const firstChoiceMessage = firstChoice?.message && typeof firstChoice.message === 'object'
+    ? firstChoice.message
+    : null;
+  const firstChoiceContent = firstChoiceMessage?.content;
   const geminiParts = Array.isArray(firstCandidate?.content?.parts)
     ? firstCandidate.content.parts
     : [];
@@ -92,6 +97,14 @@ function summarizeMalformedResponse(response = null) {
     choices_count: Array.isArray(parsed?.choices) ? parsed.choices.length : null,
     first_choice_keys: listObjectKeys(firstChoice),
     first_choice_finish_reason: String(firstChoice?.finish_reason || '').trim(),
+    first_choice_message_keys: listObjectKeys(firstChoiceMessage),
+    first_choice_message_content_type: Array.isArray(firstChoiceContent) ? 'array' : typeof firstChoiceContent,
+    first_choice_message_content_chars: typeof firstChoiceContent === 'string' ? firstChoiceContent.length : null,
+    first_choice_message_has_reasoning: Boolean(
+      firstChoiceMessage?.reasoning
+      || firstChoiceMessage?.reasoning_content
+      || firstChoiceMessage?.thinking
+    ),
     candidates_count: Array.isArray(parsed?.candidates) ? parsed.candidates.length : null,
     first_candidate_keys: listObjectKeys(firstCandidate),
     first_candidate_finish_reason: String(firstCandidate?.finishReason || firstCandidate?.finish_reason || '').trim(),
@@ -143,13 +156,16 @@ function getAllowedToolNames(context = {}) {
   if (isAdminPrivateChatContext(context, runtimeConfig)) return normalizedTools;
   const companionTools = filterCompanionAllowedTools(normalizedTools, runtimeConfig);
   const routeMeta = context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {};
+  const cardWebTools = routeHasReadableCardContext({ meta: routeMeta }) && normalizedTools.includes('web_fetch')
+    ? ['web_fetch']
+    : [];
   if (!routeHasExplicitWebSearchRequirement({
     question: context.question || routeMeta.effectiveIntentText || routeMeta.cleanText,
     cleanText: context.cleanText || routeMeta.cleanText || routeMeta.effectiveIntentText,
     rawText: context.rawText || routeMeta.rawText,
     meta: routeMeta
   })) {
-    return companionTools;
+    return normalizeToolNames([...companionTools, ...cardWebTools]);
   }
   return normalizeToolNames([
     ...companionTools,

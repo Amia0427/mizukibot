@@ -1,6 +1,11 @@
 const assert = require('assert');
 
 const config = require('../config');
+const {
+  createLoginRateLimiter,
+  getClientIp,
+  verifyWebToken
+} = require('../web/auth');
 const { __test } = require('../web/server');
 
 function makeReq({ method = 'GET', remoteAddress = '127.0.0.1', headers = {} } = {}) {
@@ -23,50 +28,102 @@ async function withConfig(patch, fn) {
 }
 
 (async () => {
-await withConfig({ WEB_TOKEN: 'secret-token', WEB_BIND_HOST: '127.0.0.1' }, async () => {
-  assert.strictEqual(__test.checkWebAuth(makeReq({ headers: { 'x-web-token': 'secret-token' } })), true);
-  assert.strictEqual(__test.checkWebAuth(makeReq({ headers: { authorization: 'Bearer secret-token' } })), true);
-  assert.strictEqual(__test.checkWebAuth(makeReq({ remoteAddress: '203.0.113.10' })), false);
-});
+  assert.strictEqual(verifyWebToken('secret-token', 'secret-token'), true);
+  assert.strictEqual(verifyWebToken('secret-token-x', 'secret-token'), false);
+  assert.strictEqual(verifyWebToken('', 'secret-token'), false);
+  assert.strictEqual(verifyWebToken('secret-token', ''), false);
 
-await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '127.0.0.1', WEB_LOCAL_ONLY_WITHOUT_TOKEN: true }, async () => {
-  assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), true);
-  assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '203.0.113.10' }), { host: '127.0.0.1', port: 3005 }), false);
-});
-
-await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '0.0.0.0', WEB_LOCAL_ONLY_WITHOUT_TOKEN: true }, async () => {
-  assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '0.0.0.0', port: 3005 }), false);
-});
-
-await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '127.0.0.1', WEB_LOCAL_ONLY_WITHOUT_TOKEN: false }, async () => {
-  assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), false);
-});
-
-await withConfig({ MODEL_ENDPOINT_ALLOW_LOCAL_HTTP: false }, async () => {
-  const safe = await __test.getSettingsEndpointError({
-    api_base_url: 'https://example.com/v1/chat/completions'
-  }, {
-    lookup: async () => [{ address: '93.184.216.34', family: 4 }]
+  await withConfig({ WEB_TOKEN: 'secret-token', WEB_BIND_HOST: '127.0.0.1' }, async () => {
+    assert.strictEqual(__test.checkWebAuth(makeReq({ headers: { 'x-web-token': 'secret-token' } })), false);
+    assert.strictEqual(__test.checkWebAuth(makeReq({ headers: { authorization: 'Bearer secret-token' } })), false);
   });
-  assert.strictEqual(safe, '');
 
-  const httpError = await __test.getSettingsEndpointError({
-    api_base_url: 'http://example.com/v1/chat/completions'
-  }, {
-    lookup: async () => [{ address: '93.184.216.34', family: 4 }]
+  assert.strictEqual(getClientIp(makeReq({
+    remoteAddress: '127.0.0.1',
+    headers: { 'x-forwarded-for': '203.0.113.10' }
+  })), '127.0.0.1');
+  assert.strictEqual(getClientIp(makeReq({
+    remoteAddress: '127.0.0.1',
+    headers: { 'x-forwarded-for': '203.0.113.10, 127.0.0.1' }
+  }), { trustProxyHops: 1 }), '127.0.0.1');
+  assert.strictEqual(getClientIp(makeReq({
+    remoteAddress: '198.51.100.5',
+    headers: { 'x-forwarded-for': '203.0.113.10' }
+  }), { trustProxyHops: 1 }), '198.51.100.5');
+  assert.strictEqual(getClientIp(makeReq({
+    remoteAddress: '198.51.100.5',
+    headers: { 'x-forwarded-for': '127.0.0.1, 203.0.113.10' }
+  }), { trustProxyHops: 1 }), '198.51.100.5');
+  assert.strictEqual(getClientIp(makeReq({
+    remoteAddress: '127.0.0.1',
+    headers: { 'x-forwarded-for': '127.0.0.1, 203.0.113.10' }
+  }), { trustProxyHops: 1 }), '203.0.113.10');
+
+  await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '127.0.0.1', WEB_LOCAL_ONLY_WITHOUT_TOKEN: true }, async () => {
+    assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), true);
+    assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '203.0.113.10' }), { host: '127.0.0.1', port: 3005 }), false);
+    assert.strictEqual(__test.checkWebAuth(makeReq({
+      method: 'GET',
+      remoteAddress: '127.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.10' }
+    }), { host: '127.0.0.1', port: 3005, trustProxyHops: 1 }), false);
+    assert.strictEqual(__test.checkWebAuth(makeReq({
+      method: 'POST',
+      remoteAddress: '127.0.0.1',
+      headers: {
+        origin: 'http://127.0.0.1:3005',
+        'x-forwarded-for': '203.0.113.10'
+      }
+    }), { host: '127.0.0.1', port: 3005, trustProxyHops: 1 }), false);
   });
-  assert.match(httpError, /API_BASE_URL.*https/);
 
-  const privateError = await __test.getSettingsEndpointError({
-    api_base_url: 'https://example.com/v1/chat/completions',
-    ai_router_base_url: 'https://router.example.com/v1/chat/completions'
-  }, {
-    lookup: async (hostname) => [{ address: hostname === 'router.example.com' ? '10.0.0.5' : '93.184.216.34', family: 4 }]
+  await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '0.0.0.0', WEB_LOCAL_ONLY_WITHOUT_TOKEN: true }, async () => {
+    assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '0.0.0.0', port: 3005 }), false);
   });
-  assert.match(privateError, /AI_ROUTER_BASE_URL.*disallowed/);
-});
 
-console.log('webAuthSecurity.test.js passed');
+  await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '127.0.0.1', WEB_LOCAL_ONLY_WITHOUT_TOKEN: false }, async () => {
+    assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), false);
+  });
+
+  let now = 1000;
+  const limiter = createLoginRateLimiter({
+    maxAttempts: 2,
+    maxClients: 2,
+    now: () => now,
+    windowMs: 1000
+  });
+  assert.deepStrictEqual(limiter.check('client-a'), { allowed: true, retryAfterSeconds: 0 });
+  limiter.recordFailure('client-a');
+  limiter.recordFailure('client-a');
+  assert.deepStrictEqual(limiter.check('client-a'), { allowed: false, retryAfterSeconds: 1 });
+  now += 1001;
+  assert.deepStrictEqual(limiter.check('client-a'), { allowed: true, retryAfterSeconds: 0 });
+
+  await withConfig({ MODEL_ENDPOINT_ALLOW_LOCAL_HTTP: false }, async () => {
+    const safe = await __test.getSettingsEndpointError({
+      api_base_url: 'https://example.com/v1/chat/completions'
+    }, {
+      lookup: async () => [{ address: '93.184.216.34', family: 4 }]
+    });
+    assert.strictEqual(safe, '');
+
+    const httpError = await __test.getSettingsEndpointError({
+      api_base_url: 'http://example.com/v1/chat/completions'
+    }, {
+      lookup: async () => [{ address: '93.184.216.34', family: 4 }]
+    });
+    assert.match(httpError, /API_BASE_URL.*https/);
+
+    const privateError = await __test.getSettingsEndpointError({
+      api_base_url: 'https://example.com/v1/chat/completions',
+      ai_router_base_url: 'https://router.example.com/v1/chat/completions'
+    }, {
+      lookup: async (hostname) => [{ address: hostname === 'router.example.com' ? '10.0.0.5' : '93.184.216.34', family: 4 }]
+    });
+    assert.match(privateError, /AI_ROUTER_BASE_URL.*disallowed/);
+  });
+
+  console.log('webAuthSecurity.test.js passed');
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
   process.exit(1);

@@ -124,6 +124,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           triggerBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct.final_send' : 'tool_plan.final_send',
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrl,
           imageUrls,
           deferPersist: false,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
@@ -244,7 +245,16 @@ function createMessageDispatchCoordinator(deps = {}) {
           senderId,
           shouldSend: freshness && typeof freshness.shouldSend === 'function'
             ? freshness.shouldSend
-            : null
+            : null,
+          source: 'main_reply',
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+          triggerReason: 'direct_reply.final_send',
+          topRouteType: routeExecutionPlan.topRouteType,
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+            groupId,
+            messageId: String(sourceMessageId || '').trim(),
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
+          })
         });
         const streamOptions = {
           onDelta: streamingDispatcher.onDelta,
@@ -266,6 +276,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrl,
           imageUrls,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,

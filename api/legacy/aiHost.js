@@ -790,6 +790,7 @@ function buildConversationMessagesWithCompression(
     channelId: routeMeta.channelId || routeMeta.channel_id || '',
     taskType: routeMeta.taskType || routeMeta.task_type || ''
   });
+  const normalizeArray = (value) => Array.isArray(value) ? value : [];
   const segments = {
     system_prompt: dynamicPrompt
       ? [{ role: 'system', content: dynamicPrompt }, { role: 'system', content: HUMANIZER_SYSTEM_PROMPT }]

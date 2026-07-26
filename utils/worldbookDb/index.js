@@ -9,6 +9,7 @@ const {
   normalizeText: normalizeTextRaw,
   tokenize
 } = require('../memory-v3/helpers');
+const { openSqliteDatabase } = require('../sqliteConnection');
 
 const DEFAULT_DOC_MAX_CHARS = 1200;
 const ACTIVE_STATUSES = new Set(['active', 'candidate']);
@@ -192,8 +193,6 @@ function buildFtsText(entry = {}) {
 }
 
 function initSchema(db) {
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE IF NOT EXISTS worldbook_entries (
       id TEXT PRIMARY KEY,
@@ -303,7 +302,7 @@ function getDb(options = {}) {
   try {
     const file = getDbFile();
     ensureDir(file);
-    dbInstance = new Database(file);
+    dbInstance = openSqliteDatabase(Database, file);
     initSchema(dbInstance);
     return dbInstance;
   } catch (error) {
@@ -313,16 +312,20 @@ function getDb(options = {}) {
   }
 }
 
-function resetDbForTests() {
+function closeDb() {
   if (dbInstance) {
     try {
       dbInstance.close();
     } catch (_) {}
   }
   dbInstance = null;
+  ftsAvailable = false;
+}
+
+function resetDbForTests() {
+  closeDb();
   dbError = null;
   fallbackCount = 0;
-  ftsAvailable = false;
 }
 
 function syncFtsRow(db, entry = {}) {
@@ -901,6 +904,7 @@ module.exports = {
   DEFAULT_DOC_MAX_CHARS,
   buildSearchText,
   clearSessionActivations,
+  closeDb,
   getActiveSessionEntries,
   getDb,
   getDbFile,

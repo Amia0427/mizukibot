@@ -56,13 +56,27 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     worldbookSessionConsume: options.worldbookSessionConsume,
     mainReplyPromptMode
   };
-  const personaModuleCandidatesPromise = timing.measureAsync('persona_worldbook', () => buildPersonaModuleCandidatesAsync(personaModuleContext), {
+  const providedPersonaModuleCandidates = Array.isArray(options.personaModuleCandidates)
+    ? options.personaModuleCandidates
+    : null;
+  const personaModuleCandidatesPromise = providedPersonaModuleCandidates
+    ? Promise.resolve(providedPersonaModuleCandidates)
+    : timing.measureAsync('persona_worldbook', () => buildPersonaModuleCandidatesAsync(personaModuleContext), {
+        category: 'collect',
+        source: 'utils/personaModules.buildPersonaModuleCandidatesAsync',
+        readOnly: true,
+        includes: ['persona_modules', 'worldbook']
+      }).catch((error) => ({ __personaModuleCandidatesError: error }));
+  if (providedPersonaModuleCandidates) {
+    timing.record('persona_worldbook', {
       category: 'collect',
-      source: 'utils/personaModules.buildPersonaModuleCandidatesAsync',
+      source: 'provided_options.personaModuleCandidates',
+      status: 'provided',
       readOnly: true,
-      includes: ['persona_modules', 'worldbook']
-    })
-    .catch((error) => ({ __personaModuleCandidatesError: error }));
+      includes: ['persona_modules', 'worldbook'],
+      summary: { candidates: providedPersonaModuleCandidates.length }
+    });
+  }
   const memoryContext = options.memoryContext && typeof options.memoryContext === 'object'
     ? options.memoryContext
     : await timing.measureAsync('memory_context', () => buildMemoryContextAsync(userId, question || '', {

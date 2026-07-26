@@ -28,6 +28,7 @@ const {
 } = require('./contextProfile');
 const { isUnsafeUserFacingReply } = require('../userFacingReplyGuards');
 const {
+  getSessionContextMetadata,
   listUserSessionKeys: listStoredUserSessionKeys
 } = require('../shortTermSessionStore');
 
@@ -87,6 +88,14 @@ function shouldIncludeSiblingShortTermSessions(deps = {}) {
   const text = String(raw || '').trim().toLowerCase();
   if (text === 'false' || text === '0' || text === 'no') return false;
   return text === 'true' || text === '1' || text === 'yes';
+}
+
+function getMaxSiblingSessions(deps = {}) {
+  if (deps.maxSiblingSessions !== undefined && deps.maxSiblingSessions !== null && deps.maxSiblingSessions !== '') {
+    return Math.max(0, Math.floor(Number(deps.maxSiblingSessions) || 0));
+  }
+  const configured = Number(config.SHORT_TERM_SHARED_MAX_SIBLING_SESSIONS);
+  return Number.isFinite(configured) ? Math.max(0, Math.floor(configured)) : 3;
 }
 
 function isSessionKeyForUser(sessionKey = '', userId = '') {
@@ -174,7 +183,31 @@ function collectSharedShortTermSessionEntries(userId, deps = {}) {
   const currentSessionKey = String(deps.sessionKey || resolveShortTermSessionKey(uid, deps.routeMeta) || '').trim();
   const includeSiblingSessions = shouldIncludeSiblingShortTermSessions(deps);
   const availableSessionKeys = listUserSessionKeys(uid, historyStore, shortTermStore);
-  const selectedKeys = includeSiblingSessions ? availableSessionKeys.slice() : [];
+  const maxSiblingSessions = getMaxSiblingSessions(deps);
+  const siblingKeys = includeSiblingSessions
+    ? availableSessionKeys
+        .filter((sessionKey) => sessionKey !== currentSessionKey)
+        .map((sessionKey) => {
+          const metadata = getSessionContextMetadata(sessionKey);
+          const history = metadata.exists ? [] : (Array.isArray(historyStore[sessionKey]) ? historyStore[sessionKey] : []);
+          return {
+            sessionKey,
+            updatedAt: Math.max(
+              Number(metadata.updatedAt || 0) || 0,
+              history.length > 0 ? history.length : 0
+            ),
+            historyLength: history.length
+          };
+        })
+        .sort((a, b) => {
+          if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+          if (b.historyLength !== a.historyLength) return b.historyLength - a.historyLength;
+          return String(a.sessionKey || '').localeCompare(String(b.sessionKey || ''));
+        })
+        .slice(0, maxSiblingSessions)
+        .map((entry) => entry.sessionKey)
+    : [];
+  const selectedKeys = siblingKeys.slice();
   if (currentSessionKey && !selectedKeys.includes(currentSessionKey)) {
     selectedKeys.push(currentSessionKey);
   }
@@ -433,7 +466,9 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
     })),
     ignoredSessionKeys: []
   };
-  logShortTermScopeDecision(userId, key, scopeMeta);
+  if (deps.suppressScopeLog !== true) {
+    logShortTermScopeDecision(userId, key, scopeMeta);
+  }
   const sharedState = normalizeShortTermState({
     summary: pickSharedField(sessionEntries, (state) => state.summary, 2400),
     activeTopic: pickSharedField(sessionEntries, (state) => state.activeTopic, 180),
@@ -512,10 +547,12 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
     ),
     presence: (sessionEntries.find((entry) => entry?.isCurrent)?.state || defaultShortTermState()).presence
   });
-  const summaryText = deps.buildStructuredSummaryText(sharedState, settings.summaryMaxTokens);
-  const summaryMessage = deps.buildHistorySummaryMessage(summaryText, settings.summaryMaxTokens);
   const historyStore = deps.chatHistory || {};
   const currentHistory = Array.isArray(historyStore[key]) ? historyStore[key] : [];
+  const summaryText = deps.buildStructuredSummaryText(sharedState, settings.summaryMaxTokens, {
+    includeRecentTurns: false
+  });
+  const summaryMessage = deps.buildHistorySummaryMessage(summaryText, settings.summaryMaxTokens);
   const summaryLoadCount = Math.max(1, Math.floor(Number(deps.sessionSummaryLoadCount || contextProfile.summaryLoadCount || config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT) || 1));
   const sessionSummaryBundle = deps.buildSessionSummaryMessages(
     key,

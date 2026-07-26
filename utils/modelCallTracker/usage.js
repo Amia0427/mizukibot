@@ -66,8 +66,21 @@ function normalizeUsage(raw) {
   };
 }
 
-function extractUsage(response) {
+function getResponseData(response) {
   const data = response?.data ?? response;
+  if (typeof data !== 'string') return data;
+  const text = data.trim();
+  if (!text || !/^[{[]/.test(text)) return data;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' ? parsed : data;
+  } catch (_) {
+    return data;
+  }
+}
+
+function extractUsage(response) {
+  const data = getResponseData(response);
   return (
     normalizeUsage(data?.usage)
     || normalizeUsage(data?.response_metadata?.usage)
@@ -78,7 +91,7 @@ function extractUsage(response) {
 }
 
 function extractResponseModel(response) {
-  const data = response?.data ?? response;
+  const data = getResponseData(response);
   return normalizeText(
     data?.model
     || data?.model_name
@@ -88,7 +101,7 @@ function extractResponseModel(response) {
 }
 
 function extractFinishReason(response) {
-  const data = response?.data ?? response;
+  const data = getResponseData(response);
   if (!data || typeof data !== 'object') return '';
   const choice = Array.isArray(data.choices) ? data.choices[0] : null;
   const candidate = Array.isArray(data.candidates) ? data.candidates[0] : null;

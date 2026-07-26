@@ -1,8 +1,14 @@
-function shouldUseLocalDecisionFallback({ decision, addressee, score }) {
+function shouldUseLocalDecisionFallback({ decision, addressee, score, visualCueProbe = false, cheapGateLevel = '' }) {
   const reason = String(decision?.reason || '');
   if (!['empty-output', 'invalid-json', 'missing-awareness-model-config'].includes(reason) && !reason.startsWith('decision-call-failed:')) return false;
-  if (!['bot_presence_check', 'bot_direct'].includes(String(addressee || ''))) return false;
-  return Number(score || 0) >= Math.max(60, Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60));
+  const normalizedAddressee = String(addressee || '');
+  if (['bot_presence_check', 'bot_direct'].includes(normalizedAddressee)) {
+    return String(cheapGateLevel || '') === 'strong_candidate'
+      && Number(score || 0) >= Math.max(60, Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60));
+  }
+  return visualCueProbe === true
+    && String(cheapGateLevel || '') === 'candidate'
+    && ['group_bot_topic', 'group_open_question'].includes(normalizedAddressee);
 }
 
 function shouldForceStrongCueReply({ decision, addressee, score }) {
@@ -167,6 +173,19 @@ function buildPassiveReplySystemMessages(senderId = '') {
   return messages;
 }
 
+function resolveDecisionModelBudget(visualCueProbe = false) {
+  if (visualCueProbe === true) {
+    return {
+      timeoutMs: Math.max(1000, Number(config.PASSIVE_AWARENESS_VISUAL_CUE_PROBE_TIMEOUT_MS || 3000)),
+      retries: Math.max(0, Number(config.PASSIVE_AWARENESS_VISUAL_CUE_PROBE_RETRIES || 0))
+    };
+  }
+  return {
+    timeoutMs: Math.max(1000, Number(config.PASSIVE_AWARENESS_TIMEOUT_MS || 15000)),
+    retries: Math.max(0, Number(config.PASSIVE_AWARENESS_RETRIES || 1))
+  };
+}
+
 async function invokeDecisionModel({
   groupId,
   senderId,
@@ -182,6 +201,7 @@ async function invokeDecisionModel({
   replyType,
   gate,
   directedContext,
+  visualCueProbe = false,
   now = Date.now()
 }) {
   if (!config.PASSIVE_AWARENESS_DECISION_ENABLED) {
@@ -219,6 +239,7 @@ async function invokeDecisionModel({
     directedContext,
     now
   });
+  const budget = resolveDecisionModelBudget(visualCueProbe);
   const resp = await postWithRetry(
     baseUrl,
     {
@@ -237,7 +258,7 @@ async function invokeDecisionModel({
       max_tokens: Math.max(120, Number(config.PASSIVE_AWARENESS_MAX_TOKENS || 300)),
       stream: false,
       __preferredProtocol: 'chat_completions',
-      __timeoutMs: Math.max(1000, Number(config.PASSIVE_AWARENESS_TIMEOUT_MS || 15000)),
+      __timeoutMs: budget.timeoutMs,
       __trace: {
         source: 'passive_awareness',
         phase: 'awareness_decision',
@@ -247,7 +268,7 @@ async function invokeDecisionModel({
         userId: ''
       }
     },
-    Math.max(0, Number(config.PASSIVE_AWARENESS_RETRIES || 1)),
+    budget.retries,
     apiKey
   );
 

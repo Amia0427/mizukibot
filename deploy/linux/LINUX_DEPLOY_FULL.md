@@ -31,9 +31,9 @@
 
 ## 1. 服务器准备
 
-### 1.1 安装 Node.js 18+
+### 1.1 安装 Node.js 20.x
 
-建议 Node.js 20 LTS（或更高）。
+项目只支持 `.nvmrc` 声明的 Node.js 20.x，避免在不同环境使用未验证的主版本。
 
 Ubuntu/Debian 示例：
 
@@ -224,17 +224,34 @@ NAPCAT_WS_URL=ws://<napcat_host>:<port>
 ---
 
 ## 9. Web 面板安全建议
+> 更新：2026-07-12 20:10 +08:00
 
-当前面板已实现最小鉴权：
-- `WEB_TOKEN` 配置后支持：
-  - `Authorization: Bearer <token>`
-  - `x-web-token: <token>`
-  - 页面 URL `?token=...`
+当前面板使用短期服务端会话：
+- 打开 `/login` 并输入 `WEB_TOKEN`，成功后由服务端签发 `HttpOnly; SameSite=Strict` cookie
+- `WEB_TOKEN` 只用于登录校验，管理 API 不接受 Bearer、`x-web-token` 或 URL query token
+- 注销或服务重启后需重新登录
 
 生产建议：
-- `WEB_BIND_HOST=127.0.0.1`
-- 用 Nginx 反代并启用 HTTPS
-- 仅开放 Nginx 端口，不直接暴露 Node 端口
+- Node 只监听 loopback，并显式信任同机 Nginx 的一跳代理：
+
+```env
+WEB_BIND_HOST=127.0.0.1
+WEB_TRUST_PROXY_HOPS=1
+```
+
+- Nginx 必须覆盖客户端提交的代理头，不能透传任意 `X-Forwarded-*`：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3005;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $remote_addr;
+}
+```
+
+- 仅开放 Nginx 的 HTTPS 端口；Node 的 `3005` 端口必须保持 loopback 或受控网络不可被客户端直连
+- 上述配置依赖 Nginx 与 Node 同机；远程直连 Node 时，伪造的 `X-Forwarded-For` 和 `X-Forwarded-Proto` 不会被信任
 
 ---
 
@@ -254,8 +271,8 @@ NAPCAT_WS_URL=ws://<napcat_host>:<port>
 - 再看 `journalctl -u mizukibot -n 200 --no-pager`
 
 ### Q4: 面板 401
-- 未携带 token 或 token 错误
-- 可用 `?token=你的WEB_TOKEN` 先登录
+- 会话已过期、已注销或服务刚重启
+- 打开 `/login`，重新输入 `WEB_TOKEN`
 
 ### Q5: 服务器网络慢导致 API 超时
 - 检查出网

@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "data": {
+    "aid": 2,
+    "bvid": "BV1xx411c7mD",
+    "title": "测试视频标题",
+    "desc": "这是测试视频简介",
+    "duration": 245,
+    "pic": "https://i0.hdslb.com/bfs/archive/cover.jpg",
+    "owner": { "mid": 100, "name": "测试UP主" },
+    "stat": { "view": 12345, "danmaku": 67, "reply": 8, "favorite": 90, "coin": 12, "share": 3, "like": 456 },
+    "pages": [
+      { "cid": 101, "page": 1, "part": "第一部分", "duration": 120 },
+      { "cid": 102, "page": 2, "part": "第二部分", "duration": 125 }
+    ]
+  }
+}

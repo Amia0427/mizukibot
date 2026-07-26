@@ -31,6 +31,7 @@ function loadConfigWithEnv(env = {}) {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
+  let mainRuntime = null;
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.MCP_WARM_ON_RUNTIME_INIT = 'false';
@@ -71,15 +72,68 @@ module.exports = (async () => {
     assert.strictEqual(config.SCHEDULER_RUNTIME_ENABLED, false);
     assert.strictEqual(config.QZONE_AUTO_PUBLISH_ENABLED, false);
 
-    const indexSource = require('fs').readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
-    assert.ok(!indexSource.includes("const { askAIByGraph } = require('./api/agentGraph')"), 'main entrypoint should lazy-load agentGraph until first model call');
-    assert.ok(!/^const\s+\{\s*enqueueMissingEmbeddings\s*\}\s*=\s*require\('\.\/utils\/memory-v3\/embeddingIndex'\)/m.test(indexSource), 'main entrypoint should not top-level load embedding backfill');
-    assert.ok(indexSource.includes('config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START'), 'main entrypoint should gate startup embedding backfill behind config');
-    const memoryQuerySource = require('fs').readFileSync(path.join(__dirname, '..', 'utils', 'memory-v3', 'query.js'), 'utf8');
-    assert.ok(!/^const\s+\{[\s\S]*?\}\s*=\s*require\('\.\.\/lancedbMemoryStore'\)/m.test(memoryQuerySource), 'memory query should lazy-load LanceDB only when vector recall runs');
-    assert.ok(memoryQuerySource.includes("require('../lancedbMemoryStore/helperClient')"), 'memory query should route low-resource main LanceDB reads through the helper');
-    const memoryQueryScoringSource = require('fs').readFileSync(path.join(__dirname, '..', 'utils', 'memory-v3', 'queryScoring.js'), 'utf8');
-    assert.ok(!/^const\s+\{[\s\S]*?\}\s*=\s*require\('\.\/embeddingIndex'\)/m.test(memoryQueryScoringSource), 'memory scoring should lazy-load embeddingIndex only for semantic scoring');
+    clearProjectCache();
+    process.env.MIZUKIBOT_INDEX_TEST_MODE = '1';
+    process.env.DATA_DIR = path.resolve(__dirname, '..', 'tmp', 'tests', 'hotpath-require-guard');
+    process.env.BOT_MAIN_HEARTBEAT_ENABLED = 'false';
+    process.env.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START = 'false';
+    mainRuntime = require('../index').__test;
+    const runtimeConfig = require('../config');
+    assert.strictEqual(isLoaded('api/agentGraph.js'), false, 'main entrypoint should lazy-load agentGraph until first model call');
+    assert.strictEqual(isLoaded('utils/memory-v3/embeddingIndex.js'), false, 'disabled startup backfill should not load embedding index');
+    assert.strictEqual(mainRuntime.scheduleMainProcessEmbeddingBackfill(), false);
+
+    const embeddingIndexPath = require.resolve('../utils/memory-v3/embeddingIndex');
+    let backfillCall = null;
+    require.cache[embeddingIndexPath] = {
+      id: embeddingIndexPath,
+      filename: embeddingIndexPath,
+      loaded: true,
+      exports: {
+        enqueueMissingEmbeddings(userId, options) {
+          backfillCall = { userId, options };
+        }
+      }
+    };
+    runtimeConfig.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START = true;
+    assert.strictEqual(mainRuntime.scheduleMainProcessEmbeddingBackfill(), true);
+    assert.deepStrictEqual(backfillCall, {
+      userId: null,
+      options: { schedule: true, delayMs: 15000, continueDelayMs: 60000 }
+    });
+
+    clearProjectCache();
+    require('../utils/memory-v3/query');
+    assert.strictEqual(isLoaded('utils/lancedbMemoryStore/helperClient.js'), true);
+    assert.strictEqual(isLoaded('utils/lancedbMemoryStore/index.js'), false, 'memory query should not load the full LanceDB store on require');
+
+    clearProjectCache();
+    process.env.LOW_RESOURCE_SKIP_LOCAL_EMBEDDING_INDEX_SCORING = 'false';
+    const scoring = require('../utils/memory-v3/queryScoring');
+    assert.strictEqual(isLoaded('utils/memory-v3/embeddingIndex.js'), false);
+    const scoringEmbeddingPath = require.resolve('../utils/memory-v3/embeddingIndex');
+    let localEmbeddingLoaded = false;
+    require.cache[scoringEmbeddingPath] = {
+      id: scoringEmbeddingPath,
+      filename: scoringEmbeddingPath,
+      loaded: true,
+      exports: {
+        loadEmbeddingIndex() {
+          localEmbeddingLoaded = true;
+          return {};
+        },
+        calcEmbeddingSimilarity() {
+          return 0.8;
+        }
+      }
+    };
+    await scoring.scoreCandidates([
+      { id: 'candidate_1', text: '测试记忆', source: 'long_term', confidence: 1 }
+    ], '测试', 'default', {
+      queryEmbedding: [1],
+      bm25Enabled: false
+    });
+    assert.strictEqual(localEmbeddingLoaded, true, 'semantic scoring should load the local embedding index on demand');
 
     clearProjectCache();
     require('../src/runtime-v2/context/memory-inputs');
@@ -90,6 +144,17 @@ module.exports = (async () => {
 
     console.log('hotpathRequireGuard.test.js passed');
   } finally {
+    if (mainRuntime) {
+      process.removeListener('mizuki:restartScheduled', mainRuntime.drainForScheduledRestart);
+      process.removeListener('uncaughtException', mainRuntime.handleMainUncaughtException);
+      process.removeListener('unhandledRejection', mainRuntime.handleMainUnhandledRejection);
+      process.removeListener('beforeExit', mainRuntime.handleMainBeforeExit);
+      process.removeListener('exit', mainRuntime.handleMainExit);
+      process.removeListener('SIGINT', mainRuntime.handleMainSigint);
+      process.removeListener('SIGTERM', mainRuntime.handleMainSigterm);
+      process.removeListener('SIGBREAK', mainRuntime.handleMainSigbreak);
+      process.removeListener('SIGHUP', mainRuntime.handleMainSighup);
+    }
     for (const key of Object.keys(process.env)) {
       if (!(key in snapshot)) delete process.env[key];
     }

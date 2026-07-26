@@ -101,6 +101,57 @@ function createDailyJournalSummaryRunner(deps = {}) {
     return (parts.hour > hour) || (parts.hour === hour && parts.minute >= minute);
   }
 
+  async function writeDailyJournalSummary(userId, day, options = {}) {
+    const uid = String(userId || '').trim();
+    if (!uid || !day) return false;
+    const journalText = safeReadText(getJournalFilePath(uid, day), '').trim();
+    const safeJournalText = formatJournalEntries(filterInjectableJournalEntries(parseJournalEntries(journalText))).trim();
+    const segments = readSegmentSummaries(uid, day);
+    if (!safeJournalText && segments.length === 0) return false;
+
+    const summary = typeof options.summarySummarizer === 'function'
+      ? strictClampText(
+        await options.summarySummarizer({ userId: uid, day, journalText: safeJournalText, segments }),
+        Math.max(40, Number(config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS) || 2500)
+      )
+      : await summarizeJournalForDay(uid, day);
+    if (!summary) return false;
+
+    atomicWriteText(getSummaryFilePath(uid, day), `${summary}\n`);
+    updateJournalIndex(uid, (index) => ({
+      ...index,
+      summaryDays: sortUniqueStrings([...(index.summaryDays || []), day])
+    }));
+    await syncEpisodeMemory(uid, summary, {
+      source: 'daily_journal_summary',
+      rollupLevel: 'daily',
+      episodeDay: day,
+      yearMonth: getYearMonthFromDay(day),
+      sourceFile: getSummaryFilePath(uid, day),
+      textKind: 'journal_daily_summary',
+      maxChars: config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS
+    });
+    syncJournalRollupToProfileJournalDb(uid, {
+      id: `daily:${uid}:${day}`,
+      level: 'daily',
+      day,
+      startDay: day,
+      endDay: day,
+      text: summary,
+      status: 'active',
+      sourceEventIds: [],
+      quality: {
+        source: 'daily_journal_summary',
+        textKind: 'journal_daily_summary',
+        sourceFile: getSummaryFilePath(uid, day),
+        segmentCount: segments.length,
+        activeRaw: Boolean(safeJournalText)
+      }
+    });
+    scheduleDailyJournalEmbeddingBackfill(uid, { days: [day] });
+    return true;
+  }
+
   async function runDailyJournalSummaries(options = {}) {
     if (!config.DAILY_JOURNAL_ENABLED) return { ran: false, count: 0 };
     const pressureDelayMs = getBackgroundPressureDelayMs();
@@ -127,54 +178,8 @@ function createDailyJournalSummaryRunner(deps = {}) {
     let fourDayCreated = 0;
     let monthlyCreated = 0;
     for (const userId of Object.keys(favorites || {})) {
-      const journalText = safeReadText(getJournalFilePath(userId, targetDay), '').trim();
-      const safeJournalText = formatJournalEntries(filterInjectableJournalEntries(parseJournalEntries(journalText))).trim();
-      const segments = readSegmentSummaries(userId, targetDay);
-
       try {
-        if (safeJournalText || segments.length > 0) {
-          const summary = typeof options.summarySummarizer === 'function'
-            ? strictClampText(
-              await options.summarySummarizer({ userId, day: targetDay, journalText: safeJournalText, segments }),
-              Math.max(40, Number(config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS) || 2500)
-            )
-            : await summarizeJournalForDay(userId, targetDay);
-          if (summary) {
-            atomicWriteText(getSummaryFilePath(userId, targetDay), `${summary}\n`);
-            updateJournalIndex(userId, (index) => ({
-              ...index,
-              summaryDays: sortUniqueStrings([...(index.summaryDays || []), targetDay])
-            }));
-            await syncEpisodeMemory(userId, summary, {
-              source: 'daily_journal_summary',
-              rollupLevel: 'daily',
-              episodeDay: targetDay,
-              yearMonth: getYearMonthFromDay(targetDay),
-              sourceFile: getSummaryFilePath(userId, targetDay),
-              textKind: 'journal_daily_summary',
-              maxChars: config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS
-            });
-            syncJournalRollupToProfileJournalDb(userId, {
-              id: `daily:${userId}:${targetDay}`,
-              level: 'daily',
-              day: targetDay,
-              startDay: targetDay,
-              endDay: targetDay,
-              text: summary,
-              status: 'active',
-              sourceEventIds: [],
-              quality: {
-                source: 'daily_journal_summary',
-                textKind: 'journal_daily_summary',
-                sourceFile: getSummaryFilePath(userId, targetDay),
-                segmentCount: segments.length,
-                activeRaw: Boolean(safeJournalText)
-              }
-            });
-            scheduleDailyJournalEmbeddingBackfill(userId, { days: [targetDay] });
-            count += 1;
-          }
-        }
+        if (await writeDailyJournalSummary(userId, targetDay, options)) count += 1;
 
         const rollupResult = await maintainDailyJournalRollups(userId, options);
         fourDayCreated += Number(rollupResult?.fourDayCreated || 0);
@@ -201,7 +206,8 @@ function createDailyJournalSummaryRunner(deps = {}) {
   return {
     runDailyJournalSummaries,
     shouldRunDailySummaryNow,
-    summarizeJournalForDay
+    summarizeJournalForDay,
+    writeDailyJournalSummary
   };
 }
 

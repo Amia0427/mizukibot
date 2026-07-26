@@ -18,10 +18,12 @@ const {
   appendPromptLine,
   canonicalizeKnownShareUrl,
   collectMessageContent,
+  extractCardContextsFromRawJsonSegments,
   extractTextAndImagesFromMessage,
   extractUrlsFromJsonPayload,
   extractUrlsFromRawJsonSegments,
   identifyCardPlatform,
+  normalizeCardContexts,
   normalizeText,
   parseRawForwardIds,
   parseRawImageUrls,
@@ -305,13 +307,16 @@ function normalizeMessageForDownstream(baseMsg = {}, merged = {}, effectiveBotQQ
         ? { ...merged.forwardImageRefMap }
         : {},
       qqCardUrls: Array.isArray(merged.qqCardUrls) ? merged.qqCardUrls.slice() : [],
+      cardContexts: normalizeCardContexts(merged.cardContexts),
+      cardOnly: merged.cardOnly === true,
       expansionState: {
         reply: normalizeText(merged.expansionState?.reply)
           || (merged.replyContext ? 'resolved' : (merged.replyMessageId ? 'pending' : 'skipped')),
         forward: normalizeText(merged.expansionState?.forward)
           || (Array.isArray(merged.forwardIds) && merged.forwardIds.length ? 'pending' : 'skipped'),
         card: normalizeText(merged.expansionState?.card)
-          || (Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length ? 'pending' : 'skipped')
+          || ((Array.isArray(merged.cardContexts) && merged.cardContexts.length)
+            || (Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length) ? 'pending' : 'skipped')
       },
       timing: merged.timing && typeof merged.timing === 'object'
         ? { ...merged.timing }
@@ -331,6 +336,7 @@ function buildMergedMessagePayload(entries = [], options = {}) {
   let replyContext = null;
   const forwardIds = [];
   const qqCardUrls = [];
+  const cardContexts = [];
   const forwardSummaryTexts = [];
   const forwardImageUrls = [];
   const imageRefMap = {};
@@ -349,6 +355,7 @@ function buildMergedMessagePayload(entries = [], options = {}) {
     }
     if (Array.isArray(entry.forwardIds)) forwardIds.push(...entry.forwardIds.filter(Boolean));
     if (Array.isArray(entry.qqCardUrls)) qqCardUrls.push(...entry.qqCardUrls.filter(Boolean));
+    if (Array.isArray(entry.cardContexts)) cardContexts.push(...entry.cardContexts);
     if (entry.forwardSummaryText) forwardSummaryTexts.push(String(entry.forwardSummaryText));
     if (Array.isArray(entry.forwardImageUrls)) forwardImageUrls.push(...entry.forwardImageUrls.filter(Boolean));
     if (entry.forwardImageRefMap && typeof entry.forwardImageRefMap === 'object') Object.assign(forwardImageRefMap, entry.forwardImageRefMap);
@@ -374,6 +381,7 @@ function buildMergedMessagePayload(entries = [], options = {}) {
     }
   }
 
+  const normalizedCardContexts = normalizeCardContexts(cardContexts);
   return {
     sessionKey: options.sessionKey || '',
     text,
@@ -391,7 +399,9 @@ function buildMergedMessagePayload(entries = [], options = {}) {
     forwardImageUrls: Array.from(new Set(forwardImageUrls)),
     imageRefMap,
     forwardImageRefMap,
-    qqCardUrls: Array.from(new Set(qqCardUrls))
+    qqCardUrls: Array.from(new Set(qqCardUrls)),
+    cardContexts: normalizedCardContexts,
+    cardOnly: normalizedCardContexts.length > 0 && entries.every((entry) => entry?.cardOnly === true)
   };
 }
 
@@ -555,10 +565,17 @@ function cheapParseMessageEntry(msg = {}, options = {}) {
     qqCardLinksEnabled
   });
   const fallbackText = stripCqControlSegments(rawText);
+  const cardContexts = qqCardLinksEnabled
+    ? normalizeCardContexts([
+      ...(Array.isArray(extracted.cardContexts) ? extracted.cardContexts : []),
+      ...extractCardContextsFromRawJsonSegments(rawText)
+    ])
+    : [];
+  const plainText = extracted.text || fallbackText;
   const entry = {
     messageId: normalizeText(msg?.message_id),
     timestamp: Number(msg?.time || 0) > 0 ? Number(msg.time) * 1000 : Date.now(),
-    text: extracted.text || fallbackText,
+    text: plainText,
     imageUrls: [
       ...extracted.imageUrls,
       ...parseRawImageUrls(rawText)
@@ -577,6 +594,12 @@ function cheapParseMessageEntry(msg = {}, options = {}) {
         ...extractUrlsFromRawJsonSegments(rawText)
       ])
       : [],
+    cardContexts,
+    cardOnly: cardContexts.length > 0
+      && !normalizeText(plainText)
+      && extracted.imageUrls.length === 0
+      && extracted.forwardIds.length === 0
+      && !extracted.replyMessageId,
     expansionState: {
       reply: extracted.replyMessageId || parseRawReplyId(rawText) ? 'pending' : 'skipped',
       forward: (extracted.forwardIds.length ? extracted.forwardIds : parseRawForwardIds(rawText)).length ? 'pending' : 'skipped',
@@ -600,7 +623,8 @@ async function resolveContinuousEntryDetails(entry = {}, options = {}) {
     entry.expansionState = {
       reply: Array.isArray(entry.replyMessageId) ? 'pending' : (entry.replyMessageId ? 'pending' : 'skipped'),
       forward: Array.isArray(entry.forwardIds) && entry.forwardIds.length ? 'pending' : 'skipped',
-      card: Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length ? 'pending' : 'skipped'
+      card: (Array.isArray(entry.cardContexts) && entry.cardContexts.length)
+        || (Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length) ? 'pending' : 'skipped'
     };
   }
   const qqCardLinksEnabled = options.qqCardLinksEnabled ?? config.CONTINUOUS_MESSAGE_QQ_CARD_LINKS_ENABLED;
@@ -618,7 +642,8 @@ async function resolveContinuousEntryDetails(entry = {}, options = {}) {
   }
   if (options.resolveCards !== false && qqCardLinksEnabled) {
     entry.text = appendCardUrlsToText(entry.text, entry.qqCardUrls || [], { qqCardLinksEnabled });
-    entry.expansionState.card = Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length ? 'resolved' : 'skipped';
+    entry.expansionState.card = (Array.isArray(entry.cardContexts) && entry.cardContexts.length)
+      || (Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length) ? 'resolved' : 'skipped';
   }
   entry.imageRefMap = await buildImageRefMap(entry.imageUrls, {
     ...options,
@@ -718,6 +743,7 @@ function hasLongAggregationAnchor(entry = {}) {
   return Boolean(
     (Array.isArray(entry.imageUrls) && entry.imageUrls.length > 0)
     || (Array.isArray(entry.forwardIds) && entry.forwardIds.length > 0)
+    || (Array.isArray(entry.cardContexts) && entry.cardContexts.length > 0)
     || (Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length > 0)
   );
 }
@@ -966,7 +992,8 @@ function createContinuousMessagePreprocessor(options = {}) {
         effectiveBotQQ,
         resolveReply: Boolean(entry.replyMessageId),
         resolveForward: Array.isArray(entry.forwardIds) && entry.forwardIds.length > 0,
-        resolveCards: Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length > 0
+        resolveCards: (Array.isArray(entry.cardContexts) && entry.cardContexts.length > 0)
+          || (Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length > 0)
       });
       const doneAt = Date.now();
       return {
@@ -992,6 +1019,8 @@ function createContinuousMessagePreprocessor(options = {}) {
             ? { ...entry.forwardImageRefMap }
             : {},
           qqCardUrls: Array.isArray(entry.qqCardUrls) ? entry.qqCardUrls.slice() : [],
+          cardContexts: normalizeCardContexts(entry.cardContexts),
+          cardOnly: entry.cardOnly === true,
           expansionState: { ...(entry.expansionState || {}) },
           timing: {
             totalMs: Math.max(0, doneAt - preprocessStartedAt),
@@ -1043,10 +1072,16 @@ function createContinuousMessagePreprocessor(options = {}) {
           forwardIds: Array.from(new Set(session.entries.flatMap((item) => item.forwardIds || []).filter(Boolean))),
           forwardImageRefMap: {},
           qqCardUrls: Array.from(new Set(session.entries.flatMap((item) => item.qqCardUrls || []).filter(Boolean))),
+          cardContexts: normalizeCardContexts(session.entries.flatMap((item) => item.cardContexts || [])),
+          cardOnly: session.entries.some((item) => Array.isArray(item.cardContexts) && item.cardContexts.length)
+            && session.entries.every((item) => item?.cardOnly === true),
           expansionState: {
             reply: session.entries.some((item) => item.replyMessageId) ? 'pending' : 'skipped',
             forward: session.entries.some((item) => Array.isArray(item.forwardIds) && item.forwardIds.length) ? 'pending' : 'skipped',
-            card: session.entries.some((item) => Array.isArray(item.qqCardUrls) && item.qqCardUrls.length) ? 'pending' : 'skipped'
+            card: session.entries.some((item) => (
+              (Array.isArray(item.cardContexts) && item.cardContexts.length)
+              || (Array.isArray(item.qqCardUrls) && item.qqCardUrls.length)
+            )) ? 'pending' : 'skipped'
           }
         }
       };
@@ -1137,7 +1172,8 @@ function createContinuousMessagePreprocessor(options = {}) {
               messageId: Array.isArray(resumedMerged.sourceMessageIds) ? resumedMerged.sourceMessageIds[0] : imageMemoryContext.messageId,
               resolveReply: Boolean(resumedMerged.replyMessageId),
               resolveForward: Array.isArray(resumedMerged.forwardIds) && resumedMerged.forwardIds.length > 0,
-              resolveCards: Array.isArray(resumedMerged.qqCardUrls) && resumedMerged.qqCardUrls.length > 0
+              resolveCards: (Array.isArray(resumedMerged.cardContexts) && resumedMerged.cardContexts.length > 0)
+                || (Array.isArray(resumedMerged.qqCardUrls) && resumedMerged.qqCardUrls.length > 0)
             });
             const doneAt = Date.now();
             resumedMerged.timing = buildTimingMeta(resumed, preprocessStartedAt, resumedWaitEndedAt, resolveStartedAt, doneAt);
@@ -1164,7 +1200,8 @@ function createContinuousMessagePreprocessor(options = {}) {
       messageId: Array.isArray(merged.sourceMessageIds) ? merged.sourceMessageIds[0] : imageMemoryContext.messageId,
       resolveReply: Boolean(merged.replyMessageId),
       resolveForward: Array.isArray(merged.forwardIds) && merged.forwardIds.length > 0,
-      resolveCards: Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length > 0
+      resolveCards: (Array.isArray(merged.cardContexts) && merged.cardContexts.length > 0)
+        || (Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length > 0)
     });
     const doneAt = Date.now();
     merged.timing = buildTimingMeta(session, preprocessStartedAt, firstWaitEndedAt, resolveStartedAt, doneAt);
@@ -1208,6 +1245,7 @@ module.exports = {
   cheapParseMessageEntry,
   collectMessageContent,
   createContinuousMessagePreprocessor,
+  extractCardContextsFromRawJsonSegments,
   extractTextAndImagesFromMessage,
   extractUrlsFromJsonPayload,
   extractUrlsFromRawJsonSegments,

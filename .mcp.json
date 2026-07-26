@@ -33,12 +33,19 @@
       "protocolMode": "line",
       "args": [
         "-y",
-        "@memtensor/memos-api-mcp@latest"
+        "@memtensor/memos-api-mcp@1.1.2"
       ],
       "env": {
         "MEMOS_API_KEY": "${MEMOS_API_KEY}",
         "MEMOS_USER_ID": "${MEMOS_USER_ID}",
         "MEMOS_CHANNEL": "MODELSCOPE"
+      }
+    },
+    "my-coffee": {
+      "type": "streamablehttp",
+      "url": "https://gwmcp.lkcoffee.com/order/user/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LUCKIN_MCP_GLOBAL_TOKEN}"
       }
     }
   }

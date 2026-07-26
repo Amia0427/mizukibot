@@ -87,10 +87,6 @@ npm run diag:memory -- openviking --query "长期记忆 偏好"
 
 输出包含健康、召回数、去重摘要、cache 状态和 circuit breaker 状态。
 
-## 回灌
-
-`utils/openVikingMemory/backfill.js` 提供一次性回灌工具能力，默认 dry-run。输入来源包括 Memory V3 节点、session summaries 和 daily journal 摘要；正式写入前应先检查 dry-run 数量和身份隔离映射。
-
 ## 测试覆盖
 
 新增覆盖：

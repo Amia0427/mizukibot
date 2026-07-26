@@ -63,9 +63,9 @@ module.exports = (async () => {
     originalPostWithRetry = httpClient.postWithRetry;
     originalPostStreamWithRetry = httpClient.postStreamWithRetry;
 
-    const decisionBodies = [];
-    httpClient.postWithRetry = async (_url, body) => {
-      decisionBodies.push(body);
+    const decisionCalls = [];
+    httpClient.postWithRetry = async (_url, body, retries) => {
+      decisionCalls.push({ body, retries });
       return {
         data: {
           choices: [
@@ -125,8 +125,10 @@ module.exports = (async () => {
     assert.strictEqual(result.presenceReason, 'visual-cue-probe: unclear');
     assert.strictEqual(result.decisionModelCalled, true);
     assert.strictEqual(result.replyModelCalled, false);
-    assert.strictEqual(decisionBodies.length, 1);
-    assertVisualDecisionRequest(decisionBodies[0], 'cached-image://passive-visual-cue-current');
+    assert.strictEqual(decisionCalls.length, 1);
+    assert.strictEqual(decisionCalls[0].body.__timeoutMs, 3000);
+    assert.strictEqual(decisionCalls[0].retries, 0);
+    assertVisualDecisionRequest(decisionCalls[0].body, 'cached-image://passive-visual-cue-current');
 
     console.log('passiveAwarenessVisualCueProbe.test.js passed');
   } finally {

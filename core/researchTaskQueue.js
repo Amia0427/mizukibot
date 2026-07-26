@@ -10,13 +10,6 @@ function buildTaskKey(task = {}) {
   return [normalizeText(task.sessionKey) || `user:${normalizeText(task.userId) || 'unknown'}`, normalizeQuery(task.query)].join('|');
 }
 
-function createTimeoutPromise(timeoutMs, message = 'research_subagent timeout') {
-  return new Promise((_, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), Math.max(1, timeoutMs));
-    if (typeof timer.unref === 'function') timer.unref();
-  });
-}
-
 class ResearchTaskQueue {
   constructor(options = {}) {
     this.config = options.config || config;
@@ -96,13 +89,24 @@ class ResearchTaskQueue {
     record.status = 'running';
     record.startedAt = new Date().toISOString();
     const timeoutMs = this.getTimeoutMs();
-    Promise.race([
-      this.runner(record, {
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeoutTimer = null;
+    const runnerPromise = Promise.resolve().then(() => this.runner(record, {
         maxToolRounds: this.config.RESEARCH_SUBAGENT_MAX_TOOL_ROUNDS,
-        cacheTtlMs: this.config.RESEARCH_SUBAGENT_CACHE_TTL_MS
-      }),
-      createTimeoutPromise(timeoutMs)
-    ]).then((result) => {
+        cacheTtlMs: this.config.RESEARCH_SUBAGENT_CACHE_TTL_MS,
+        signal: controller.signal
+      }));
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(new Error('research_subagent timeout'));
+      }, timeoutMs);
+      timeoutTimer.unref?.();
+    });
+
+    Promise.race([runnerPromise, timeoutPromise]).then((result) => {
       record.status = 'completed';
       record.result = result;
       record.finishedAt = new Date().toISOString();
@@ -118,7 +122,9 @@ class ResearchTaskQueue {
         error: record.error,
         summary: ''
       });
-    }).finally(() => {
+    }).finally(async () => {
+      clearTimeout(timeoutTimer);
+      if (timedOut) await runnerPromise.catch(() => {});
       this.activeCount = Math.max(0, this.activeCount - 1);
       this.drain();
     });

@@ -2,12 +2,20 @@ const assert = require('assert');
 
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
-const { parseDecision } = require('../core/passiveGroupAwareness');
+const {
+  classifyPassiveReplyType,
+  parseDecision
+} = require('../core/passiveGroupAwareness');
 const { buildToolGuidancePrompt } = require('../core/messagePromptComposer');
 
 const exitDecision = parseDecision('{"should_reply":false,"confidence":0.9,"reason":"先这样，晚安"}');
 assert.strictEqual(exitDecision.shouldReply, false);
 assert.strictEqual(parseDecision('').reason, 'empty-output');
+assert.strictEqual(classifyPassiveReplyType({
+  text: '你坏了',
+  addressee: 'bot_direct',
+  analysis: {}
+}), 'light_tease');
 
 const prompt = buildToolGuidancePrompt({
   meta: {

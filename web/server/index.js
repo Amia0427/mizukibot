@@ -20,12 +20,21 @@ const {
   updateMemoryItem
 } = require('../../utils/memoryGovernance');
 const {
+  buildExpiredSessionCookie,
+  buildSessionCookie,
   checkWebAuth,
+  createLoginRateLimiter,
   escapeHtml,
+  getClientIp,
+  getSessionId,
   isLocalBindHost,
   isLocalIp,
-  isTokenlessLocalWebAllowed
+  isStrictSameOrigin,
+  isTokenlessLocalWebAllowed,
+  verifyWebToken
 } = require('../auth');
+const { createSecurityHeaders, isRequestSecure } = require('../securityHeaders');
+const { createWebSessionManager } = require('../sessionManager');
 const {
   renderMainReplyContextPreviewClientScript,
   renderMainReplyContextPreviewPanel
@@ -47,10 +56,87 @@ const {
   validateExternalApiBaseUrl
 } = require('../settingsRuntime');
 
-function startServer() {
+function getReadinessSnapshot(readiness) {
+  if (readiness && typeof readiness.getSnapshot === 'function') return readiness.getSnapshot();
+  return { live: true, ready: true };
+}
+
+function handleLivenessRequest(_req, res, readiness) {
+  const live = getReadinessSnapshot(readiness).live === true;
+  return res.status(live ? 200 : 503).json({ ok: live });
+}
+
+function handleReadinessRequest(_req, res, readiness) {
+  const ready = getReadinessSnapshot(readiness).ready === true;
+  return res.status(ready ? 200 : 503).json({ ok: ready });
+}
+
+function handleHealthRequest(req, res, readiness) {
+  return handleReadinessRequest(req, res, readiness);
+}
+
+function renderLoginPage(nonce) {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MizukiBot Console Login</title>
+  <style>
+    body{font-family:"Microsoft YaHei",sans-serif;background:#fff6f9;color:#3f2a35;display:grid;place-items:center;min-height:100vh;margin:0}
+    form{background:#fff;border:1px solid #ffd0e0;border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(255,92,147,.12);width:min(360px,calc(100vw - 48px))}
+    input,button{box-sizing:border-box;width:100%;padding:11px 12px;border-radius:10px}
+    input{border:1px solid #f2b8cc;margin:12px 0}
+    button{border:0;background:#ff5c93;color:#fff;cursor:pointer}
+    #status{min-height:20px;color:#b4235a;font-size:13px}
+  </style>
+</head>
+<body>
+  <form id="login-form">
+    <h1>MizukiBot 控制台</h1>
+    <label for="token">管理令牌</label>
+    <input id="token" name="token" type="password" autocomplete="current-password" required />
+    <button type="submit">登录</button>
+    <p id="status"></p>
+  </form>
+  <script nonce="${nonce}">
+    document.getElementById('login-form').addEventListener('submit', async function (event) {
+      event.preventDefault();
+      const status = document.getElementById('status');
+      status.textContent = '登录中...';
+      const response = await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ token: document.getElementById('token').value })
+      });
+      if (response.ok) {
+        location.replace('/');
+        return;
+      }
+      status.textContent = response.status === 429 ? '尝试次数过多，请稍后再试。' : '令牌无效。';
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function createWebApp(options = {}) {
   const app = express();
+  const readiness = options.readiness;
   const port = config.WEB_PORT || 3005;
   const host = config.WEB_BIND_HOST || '127.0.0.1';
+  const trustProxyHops = Math.max(0, Math.floor(Number(config.WEB_TRUST_PROXY_HOPS) || 0));
+  const sessionTtlMs = Math.max(60 * 1000, Number(config.WEB_SESSION_TTL_MS) || 15 * 60 * 1000);
+  const sessionManager = options.sessionManager || createWebSessionManager({
+    maxSessions: config.WEB_SESSION_MAX_ACTIVE,
+    ttlMs: sessionTtlMs
+  });
+  const loginRateLimiter = options.loginRateLimiter || createLoginRateLimiter({
+    maxAttempts: config.WEB_LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+    maxClients: config.WEB_LOGIN_RATE_LIMIT_MAX_CLIENTS,
+    windowMs: config.WEB_LOGIN_RATE_LIMIT_WINDOW_MS
+  });
   if (!String(config.WEB_TOKEN || '').trim() && !isTokenlessLocalWebAllowed(host)) {
     throw new Error('WEB_TOKEN is required when WEB_BIND_HOST is not loopback');
   }
@@ -58,11 +144,61 @@ function startServer() {
   logStartupSecurityWarnings(config, console.warn);
 
   app.disable('x-powered-by');
+  app.use(createSecurityHeaders({ trustProxyHops }));
   app.use(express.json({ limit: '300kb' }));
+  app.get('/live', (req, res) => handleLivenessRequest(req, res, readiness));
+  app.get('/ready', (req, res) => handleReadinessRequest(req, res, readiness));
+  app.get('/healthz', (req, res) => handleHealthRequest(req, res, readiness));
+
+  app.get('/login', (req, res) => {
+    if (checkWebAuth(req, { host, port, sessionManager, trustProxyHops })) return res.redirect('/');
+    return res.send(renderLoginPage(res.locals.cspNonce));
+  });
+
+  app.post('/api/session', (req, res) => {
+    if (!isStrictSameOrigin(req, { trustProxyHops })) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const clientKey = getClientIp(req, { trustProxyHops }) || 'unknown';
+    const rateLimit = loginRateLimiter.check(clientKey);
+    if (!rateLimit.allowed) {
+      res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+      return res.status(429).json({ error: 'Too many login attempts' });
+    }
+    if (!verifyWebToken(req.body?.token)) {
+      loginRateLimiter.recordFailure(clientKey);
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    loginRateLimiter.reset(clientKey);
+    sessionManager.revoke(getSessionId(req));
+    const session = sessionManager.create();
+    res.setHeader('Set-Cookie', buildSessionCookie(
+      session.id,
+      sessionTtlMs,
+      isRequestSecure(req, { trustProxyHops })
+    ));
+    return res.status(201).json({ ok: true, expires_at: session.expiresAt });
+  });
+
+  app.delete('/api/session', (req, res) => {
+    if (!isStrictSameOrigin(req, { trustProxyHops })) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    sessionManager.revoke(getSessionId(req));
+    res.setHeader('Set-Cookie', buildExpiredSessionCookie(isRequestSecure(req, { trustProxyHops })));
+    return res.json({ ok: true });
+  });
 
   app.use((req, res, next) => {
-    if (checkWebAuth(req, { host, port })) return next();
-    return res.status(401).json({ error: 'Unauthorized' });
+    if (!checkWebAuth(req, { host, port, sessionManager, trustProxyHops })) {
+      if (req.method === 'GET' && req.path === '/') return res.redirect('/login');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const method = String(req.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !isStrictSameOrigin(req, { trustProxyHops })) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    return next();
   });
 
   app.get('/api/bot-thinking', (req, res) => {
@@ -352,7 +488,7 @@ function startServer() {
   </style>
 </head>
 <body>
-  <h1>MizukiBot 控制台</h1>
+  <div class="actions"><h1>MizukiBot 控制台</h1><button type="button" id="btn-logout">注销</button></div>
 
   <div class="card">
     <h3>模型与运行设置</h3>
@@ -441,7 +577,7 @@ function startServer() {
   <div class="card"><h3>好感度排行</h3><div class="table-wrap"><table><tr><th>QQ</th><th>等级</th><th>亲密度</th><th>关系</th><th>态度</th><th>最近变更原因</th><th>最近更新时间</th></tr>${favorHtml}</table></div></div>
   <div class="card"><h3>旧版记忆碎片（memories.json）</h3>${memoryHtml}</div>
 
-  <script>
+  <script nonce="${res.locals.cspNonce}">
     const savedApiKeys = {
       main: false,
       fallback: false,
@@ -450,16 +586,16 @@ function startServer() {
       image: false
     };
 
-    function getToken() {
-      return localStorage.getItem('WEB_TOKEN') || '';
-    }
-
     async function authedFetch(url, options) {
       const opts = options || {};
-      const headers = Object.assign({}, opts.headers || {});
-      const token = getToken();
-      if (token) headers['x-web-token'] = token;
-      return fetch(url, Object.assign({}, opts, { headers }));
+      const response = await fetch(url, Object.assign({}, opts, { credentials: 'same-origin' }));
+      if (response.status === 401) location.replace('/login');
+      return response;
+    }
+
+    async function logout() {
+      await fetch('/api/session', { method: 'DELETE', credentials: 'same-origin' });
+      location.replace('/login');
     }
 
     function escapeCell(value) {
@@ -899,6 +1035,7 @@ ${renderMainReplyContextPreviewClientScript()}
 ${renderMemoryV3NocturneClientScript()}
 
     document.getElementById('settings-form').addEventListener('submit', saveSettings);
+    document.getElementById('btn-logout').addEventListener('click', logout);
     document.getElementById('btn-model-calls-load').addEventListener('click', loadModelCalls);
     document.getElementById('btn-mg-preview').addEventListener('click', previewGovernanceAction);
     document.getElementById('btn-mg-apply').addEventListener('click', applyGovernanceAction);
@@ -965,20 +1102,32 @@ ${renderMemoryV3NocturneClientScript()}
     `);
   });
 
+  return { app, host, loginRateLimiter, port, sessionManager };
+}
+
+function startServer(options = {}) {
+  const { app, host, port, sessionManager } = createWebApp(options);
   const server = app.listen(port, host, () => {
     console.log(`Console started: http://${host}:${port}`);
   });
+  server.once('close', () => sessionManager.stop());
   return server;
 }
 
 module.exports = {
+  createWebApp,
   startServer,
   validateExternalApiBaseUrl,
   __test: {
     checkWebAuth,
     getSettingsEndpointError,
+    handleHealthRequest,
+    handleLivenessRequest,
+    handleReadinessRequest,
     isLocalBindHost,
     isLocalIp,
-    isTokenlessLocalWebAllowed
+    isStrictSameOrigin,
+    isTokenlessLocalWebAllowed,
+    renderLoginPage
   }
 };

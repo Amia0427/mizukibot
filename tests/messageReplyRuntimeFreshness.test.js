@@ -10,12 +10,14 @@ fs.mkdirSync(sensitiveVendorDir, { recursive: true });
 fs.writeFileSync(path.join(sensitiveVendorDir, 'words.txt'), 'runtime-block\nstream-block\nsrc-stream-block\n', 'utf8');
 fs.writeFileSync(sensitiveConfigPath, JSON.stringify({
   enabled: true,
+  politicalContextRequired: false,
   replacementText: '敏感回复已拦截',
   extraWords: [],
   allowWords: []
 }, null, 2), 'utf8');
 process.env.GROUP_REPLY_SENSITIVE_VENDOR_DIR = sensitiveVendorDir;
 process.env.GROUP_REPLY_SENSITIVE_CONFIG_PATH = sensitiveConfigPath;
+process.env.ADMIN_USER_IDS = 'admin_sensitive';
 
 const {
   createMessageReplyRuntime,
@@ -89,8 +91,20 @@ module.exports = (async () => {
   });
   assert.strictEqual(
     sentPayloads[sentPayloads.length - 1].params.message,
+    '敏感回复已拦截',
+    'normal private replies should use the sensitive guard'
+  );
+
+  await runtime.sendReply({
+    chatType: 'private',
+    userId: 'admin_sensitive',
+    senderId: 'admin_sensitive',
+    replyText: '这句包含 runtime-block'
+  });
+  assert.strictEqual(
+    sentPayloads[sentPayloads.length - 1].params.message,
     '这句包含 runtime-block',
-    'private replies should not use the group sensitive guard'
+    'admin private replies should bypass the sensitive guard'
   );
 
   const streamPayloads = [];
@@ -108,6 +122,36 @@ module.exports = (async () => {
   await dispatcher.onDelta('abc', '第一段。第二段。');
   await dispatcher.finish('第一段。第二段。');
   assert.strictEqual(streamPayloads.length, 0);
+
+  const privateSensitiveStreamPayloads = [];
+  const privateSensitiveDispatcher = createStreamingDispatcher({
+    runtimeConfig: { ADMIN_USER_IDS: ['admin_sensitive'] },
+    sendWithRetry: async (payload) => {
+      privateSensitiveStreamPayloads.push(payload);
+      return true;
+    },
+    chatType: 'private',
+    userId: 'private_sensitive_stream',
+    senderId: 'private_sensitive_stream'
+  });
+  await privateSensitiveDispatcher.finish('这一段包含 stream-block');
+  assert.strictEqual(privateSensitiveStreamPayloads.length, 1);
+  assert.strictEqual(privateSensitiveStreamPayloads[0].params.message, '敏感回复已拦截');
+
+  const adminSensitiveStreamPayloads = [];
+  const adminSensitiveDispatcher = createStreamingDispatcher({
+    runtimeConfig: { ADMIN_USER_IDS: ['admin_sensitive'] },
+    sendWithRetry: async (payload) => {
+      adminSensitiveStreamPayloads.push(payload);
+      return true;
+    },
+    chatType: 'private',
+    userId: 'admin_sensitive',
+    senderId: 'admin_sensitive'
+  });
+  await adminSensitiveDispatcher.finish('这一段包含 stream-block');
+  assert.strictEqual(adminSensitiveStreamPayloads.length, 1);
+  assert.strictEqual(adminSensitiveStreamPayloads[0].params.message, '这一段包含 stream-block');
 
   assert.strictEqual(findNaturalSplitIndex('第一句。第二句。'), '第一句。'.length);
   assert.strictEqual(findNaturalSplitIndex('可以吗？可以！'), '可以吗？'.length);
@@ -269,6 +313,36 @@ module.exports = (async () => {
   assert.strictEqual(srcSensitivePayloads.length, 1);
   assert.strictEqual(srcSensitivePayloads[0].params.message, '[CQ:at,qq=src_user_sensitive] 敏感回复已拦截');
   assert.ok(srcSensitiveEvents.some((event) => event.type === 'group_reply_sensitive_blocked'));
+
+  const srcPrivateSensitivePayloads = [];
+  const srcPrivateSensitiveDispatcher = createSrcStreamingDispatcher({
+    runtimeConfig: { ADMIN_USER_IDS: ['admin_sensitive'] },
+    sendWithRetry: async (payload) => {
+      srcPrivateSensitivePayloads.push(payload);
+      return true;
+    },
+    chatType: 'private',
+    userId: 'src_private_sensitive',
+    senderId: 'src_private_sensitive'
+  });
+  await srcPrivateSensitiveDispatcher.finish('这一段包含 src-stream-block');
+  assert.strictEqual(srcPrivateSensitivePayloads.length, 1);
+  assert.strictEqual(srcPrivateSensitivePayloads[0].params.message, '敏感回复已拦截');
+
+  const srcAdminSensitivePayloads = [];
+  const srcAdminSensitiveDispatcher = createSrcStreamingDispatcher({
+    runtimeConfig: { ADMIN_USER_IDS: ['admin_sensitive'] },
+    sendWithRetry: async (payload) => {
+      srcAdminSensitivePayloads.push(payload);
+      return true;
+    },
+    chatType: 'private',
+    userId: 'admin_sensitive',
+    senderId: 'admin_sensitive'
+  });
+  await srcAdminSensitiveDispatcher.finish('这一段包含 src-stream-block');
+  assert.strictEqual(srcAdminSensitivePayloads.length, 1);
+  assert.strictEqual(srcAdminSensitivePayloads[0].params.message, '这一段包含 src-stream-block');
 
   fs.rmSync(tempSensitiveDir, { recursive: true, force: true });
   console.log('messageReplyRuntimeFreshness.test.js passed');

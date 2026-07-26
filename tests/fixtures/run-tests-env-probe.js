@@ -3,6 +3,10 @@ const { getModelHttpTransportStatus } = require('../../src/model/http/model-post
 
 console.log(JSON.stringify({
   env: {
+    TEST_TEMP_ROOT: process.env.TEST_TEMP_ROOT,
+    TEMP: process.env.TEMP,
+    TMP: process.env.TMP,
+    TMPDIR: process.env.TMPDIR,
     MODEL_TLS_IMPERSONATION_ENABLED: process.env.MODEL_TLS_IMPERSONATION_ENABLED,
     MODEL_TLS_IMPERSONATION_STREAM_ENABLED: process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED,
     MEMORY_CLI_RERANK_ENABLED: process.env.MEMORY_CLI_RERANK_ENABLED

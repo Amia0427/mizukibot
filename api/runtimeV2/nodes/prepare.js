@@ -405,7 +405,30 @@ function createPrepareNode(deps = {}) {
     return String(decision.decision || '').trim().toLowerCase() !== 'skip';
   }
 
+  function resolveFallbackMemoryNeed(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const question = String(request.runtimeQuestionText || request.question || '').trim();
+    const recallNeed = classifyMemoryNeed(question, {
+      facets: request.facets || routeMeta.facets || {},
+      intent: request.intent || routeMeta.intent || {},
+      meta: routeMeta
+    });
+    const routePolicyKey = String(request.routePolicyKey || routeMeta.routePolicyKey || '').trim().toLowerCase();
+    const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+    const routeMemorySignal = request.intent?.needsMemory === true
+      || routeMeta.intent?.needsMemory === true
+      || Boolean(routeMeta.needsMemoryReason || routeMeta.recallFacet);
+    const plainChatDefault = routePolicyKey === 'chat/default' && (topRouteType === 'direct_chat' || !topRouteType);
+    const forceMemoryContext = recallNeed.needsMemory === true || routeMemorySignal;
+    return {
+      forceMemoryContext,
+      shouldUseMemoryContext: forceMemoryContext || !plainChatDefault
+    };
+  }
+
   function buildFallbackMemoryContext(state = {}, request = {}) {
+    const memoryNeed = resolveFallbackMemoryNeed(request);
+    if (!memoryNeed.shouldUseMemoryContext) return null;
     const existing = state.memory?.context && typeof state.memory.context === 'object'
       ? state.memory.context
       : null;
@@ -415,12 +438,7 @@ function createPrepareNode(deps = {}) {
     const userId = String(request.userId || '').trim();
     const question = String(request.runtimeQuestionText || request.question || '').trim();
     if (!userId || !question) return null;
-    const recallNeed = classifyMemoryNeed(question, {
-      facets: request.facets || routeMeta.facets || {},
-      intent: request.intent || routeMeta.intent || {},
-      meta: routeMeta
-    });
-    const forceLocalRag = config.MEMORY_RECALL_FORCE_LOCAL_RAG !== false && recallNeed.needsMemory;
+    const forceLocalRag = config.MEMORY_RECALL_FORCE_LOCAL_RAG !== false && memoryNeed.forceMemoryContext;
     return buildFallbackMemoryContextImpl(userId, question, {
       routePolicyKey: request.routePolicyKey,
       topRouteType: request.topRouteType || routeMeta.topRouteType || '',
@@ -436,7 +454,7 @@ function createPrepareNode(deps = {}) {
       dailyJournalYearMonth: request.dailyJournalYearMonth,
       dailyJournalMaxFourDayFiles: 1,
       dailyJournalMaxMonthlyFiles: 0,
-      forceMemoryContext: recallNeed.needsMemory,
+      forceMemoryContext: memoryNeed.forceMemoryContext,
       ragEnabled: forceLocalRag ? true : false,
       retrievalPath: forceLocalRag ? 'prepare_fallback_forced_local_rag' : 'prepare_fallback_no_rag'
     }) || null;
@@ -502,7 +520,9 @@ function createPrepareNode(deps = {}) {
 
   function buildSoftTimeoutDynamicBlocks(state = {}, request = {}, memoryContext = null) {
     if (String(request.customPrompt || '').trim()) return [];
-    const blocks = normalizePromptBlocks(state.memory?.dynamicContextBlocks);
+    const memoryNeed = resolveFallbackMemoryNeed(request);
+    const blocks = normalizePromptBlocks(state.memory?.dynamicContextBlocks)
+      .filter((block) => memoryNeed.shouldUseMemoryContext || !['retrieved_memory_lite', 'daily_journal', 'memory_recall_policy'].includes(blockId(block)));
     const context = memoryContext && typeof memoryContext === 'object' ? memoryContext : {};
     const retrievedText = String(
       context.promptRetrievedMemoryText
@@ -510,20 +530,24 @@ function createPrepareNode(deps = {}) {
       || context.retrievedMemoryForPrompt
       || ''
     ).trim();
-    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
-      'retrieved_memory_lite',
-      'Retrieved Memory Lite',
-      retrievedText ? `[RetrievedMemoryLite]\n${retrievedText}` : '',
-      { priority: 260, meta: { evidenceOnly: true } }
-    ));
+    if (memoryNeed.shouldUseMemoryContext) {
+      appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+        'retrieved_memory_lite',
+        'Retrieved Memory Lite',
+        retrievedText ? `[RetrievedMemoryLite]\n${retrievedText}` : '',
+        { priority: 260, meta: { evidenceOnly: true } }
+      ));
+    }
 
     const dailyJournalText = String(context.promptDailyJournalText || context.dailyJournalText || '').trim();
-    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
-      'daily_journal',
-      'Daily Journal',
-      dailyJournalText ? `[DailyJournal]\n${dailyJournalText}` : '',
-      { priority: 261, meta: { evidenceOnly: true } }
-    ));
+    if (memoryNeed.shouldUseMemoryContext) {
+      appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+        'daily_journal',
+        'Daily Journal',
+        dailyJournalText ? `[DailyJournal]\n${dailyJournalText}` : '',
+        { priority: 261, meta: { evidenceOnly: true } }
+      ));
+    }
 
     const shortTermContinuity = formatFallbackShortTermContinuity(state, request);
     appendUniquePromptBlock(blocks, createFallbackPromptBlock(
@@ -562,7 +586,9 @@ function createPrepareNode(deps = {}) {
       }
     ));
 
-    const summaryText = String(context.promptSummaryText || context.summary || '').trim();
+    const summaryText = memoryNeed.shouldUseMemoryContext
+      ? String(context.promptSummaryText || context.summary || '').trim()
+      : '';
     appendUniquePromptBlock(blocks, createFallbackPromptBlock(
       'summary',
       'Summary',

@@ -28,6 +28,13 @@ function getDiagnosticsModule() {
   return require('../memory-v3/diagnostics');
 }
 
+function clearMemoryV3EmbeddingCache() {
+  try {
+    const { clearEmbeddingIndexCache } = require('../memory-v3/embeddingIndex');
+    clearEmbeddingIndexCache();
+  } catch (_) {}
+}
+
 function normalizeVectorWatchdogSource(value = 'all') {
   const normalized = normalizeText(value || 'all').toLowerCase();
   return ['all', 'memory', 'journal', 'worldbook'].includes(normalized) ? normalized : 'all';
@@ -141,6 +148,7 @@ async function buildSyncSummary(deps = {}) {
     includeRows: false
   });
   if (summary && summary._rows) delete summary._rows;
+  clearMemoryV3EmbeddingCache();
   return summary;
 }
 
@@ -254,6 +262,7 @@ async function runPostReplyVectorWatchdog(options = {}, deps = {}) {
     watchdogState.lastResult = summary;
     return summary;
   } finally {
+    clearMemoryV3EmbeddingCache();
     watchdogState.running = false;
   }
 }

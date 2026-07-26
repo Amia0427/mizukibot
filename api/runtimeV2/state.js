@@ -1,3 +1,4 @@
+// @ts-check
 const { Annotation } = require('@langchain/langgraph');
 const {
   normalizePlanStep,
@@ -13,23 +14,33 @@ function appendReducer(left, right) {
   return base.concat(incoming.filter((item) => item !== undefined));
 }
 
+function replaceReducer(_left, right) {
+  return right;
+}
+
 const GraphStateV2 = Annotation.Root({
   request: Annotation({
+    value: replaceReducer,
     default: () => ({})
   }),
   thread: Annotation({
+    value: replaceReducer,
     default: () => ({})
   }),
   memory: Annotation({
+    value: replaceReducer,
     default: () => ({})
   }),
   plan: Annotation({
+    value: replaceReducer,
     default: () => ({})
   }),
   execution: Annotation({
+    value: replaceReducer,
     default: () => ({})
   }),
   output: Annotation({
+    value: replaceReducer,
     default: () => ({})
   }),
   messages: Annotation({

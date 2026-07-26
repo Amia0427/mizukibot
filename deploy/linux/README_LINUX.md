@@ -4,7 +4,7 @@
 
 ## 1. 环境要求
 - Ubuntu/Debian/CentOS 等 Linux 发行版
-- Node.js >= 18
+- Node.js 20.x（以项目根目录 `.nvmrc` 为准）
 - npm
 - 已可访问你的 `API_BASE_URL`
 - NapCat OneBot WebSocket 已部署并可连接
@@ -95,12 +95,14 @@ systemctl stop mizukibot
 外部子 agent 桥接已退役。线上工具请求仍按 `core/routeExecution.js` 和 `api/runtimeV2` 的本地工具、MCP、记忆与 planner 链路执行。
 
 ## 9. Web 面板访问
+> 更新：2026-07-12 20:10 +08:00
+
 - 默认仅本机访问：`WEB_BIND_HOST=127.0.0.1`
 - 若需公网访问，建议 Nginx 反代 + HTTPS，并设置强 `WEB_TOKEN`
-- 已启用最小鉴权（`WEB_TOKEN`）
-  - 支持 `Authorization: Bearer <token>`
-  - 支持 `x-web-token: <token>`
-  - 页面也支持 `?token=...` 方式登录
+- 同机 Nginx 反代时设置 `WEB_TRUST_PROXY_HOPS=1`，并用 `proxy_set_header` 覆盖 `Host`、`X-Forwarded-Proto`、`X-Forwarded-For`；其中 `X-Forwarded-For` 应设为 `$remote_addr`，不要透传客户端自带值
+- Node 的 `3005` 端口必须只绑定 loopback 或受控网络，公网仅开放 Nginx HTTPS 端口
+- 浏览器打开面板后，在 `/login` 输入一次 `WEB_TOKEN`；服务端签发短期 `HttpOnly` 会话 cookie
+- 管理 API 不再接受 Bearer、`x-web-token` 或 URL query token
 
 ## 10. 常见问题
 1) 启动失败 `.env not found`

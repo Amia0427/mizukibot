@@ -16,8 +16,7 @@ const files = [
   'persona/03_boundaries.txt',
   'persona/04_behavior.txt',
   'persona/05_voice_samples.txt',
-  'persona/06_state_modulation.txt',
-  'persona/09_liveness_authentic.txt'
+  'persona/06_state_modulation.txt'
 ];
 
 console.log('=== Persona文件Token估算（优化后）===\n');

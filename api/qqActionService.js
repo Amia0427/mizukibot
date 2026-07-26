@@ -23,6 +23,10 @@ const {
   shouldAttemptBotDiaryImage,
   tryGenerateBotDiaryQzoneImage
 } = require('./qqActionService.imageDiary');
+const {
+  buildOutboundMessageMeta,
+  recordOutboundMessageEvent
+} = require('../core/outboundMessageDiagnostics');
 
 const ADMIN_USER_IDS = new Set((config.ADMIN_USER_IDS || []).map((item) => String(item || '').trim()).filter(Boolean));
 const REASONING_FORWARD_NODE_MAX_CHARS = 3500;
@@ -118,9 +122,34 @@ async function sendGroupMessage(groupId = '', message = '', options = {}) {
   const text = normalizeText(message);
   if (!targetGroupId) throw new Error('groupId is required');
   if (!text) throw new Error('message content is required');
-  await actionClient.callAction('send_group_msg', {
-    group_id: targetGroupId,
-    message: text
+  const outboundMeta = buildOutboundMessageMeta(options, {
+    source: 'qq_action_service',
+    triggerReason: 'group_message'
+  });
+  const outboundPayload = {
+    channel: 'group',
+    action: 'send_group_msg',
+    groupId: targetGroupId,
+    messageLength: text.length
+  };
+  const startedAt = Date.now();
+  recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
+  try {
+    await actionClient.callAction('send_group_msg', {
+      group_id: targetGroupId,
+      message: text
+    });
+  } catch (error) {
+    recordOutboundMessageEvent('send_failure', outboundMeta, {
+      ...outboundPayload,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      error: error?.message || String(error || '')
+    });
+    throw error;
+  }
+  recordOutboundMessageEvent('send_success', outboundMeta, {
+    ...outboundPayload,
+    durationMs: Math.max(0, Date.now() - startedAt)
   });
   return {
     success: true,
@@ -134,9 +163,34 @@ async function sendPrivateMessage(userId = '', message = '', options = {}) {
   const text = normalizeText(message);
   if (!targetUserId) throw new Error('userId is required');
   if (!text) throw new Error('message content is required');
-  await actionClient.callAction('send_private_msg', {
-    user_id: targetUserId,
-    message: text
+  const outboundMeta = buildOutboundMessageMeta(options, {
+    source: 'qq_action_service',
+    triggerReason: 'private_message'
+  });
+  const outboundPayload = {
+    channel: 'private',
+    action: 'send_private_msg',
+    userId: targetUserId,
+    messageLength: text.length
+  };
+  const startedAt = Date.now();
+  recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
+  try {
+    await actionClient.callAction('send_private_msg', {
+      user_id: targetUserId,
+      message: text
+    });
+  } catch (error) {
+    recordOutboundMessageEvent('send_failure', outboundMeta, {
+      ...outboundPayload,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      error: error?.message || String(error || '')
+    });
+    throw error;
+  }
+  recordOutboundMessageEvent('send_success', outboundMeta, {
+    ...outboundPayload,
+    durationMs: Math.max(0, Date.now() - startedAt)
   });
   return {
     success: true,
@@ -156,8 +210,8 @@ function splitTextIntoFixedChunks(text = '', maxChars = REASONING_FORWARD_NODE_M
 }
 
 function buildReasoningForwardNodes(reasoningText = '', options = {}) {
-  const text = String(reasoningText || '').trim();
-  if (!text) return [];
+  const text = String(reasoningText || '');
+  if (!text.trim()) return [];
   const name = normalizeText(options.name || options.botName || '瑞希') || '瑞希';
   const uin = normalizeText(options.uin || options.botUin || config.BOT_QQ || '0') || '0';
   return splitTextIntoFixedChunks(text, options.maxNodeChars).map((content) => ({
@@ -204,9 +258,9 @@ async function sendPrivateForwardMessage(userId = '', messages = [], options = {
 
 async function sendReasoningForwardMessage(input = {}, options = {}) {
   const chatType = normalizeText(input.chatType || input.chat_type).toLowerCase() === 'private' ? 'private' : 'group';
-  const reasoningForwardText = String(input.reasoningForwardText || '').trim();
-  if (!reasoningForwardText) return { success: false, skipped: true, reason: 'empty_reasoning_forward_text' };
-  const messages = buildReasoningForwardNodes(reasoningForwardText, {
+  const reasoningText = String(input.reasoningText || '');
+  if (!reasoningText.trim()) return { success: false, skipped: true, reason: 'empty_reasoning_text' };
+  const messages = buildReasoningForwardNodes(reasoningText, {
     botName: input.botName || options.botName,
     botUin: input.botUin || options.botUin,
     maxNodeChars: input.maxNodeChars || options.maxNodeChars

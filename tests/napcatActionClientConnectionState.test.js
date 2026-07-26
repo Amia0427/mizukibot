@@ -39,6 +39,21 @@ module.exports = (async () => {
       }
     );
 
+    axios.post = async () => {
+      const error = new Error('timeout of 15000ms exceeded');
+      error.code = 'ECONNABORTED';
+      throw error;
+    };
+    await assert.rejects(
+      () => client.callAction('send_group_msg', { group_id: 1, message: 'hello' }),
+      (error) => {
+        assert.ok(error instanceof NapCatActionError);
+        assert.strictEqual(error.offline, true);
+        assert.strictEqual(error.retryable, false);
+        return true;
+      }
+    );
+
     const offlineState = client.getConnectionState();
     assert.strictEqual(offlineState.connected, false);
     assert.strictEqual(offlineState.readyStateName, 'http_offline');

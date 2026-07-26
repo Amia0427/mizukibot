@@ -39,8 +39,13 @@ COPY utils ./utils
 COPY web ./web
 COPY index.js package.json package-lock.json .env.example .env.skills.example ./
 
-RUN mkdir -p /app/data /app/logs
+RUN mkdir -p /app/data \
+  && touch /app/runtime.env \
+  && chown node:node /app \
+  && chown -R node:node /app/data /app/runtime.env
 
 EXPOSE 3002 3005
 
-CMD ["npm", "start"]
+USER node
+
+CMD ["node", "index.js"]

@@ -32,7 +32,17 @@ function createSchedulerRuntime(options = {}) {
   async function executeTask(task = {}) {
     const commandType = String(task.commandType || '').trim();
     if (commandType === 'group_message') {
-      const ok = await sendGroupMessage(task.groupId, task.payload?.message || '');
+      const ok = await sendGroupMessage(task.groupId, task.payload?.message || '', {
+        source: 'scheduler_runtime',
+        routePolicyKey: 'scheduled/group-message',
+        triggerReason: 'scheduled_task_due',
+        topRouteType: 'proactive',
+        routeMeta: {
+          groupId: String(task.groupId || '').trim(),
+          taskId: String(task.id || '').trim(),
+          commandType
+        }
+      });
       return {
         success: ok,
         reason: ok ? '群消息已发送' : '群消息发送失败'
@@ -107,13 +117,18 @@ function createSchedulerRuntime(options = {}) {
           continue;
         }
 
-        const result = await executeTask(task);
+        const claimedTask = typeof store.claimDueTask === 'function'
+          ? store.claimDueTask(task.id, nowText)
+          : task;
+        if (!claimedTask) continue;
+
+        const result = await executeTask(claimedTask);
         const nextStatus = result.ownerNoLongerAdmin
-          ? (task.scheduleType === 'once' ? 'failed' : 'cancelled')
-          : (task.scheduleType === 'once'
+          ? (claimedTask.scheduleType === 'once' ? 'failed' : 'cancelled')
+          : (claimedTask.scheduleType === 'once'
             ? (result.success ? 'completed' : 'failed')
             : 'active');
-        store.markRunResult(task.id, {
+        store.markRunResult(claimedTask.id, {
           status: nextStatus,
           lastRunAt: new Date().toISOString(),
           nowText,

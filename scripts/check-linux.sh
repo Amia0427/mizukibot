@@ -48,6 +48,7 @@ fi
 
 cd "$ROOT_DIR"
 
+npm run -s check:node
 node -c config/index.js
 node -c index.js
 node -c web/server/index.js

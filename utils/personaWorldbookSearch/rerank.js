@@ -18,6 +18,18 @@ function shouldRerankCandidates(candidates = []) {
   return top <= 0 || fourth <= 0 || (top - fourth) < 0.35;
 }
 
+function resolvePersonaWorldbookRerankTimeoutMs(options = {}) {
+  const hasExplicitTimeout = Object.prototype.hasOwnProperty.call(options, 'rerankTimeoutMs')
+    && Number(options.rerankTimeoutMs) > 0;
+  const raw = hasExplicitTimeout
+    ? options.rerankTimeoutMs
+    : (config.PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS || config.MEMORY_RERANK_TIMEOUT_MS || 2000);
+  const timeoutMs = Math.max(0, Math.floor(Number(raw) || 0));
+  if (hasExplicitTimeout || timeoutMs <= 0) return timeoutMs;
+  const floorMs = Math.max(100, Math.floor(Number(config.MEMORY_RERANK_TIMEOUT_FLOOR_MS || 2000) || 2000));
+  return Math.max(timeoutMs, floorMs);
+}
+
 async function rerankPersonaWorldbookCandidates(query = '', candidates = [], options = {}) {
   const diagnostics = {
     applied: false,
@@ -32,10 +44,7 @@ async function rerankPersonaWorldbookCandidates(query = '', candidates = [], opt
     2,
     Math.floor(Number(options.maxCandidates || config.PERSONA_WORLDBOOK_RERANK_MAX_CANDIDATES || 24) || 24)
   );
-  const rerankTimeoutMs = Math.max(
-    0,
-    Math.floor(Number(options.rerankTimeoutMs || config.PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS || config.MEMORY_RERANK_TIMEOUT_MS || 2000) || 0)
-  );
+  const rerankTimeoutMs = resolvePersonaWorldbookRerankTimeoutMs(options);
   const head = candidates.slice(0, maxCandidates);
   diagnostics.candidates = head.length;
   try {
@@ -98,6 +107,7 @@ async function withSoftTimeout(promiseFactory, timeoutMs, fallbackValue) {
 
 module.exports = {
   rerankPersonaWorldbookCandidates,
+  resolvePersonaWorldbookRerankTimeoutMs,
   shouldRerankCandidates,
   withSoftTimeout
 };

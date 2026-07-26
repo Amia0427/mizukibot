@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "types": ["node"],
+    "strict": false,
+    "noImplicitAny": false,
+    "noImplicitThis": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "web/auth.js",
+    "web/securityHeaders.js",
+    "web/sessionManager.js",
+    "utils/networkSafety.js",
+    "utils/requestTrace.js",
+    "utils/securityDiagnostics.js",
+    "utils/toolPolicy/skillArgs.js",
+    "api/runtimeV2/contracts.js",
+    "api/runtimeV2/state.js",
+    "api/runtimeV2/host/routePredicates.js"
+  ]
+}

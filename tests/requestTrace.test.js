@@ -37,6 +37,7 @@ module.exports = (async () => {
   try {
     process.env.DATA_DIR = tempDir;
     process.env.API_KEY = 'test-key';
+    process.env.REQUEST_TRACE_HASH_SECRET = 'trace-hash-test-secret';
     process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
     process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     clearProjectCache();
@@ -44,7 +45,9 @@ module.exports = (async () => {
     const {
       buildRequestId,
       createRequestTrace,
+      appendRequestTraceEvent,
       flushRequestTraceEventsSync,
+      hashTraceIdentifier,
       nextTracePhase,
       resetRequestTraceStateForTests
     } = require('../utils/requestTrace');
@@ -52,6 +55,143 @@ module.exports = (async () => {
     const httpClient = require('../api/httpClient');
 
     resetRequestTraceStateForTests();
+
+    appendRequestTraceEvent({
+      requestId: 'req_privacy_boundary',
+      phaseSeq: 1,
+      stage: 'privacy_test',
+      userId: 'u-safe',
+      groupId: 'g-safe',
+      messageId: 'm-safe',
+      authorization: 'Bearer exposed-authorization',
+      apiKey: 'exposed-api-key',
+      token: 'exposed-token',
+      password: 'exposed-password',
+      prompt: 'private prompt body',
+      message: 'private message body',
+      arbitrary: { nested: 'must not be logged' },
+      error: Object.assign(new Error('request failed authorization=Bearer-secret token=token-secret'), {
+        config: { headers: { authorization: 'Bearer nested-secret' } },
+        response: { data: { prompt: 'private response body' } }
+      })
+    });
+    flushRequestTraceEventsSync();
+    const privacyEvent = readJsonLines(path.join(tempDir, 'request-trace.ndjson'))
+      .find((event) => event.requestId === 'req_privacy_boundary');
+    assert.ok(privacyEvent);
+    assert.strictEqual(privacyEvent.userIdHash, hashTraceIdentifier('userId', 'u-safe'));
+    assert.strictEqual(privacyEvent.groupIdHash, hashTraceIdentifier('groupId', 'g-safe'));
+    assert.strictEqual(privacyEvent.messageIdHash, hashTraceIdentifier('messageId', 'm-safe'));
+    assert.ok(!('userId' in privacyEvent));
+    assert.ok(!('groupId' in privacyEvent));
+    assert.ok(!('messageId' in privacyEvent));
+    assert.strictEqual(privacyEvent.error, 'request failed authorization=[REDACTED] token=[REDACTED]');
+    for (const forbidden of ['authorization', 'apiKey', 'token', 'password', 'prompt', 'message', 'arbitrary']) {
+      assert.ok(!(forbidden in privacyEvent), `${forbidden} must not be persisted`);
+    }
+    assert.ok(!JSON.stringify(privacyEvent).includes('secret'));
+
+    appendRequestTraceEvent({
+      requestId: 'req_compatibility_contract',
+      phaseSeq: 2,
+      stage: 'stream_complete',
+      needsBackground: true,
+      executor: 'direct',
+      planner: 'runtime_v2',
+      stream: true,
+      apiBaseUrl: 'https://user:pass@example.com/v1?api_key=base-secret',
+      requestUrl: 'https://example.com/chat?token=request-secret&mode=stream',
+      retry: 'network',
+      retryCount: 2,
+      tool: 'search',
+      replyPath: 'direct_reply',
+      finishReason: 'stop',
+      streamCompleted: true,
+      sent: true,
+      streamDoneSeen: true,
+      maxAttempts: 3,
+      allowTools: true,
+      shouldUseTools: true,
+      decisionSource: 'route_policy',
+      plannerDecisionSource: 'model',
+      allowedToolCount: 2,
+      allowedToolNames: ['search', 'weather'],
+      plannerFallbackUsed: false,
+      plannerModel: 'planner-model',
+      plannerMode: 'tool_plan',
+      plannerStepCount: 1,
+      plannerTools: ['search'],
+      unavailableReason: 'none',
+      fastPath: 'plain_private_chat',
+      relationship: 'known',
+      tokens: 123,
+      hasContext: true,
+      needsMemory: true,
+      forceMemoryContext: false,
+      needsMemoryReason: 'continuity',
+      recallFacet: 'profile',
+      cache: {
+        openaiPromptCacheKey: 'stable-cache-key',
+        downgradeReason: 'unsupported_retention'
+      },
+      plannerMs: 12,
+      executorMs: 34,
+      streamMs: 56,
+      error: 'failed {"authorization": "Bearer json-secret", "password" : "space-secret"}'
+    });
+    flushRequestTraceEventsSync();
+    const compatibilityEvent = readJsonLines(path.join(tempDir, 'request-trace.ndjson'))
+      .find((event) => event.requestId === 'req_compatibility_contract');
+    assert.deepStrictEqual({
+      needsBackground: compatibilityEvent.needsBackground,
+      executor: compatibilityEvent.executor,
+      planner: compatibilityEvent.planner,
+      stream: compatibilityEvent.stream,
+      retryCount: compatibilityEvent.retryCount,
+      tool: compatibilityEvent.tool,
+      replyPath: compatibilityEvent.replyPath,
+      finishReason: compatibilityEvent.finishReason,
+      streamCompleted: compatibilityEvent.streamCompleted,
+      plannerMs: compatibilityEvent.plannerMs,
+      executorMs: compatibilityEvent.executorMs,
+      streamMs: compatibilityEvent.streamMs
+    }, {
+      needsBackground: true,
+      executor: 'direct',
+      planner: 'runtime_v2',
+      stream: true,
+      retryCount: 2,
+      tool: 'search',
+      replyPath: 'direct_reply',
+      finishReason: 'stop',
+      streamCompleted: true,
+      plannerMs: 12,
+      executorMs: 34,
+      streamMs: 56
+    });
+    assert.strictEqual(compatibilityEvent.fastPath, 'plain_private_chat');
+    assert.ok(!JSON.stringify(compatibilityEvent).includes('secret'));
+    assert.strictEqual(compatibilityEvent.apiBaseUrl, 'https://example.com');
+    assert.strictEqual(compatibilityEvent.requestUrl, 'https://example.com');
+    assert.deepStrictEqual(compatibilityEvent.allowedToolNames, ['search', 'weather']);
+    assert.deepStrictEqual(compatibilityEvent.plannerTools, ['search']);
+    assert.strictEqual(compatibilityEvent.cache.openaiPromptCacheKey, 'stable-cache-key');
+    assert.strictEqual(compatibilityEvent.cache.downgradeReason, 'unsupported_retention');
+
+    appendRequestTraceEvent({
+      requestId: 'req_token=identifier-secret',
+      phaseSeq: 3,
+      stage: 'request_id_safety',
+      error: 'headers {"access_token":"ACCESS_LEAK","client_secret" : "CLIENT_LEAK","refresh_token":"REFRESH_LEAK","set-cookie":"COOKIE_LEAK"}'
+    });
+    flushRequestTraceEventsSync();
+    const safeIdEvent = readJsonLines(path.join(tempDir, 'request-trace.ndjson'))
+      .find((event) => event.stage === 'request_id_safety');
+    assert.ok(safeIdEvent);
+    for (const leakedValue of ['identifier-secret', 'ACCESS_LEAK', 'CLIENT_LEAK', 'REFRESH_LEAK', 'COOKIE_LEAK']) {
+      assert.ok(!JSON.stringify(safeIdEvent).includes(leakedValue));
+    }
+    assert.ok(safeIdEvent.requestId.length <= 160);
 
     const requestId = buildRequestId({
       chatType: 'group',
@@ -65,6 +205,9 @@ module.exports = (async () => {
       userId: 'u1',
       messageId: 'm1'
     }));
+    assert.ok(!requestId.includes('g1'));
+    assert.ok(!requestId.includes('u1'));
+    assert.ok(!requestId.includes('m1'));
 
     const trace = createRequestTrace({
       source: 'message_ingress',

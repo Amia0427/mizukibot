@@ -2,12 +2,15 @@
 
 更新 2026-06-26 02:30 +08:00：这份文档给第一次用 Docker 部署 MizukiBot 的人看，只覆盖现有 `Dockerfile` 和 `docker-compose.yml` 的最小启动路径。
 
+更新 2026-07-12 20:39 +08:00：Compose 已改为非 root、只读根文件系统和受限资源运行。持久业务数据只使用 `mizukibot-data`；容器控制台日志由 Docker `local` 驱动轮转。主服务会可写挂载宿主 `.env` 以支持 Web 设置保存，Linux 部署必须先确认该文件对容器内 UID/GID `1000:1000` 可写。
+
 ## 先知道范围
 
 - Docker 只运行 MizukiBot 主进程和 post-reply worker。
 - NapCat 不在这个 Compose 里，需要你单独运行。
 - `.env`、私有 prompt、运行数据和日志不会打进镜像。
-- 容器里的运行数据默认放在 Docker volume：`mizukibot-data` 和 `mizukibot-logs`。
+- 容器里的运行数据默认放在 Docker volume：`mizukibot-data`。
+- stdout/stderr 日志由 Docker `local` 日志驱动保留，默认每个容器最多 5 个、每个 10 MiB。
 
 ## 第一步：安装 Docker
 
@@ -70,6 +73,16 @@ TIMEZONE=Asia/Shanghai
 ```
 
 不要提交 `.env`。它已经被 `.gitignore` 和 `.dockerignore` 忽略。
+
+Linux 上还要让容器内非 root 用户能够保存 Web 设置：
+
+```bash
+sudo chgrp 1000 .env
+chmod 660 .env
+stat -c '%u:%g %a %n' .env
+```
+
+不要使用 `chmod 666`。如果宿主 GID 1000 不是可信服务组，应先建立专用组并同步调整 Compose `user`，不要扩大密钥读取范围。
 
 Linux 上如果 NapCat 跑在宿主机，`host.docker.internal` 可能不可用。先用宿主机网关地址替换 `NAPCAT_HTTP_API_BASE_URL`，例如 `http://172.17.0.1:3000`；不同机器网关可能不同。
 
@@ -148,8 +161,11 @@ docker compose run --rm --entrypoint node mizukibot --check scripts/post-reply-w
 检查 Web 面板安全状态：
 
 ```bash
-curl -H "Authorization: Bearer 你的WEB_TOKEN" http://127.0.0.1:3005/api/security-status
+curl -c .web-session-cookie -H "Origin: http://127.0.0.1:3005" -H "Content-Type: application/json" -d '{"token":"你的WEB_TOKEN"}' http://127.0.0.1:3005/api/session
+curl -b .web-session-cookie http://127.0.0.1:3005/api/security-status
 ```
+
+完成后删除本地 `.web-session-cookie`；管理 API 不接受 Bearer 或 query token。（更新：2026-07-12 20:10 +08:00）
 
 检查 NapCat HTTP reverse 入口是否能收到空事件探针：
 
@@ -216,10 +232,11 @@ docker compose up -d
 
 ### Web 面板 401
 
-确认请求带了正确 token：
+在浏览器重新打开 `/login`，或为命令行重新创建短期会话：
 
 ```bash
-curl -H "Authorization: Bearer 你的WEB_TOKEN" http://127.0.0.1:3005/api/security-status
+curl -c .web-session-cookie -H "Origin: http://127.0.0.1:3005" -H "Content-Type: application/json" -d '{"token":"你的WEB_TOKEN"}' http://127.0.0.1:3005/api/session
+curl -b .web-session-cookie http://127.0.0.1:3005/api/security-status
 ```
 
 ### 不小心想清空数据

@@ -162,12 +162,24 @@ function buildLanceDbSyncPlan(nodes = [], options = {}) {
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
     .filter((node) => node && normalizeText(node.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node));
   const readyNodeIds = new Set();
-  try {
-    const { loadEmbeddingIndex } = require('./embeddingIndex');
-    for (const row of loadEmbeddingIndex().readyRows || []) {
-      if (normalizeText(row.nodeId)) readyNodeIds.add(normalizeText(row.nodeId));
+  const embeddingRows = Array.isArray(options.embeddingRows)
+    ? options.embeddingRows
+    : Array.isArray(options.readyEmbeddingRows)
+      ? options.readyEmbeddingRows
+      : [];
+  for (const row of embeddingRows) {
+    if (normalizeText(row.status || 'ready').toLowerCase() !== 'ready') continue;
+    if (Array.isArray(row.embedding) && row.embedding.length === 0) continue;
+    if (normalizeText(row.nodeId)) readyNodeIds.add(normalizeText(row.nodeId));
+  }
+  const hasInjectedEmbeddingRows = Array.isArray(options.embeddingRows) || Array.isArray(options.readyEmbeddingRows);
+  if (!hasInjectedEmbeddingRows) {
+    for (const node of activeNodes) {
+      const embedding = node?.embedding || node?.meta?.embedding;
+      if (!Array.isArray(embedding) || embedding.length === 0) continue;
+      if (normalizeText(node.id || node.nodeId)) readyNodeIds.add(normalizeText(node.id || node.nodeId));
     }
-  } catch (_) {}
+  }
   const embeddableNodes = activeNodes.filter((node) => readyNodeIds.has(normalizeText(node.id || node.nodeId)));
   return {
     dryRun: options.dryRun !== false,

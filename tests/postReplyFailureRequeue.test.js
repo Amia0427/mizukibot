@@ -11,6 +11,7 @@ const {
 
 assert.strictEqual(classifyPostReplyJobError({ lastError: '429 rate limit' }), 'transient');
 assert.strictEqual(classifyPostReplyJobError({ lastError: '503 temporarily unavailable' }), 'transient');
+assert.strictEqual(classifyPostReplyJobError({ lastError: 'Request failed with status code 495' }), 'transient');
 assert.strictEqual(classifyPostReplyJobError({ lastError: '401 unauthorized' }), 'terminal');
 assert.strictEqual(classifyPostReplyJobError({ lastError: '403 forbidden' }), 'terminal');
 assert.strictEqual(classifyPostReplyJobError({ lastError: '404 not found' }), 'terminal');
@@ -18,6 +19,7 @@ assert.strictEqual(classifyPostReplyJobError({ lastError: 'invalid job schema_ve
 assert.strictEqual(classifyPostReplyJobError({ lastError: 'quality_gate low confidence' }), 'quality_gate');
 assert.strictEqual(classifyPostReplyJobError({ lastError: 'manual canceled' }), 'canceled');
 assert.strictEqual(isTransient({ lastError: 'timeout' }), true);
+assert.strictEqual(isTransient({ lastError: 'http_495' }), true);
 assert.strictEqual(isTerminal({ lastError: 'unsupported model' }), true);
 
 const jobs = [

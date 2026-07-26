@@ -203,5 +203,6 @@ module.exports = {
   parseArgs,
   readRows,
   run,
-  summarizeRows
+  summarizeRows,
+  tokenForRow
 };

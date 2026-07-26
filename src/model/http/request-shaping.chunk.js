@@ -1,3 +1,5 @@
+const { createHash } = require('crypto');
+
 const {
   applyAnthropicCacheControl,
   applyAnthropicCacheControlToBlockIndex,
@@ -525,6 +527,14 @@ function inferMessageRole(item) {
   return 'user';
 }
 
+function normalizeAnthropicToolUseId(value) {
+  const rawId = normalizeText(value);
+  if (!rawId) return `tool_${Date.now()}`;
+  if (/^[a-zA-Z0-9_-]+$/.test(rawId)) return rawId;
+  const digest = createHash('sha256').update(rawId).digest('hex').slice(0, 24);
+  return `tool_${digest}`;
+}
+
 async function mapMessagesToAnthropic(messages) {
   const systemBlocks = [];
   const out = [];
@@ -580,7 +590,7 @@ async function mapMessagesToAnthropic(messages) {
     }
 
     if (role === 'tool') {
-      const toolUseId = normalizeText(item?.tool_call_id || item?.tool_use_id) || `tool_${Date.now()}`;
+      const toolUseId = normalizeAnthropicToolUseId(item?.tool_call_id || item?.tool_use_id);
       const toolResultBlocks = await toAnthropicContentBlocks(item?.content);
 
       out.push({
@@ -607,7 +617,7 @@ async function mapMessagesToAnthropic(messages) {
 
         blocks.push({
           type: 'tool_use',
-          id: normalizeText(call?.id) || `tooluse_${Date.now()}`,
+          id: normalizeAnthropicToolUseId(call?.id),
           name: toolName,
           input: normalizeJsonObject(call?.function?.arguments || call?.args)
         });

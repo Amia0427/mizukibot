@@ -4,6 +4,7 @@ const {
   normalizeToolNames
 } = require('../../../utils/localToolAccess');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
+const { routeHasReadableCardContext } = require('../../../utils/cardContext');
 const {
   WEB_LOOKUP_ALLOWED_TOOLS,
   routeHasExplicitWebSearchRequirement
@@ -68,13 +69,16 @@ function createToolExecutionHelpers(deps = {}) {
   }
 
   function shouldUseExplicitWebExecutorBypass(toolName = '', runtimeOptions = {}) {
-    return WEB_LOOKUP_ALLOWED_TOOLS.includes(normalizeText(toolName))
-      && routeHasExplicitWebSearchRequirement({
+    const normalizedToolName = normalizeText(toolName);
+    const route = {
         question: runtimeOptions.question || runtimeOptions.routeMeta?.effectiveIntentText || runtimeOptions.routeMeta?.cleanText,
         cleanText: runtimeOptions.cleanText || runtimeOptions.routeMeta?.cleanText || runtimeOptions.routeMeta?.effectiveIntentText,
         rawText: runtimeOptions.rawText || runtimeOptions.routeMeta?.rawText,
         meta: normalizeObject(runtimeOptions.routeMeta, {})
-      });
+    };
+    return WEB_LOOKUP_ALLOWED_TOOLS.includes(normalizedToolName)
+      && (routeHasExplicitWebSearchRequirement(route)
+        || (normalizedToolName === 'web_fetch' && routeHasReadableCardContext(route)));
   }
 
   function findToolExecutor(toolName = '', runtimeOptions = {}) {

@@ -122,7 +122,7 @@ module.exports = (async () => {
     assert.ok(!anthropicDirect.headerNames.includes('Authorization'));
     assert.strictEqual(anthropicDirect.cache.openaiPromptCacheKey, '');
     assert.strictEqual(anthropicDirect.cache.openaiPromptCacheRetention, '');
-    assert.ok(anthropicDirect.cache.anthropicCacheBreakpoints > 0);
+    assert.strictEqual(anthropicDirect.cache.anthropicCacheBreakpoints, 1);
     assert.strictEqual(anthropicDirect.cache.anthropicOneHourCacheHeader, '1');
     assert.ok(findRemoved(anthropicDirect.strippedFields, 'prompt_cache_key') > 0);
     assert.ok(findRemoved(anthropicDirect.strippedFields, 'prompt_cache_retention') > 0);

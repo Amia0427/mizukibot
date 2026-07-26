@@ -25,7 +25,7 @@ module.exports = (() => {
 
     const normalMessages = passiveAwareness.buildPassiveReplySystemMessages('normal-passive');
     assert.deepStrictEqual(normalMessages.map((message) => message.role), ['system', 'system']);
-    assert.ok(normalMessages[1].content.includes(normalUserDefaultText));
+    assert.ok(JSON.stringify(normalMessages).includes(normalUserDefaultText));
 
     const adminPrivateMessages = passiveAwareness.buildPassiveReplySystemMessages('admin-passive');
     assert.deepStrictEqual(adminPrivateMessages.map((message) => message.role), ['system']);

@@ -46,7 +46,8 @@
         effectiveBotQQ,
         resolveReply: Boolean(continuousMeta.replyMessageId),
         resolveForward: Array.isArray(continuousMeta.forwardIds) && continuousMeta.forwardIds.length > 0,
-        resolveCards: Array.isArray(continuousMeta.qqCardUrls) && continuousMeta.qqCardUrls.length > 0
+        resolveCards: (Array.isArray(continuousMeta.cardContexts) && continuousMeta.cardContexts.length > 0)
+          || (Array.isArray(continuousMeta.qqCardUrls) && continuousMeta.qqCardUrls.length > 0)
       });
     }
     if (continuousMeta && typeof continuousMeta === 'object') {
@@ -153,7 +154,7 @@
       && replyToBotRecentWindowMs > 0
       && (Date.now() - lastBotReplyAt) <= replyToBotRecentWindowMs
     );
-    const directBotAnchor = Boolean(isPrivateChatType(chatType) || mentioned || replyToBotIsRecent);
+    const directBotAnchor = Boolean(isPrivateChatType(chatType) || mentioned);
     const effectiveIntentText = String(
       directedContext?.quotePriority?.quoteAnchoredText
       || effectiveCleanText
@@ -448,6 +449,15 @@
       return;
     }
 
+    const hasUrlLessInviteCard = inboundContext.cardOnly === true
+      && inboundContext.cardContexts.some((card) => card.kind === 'invite' && !card.primaryUrl);
+    if (hasUrlLessInviteCard) {
+      runtimeQuestionText = '[分享卡片]';
+      inboundContext.effectiveIntentText = runtimeQuestionText;
+      inboundContext.runtimeQuestionText = runtimeQuestionText;
+      inboundContext.cleanText = runtimeQuestionText;
+    }
+
     console.log('[message] accepted inbound', {
       messageId: effectiveMsg.message_id,
       groupId,
@@ -459,7 +469,7 @@
       rawPreview: String(rawText || '').slice(0, 120),
       acceptedBy: isPrivateChatType(chatType)
         ? 'private_direct'
-        : (mentioned ? 'at_bot' : 'reply_to_bot_recent'),
+        : 'at_bot',
       reply_to_bot_last_reply_at: lastBotReplyAt || 0
     });
 

@@ -1,0 +1,12 @@
+{
+  "code": 200,
+  "songs": [
+    {
+      "id": 186016,
+      "name": "雨下一整晚",
+      "ar": [{ "name": "周杰伦" }],
+      "al": { "name": "跨时代", "picUrl": "https://p1.music.126.net/cover.jpg" },
+      "dt": 257000
+    }
+  ]
+}

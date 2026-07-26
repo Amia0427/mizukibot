@@ -9,6 +9,22 @@ function buildInboundMessageContext(input = {}) {
   const imageUrls = Array.isArray(source.imageUrls)
     ? source.imageUrls.map((url) => String(url || '').trim()).filter(Boolean)
     : [];
+  const continuousMeta = source.continuousMeta && typeof source.continuousMeta === 'object'
+    ? source.continuousMeta
+    : {};
+  const cardContexts = (Array.isArray(source.cardContexts) ? source.cardContexts : continuousMeta.cardContexts || [])
+    .filter((card) => card && typeof card === 'object')
+    .map((card) => ({
+      kind: String(card.kind || 'unknown').trim() || 'unknown',
+      title: String(card.title || '').trim(),
+      description: String(card.description || '').trim(),
+      sourceLabel: String(card.sourceLabel || '').trim(),
+      previewImageUrl: String(card.previewImageUrl || '').trim(),
+      primaryUrl: String(card.primaryUrl || '').trim()
+    }));
+  const qqCardUrls = (Array.isArray(source.qqCardUrls) ? source.qqCardUrls : continuousMeta.qqCardUrls || [])
+    .map((url) => String(url || '').trim())
+    .filter(Boolean);
   return {
     msg: source.msg || {},
     effectiveMsg: source.effectiveMsg || source.msg || {},
@@ -33,6 +49,9 @@ function buildInboundMessageContext(input = {}) {
     cleanText: String(source.cleanText || ''),
     imageUrl: source.imageUrl || null,
     imageUrls,
+    cardContexts,
+    cardOnly: cardContexts.length > 0 && (source.cardOnly === true || continuousMeta.cardOnly === true),
+    qqCardUrls,
     visualContext: source.visualContext && typeof source.visualContext === 'object'
       ? { ...source.visualContext }
       : null,

@@ -164,6 +164,105 @@ module.exports = (async () => {
   assert.ok(sessionCheckpoint);
   assert.strictEqual(sessionCheckpoint.payload.summary, '压缩后的短期摘要');
 
+  let skippedGenerated = 0;
+  const shortChatHistory = {
+    s_short_summary_gate: []
+  };
+  const shortChatPersistNode = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return false;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return false;
+    },
+    shouldLearnSelfImprovement() {
+      return false;
+    },
+    appendShortTermHistory(_userId, userText, assistantText) {
+      shortChatHistory.s_short_summary_gate.push({ role: 'user', content: userText });
+      shortChatHistory.s_short_summary_gate.push({ role: 'assistant', content: assistantText });
+    },
+    persistShortTermBridgeSnapshot() {},
+    recordPersonaMemoryOutcome: async () => ({ persisted: false, updatedSlots: {} }),
+    appendMemoryEvent: async () => {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    getSessionSummaryCooldownStatus() {
+      return {
+        limited: false,
+        remainingMs: 0
+      };
+    },
+    generateSessionContextSummary: async () => {
+      skippedGenerated += 1;
+      return {
+        ok: true,
+        summary: '不应该生成'
+      };
+    },
+    postReplyJobQueue: {
+      enqueue() {
+        return { enqueued: false, job: null };
+      }
+    },
+    saveAndEmit(state) {
+      return state;
+    },
+    config: {
+      MEMORY_V3_ENABLED: false,
+      SHORT_TERM_SESSION_SUMMARY_MIN_HISTORY_MESSAGES: 8,
+      SHORT_TERM_SESSION_SUMMARY_MIN_HISTORY_TOKENS: 900,
+      SHORT_TERM_SESSION_SUMMARY_RECENT_TURNS_TRIGGER: 24
+    },
+    chatHistory: shortChatHistory,
+    shortTermMemory: {
+      s_short_summary_gate: {}
+    }
+  });
+
+  await shortChatPersistNode({
+    request: {
+      userId: 'u_short_summary_gate',
+      userInfo: {},
+      question: '早',
+      runtimeQuestionText: '早',
+      persistUserText: '早',
+      routeMeta: {},
+      sessionKey: 's_short_summary_gate',
+      routePolicyKey: 'direct_chat/default',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: '早。'
+    },
+    memory: {},
+    execution: {},
+    thread: {},
+    plan: {}
+  });
+  assert.strictEqual(skippedGenerated, 0);
+
   console.log('persistNodeMemoryRepair.test.js passed');
 })().catch((error) => {
   console.error(error);

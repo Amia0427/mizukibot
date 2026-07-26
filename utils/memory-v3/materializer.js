@@ -10,7 +10,7 @@ const {
   canonicalizeText,
   uniqueBy
 } = require('./helpers');
-const { loadMemoryEvents } = require('./events');
+const { flushPendingMemoryEventWrites, loadMemoryEvents } = require('./events');
 const {
   clearProjectionReadCache,
   defaultSessionProjection,
@@ -631,6 +631,7 @@ function materializeMemoryViews(options = {}) {
 }
 
 async function materializeMemoryViewsAsync(options = {}) {
+  flushPendingMemoryEventWrites();
   try {
     const { runWorkerTask } = require('../workerThreads');
     return await runWorkerTask('memory_v3_materialize', options, {

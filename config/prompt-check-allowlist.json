@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "private_manifest_assets": [
+    {
+      "path": "admin.txt",
+      "reason": "Deployment-specific administrator instructions are intentionally supplied outside the public repository.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "path": "persona/01_identity.txt",
+      "reason": "The deployer's private persona identity is required at runtime but is not a public repository asset.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "path": "persona/02_style.txt",
+      "reason": "The deployer's private persona style is required at runtime but is not a public repository asset.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "path": "persona/03_boundaries.txt",
+      "reason": "The deployer's private persona boundaries are required at runtime but are not a public repository asset.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "path": "persona/04_behavior.txt",
+      "reason": "The deployer's private persona behavior is required at runtime but is not a public repository asset.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "path": "persona/05_examples.index.json",
+      "reason": "The deployer's private persona example index is optional runtime data and is not a public repository asset.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "path": "persona/05_voice_samples.txt",
+      "reason": "The deployer's private persona voice samples are optional runtime data and are not a public repository asset.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "path": "persona/06_state_modulation.txt",
+      "reason": "The deployer's private persona state rules are required at runtime but are not a public repository asset.",
+      "review_by": "2027-01-31"
+    }
+  ],
+  "generated_asset_groups": [
+    {
+      "id": "persona_module_metadata",
+      "paths": [
+        "persona_modules/distilled_sources.json",
+        "persona_modules/module-catalog.json",
+        "persona_modules/reference_anchor_map.json"
+      ],
+      "reason": "These generated catalogs index persona modules and are consumed by dedicated loaders rather than the prompt manifest.",
+      "review_by": "2027-01-31"
+    }
+  ],
+  "supplemental_asset_groups": [
+    {
+      "id": "persona_worldbook_sources",
+      "paths": [
+        "persona_worldbook/area_acceptance_betsuni.txt",
+        "persona_worldbook/area_ena_equal_teasing.txt",
+        "persona_worldbook/area_kanade_action_before_lecture.txt",
+        "persona_worldbook/area_mafuyu_escape_permission.txt",
+        "persona_worldbook/area_rui_relaxed_sync.txt",
+        "persona_worldbook/avoidance_gradient.txt",
+        "persona_worldbook/care_chains.txt",
+        "persona_worldbook/creative_safe_channel.txt",
+        "persona_worldbook/daily_liveliness.txt",
+        "persona_worldbook/e5_daily_after_wounds.txt",
+        "persona_worldbook/e5_functional_shutdown_room.txt",
+        "persona_worldbook/emotional_architecture.txt",
+        "persona_worldbook/ena_observation_breakthrough.txt",
+        "persona_worldbook/escape_and_return.txt",
+        "persona_worldbook/future_two_tracks.txt",
+        "persona_worldbook/inner_monologue_rules.txt",
+        "persona_worldbook/intrusive_voices.txt",
+        "persona_worldbook/kindness_fear.txt",
+        "persona_worldbook/language_tics_cn.txt",
+        "persona_worldbook/m1_ena_detects_micro_change.txt",
+        "persona_worldbook/m2_avoidance_level_1_joke.txt",
+        "persona_worldbook/m3_creation_only_safe_speech.txt",
+        "persona_worldbook/m4_choice_returned.txt",
+        "persona_worldbook/m5_acceptance_needs_effort.txt",
+        "persona_worldbook/m5_intrusive_attention_seeking.txt",
+        "persona_worldbook/m5_intrusive_fake_character.txt",
+        "persona_worldbook/m6_color_overlap.txt",
+        "persona_worldbook/m7_fashion_school_goal.txt",
+        "persona_worldbook/m7_two_tracks_conflict.txt",
+        "persona_worldbook/mask_crack_conditions.txt",
+        "persona_worldbook/outside_n25_mode.txt",
+        "persona_worldbook/post_e5_return.txt",
+        "persona_worldbook/ribbon_sister_anchor.txt",
+        "persona_worldbook/shutdown_recovery.txt",
+        "persona_worldbook/sinking_curve.txt",
+        "persona_worldbook/social_hub_planning.txt",
+        "persona_worldbook/unscreamable_pain.txt",
+        "persona_worldbook/v12_no_assistant_tone.txt",
+        "persona_worldbook/wakatteru_collapse.txt"
+      ],
+      "reason": "Worldbook text files are migration and recovery sources for the SQLite-primary worldbook loader, not direct manifest sections.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "id": "runtime_loader_templates",
+      "paths": [
+        "runtime/bridge-guidance.txt",
+        "runtime/life-scheduler-broadcast.txt",
+        "runtime/life-scheduler-generate.txt",
+        "runtime/life-scheduler-injection.txt",
+        "runtime/life-scheduler-repair.txt",
+        "runtime/life-scheduler-summary.txt",
+        "runtime/llm-perception.txt"
+      ],
+      "reason": "These templates are loaded by dedicated runtime components and intentionally remain outside the main prompt manifest.",
+      "review_by": "2027-01-31"
+    }
+  ],
+  "conflict_tag_reuse": [
+    {
+      "tag": "persona_deep",
+      "section_ids": [
+        "persona_module_boundary_touch",
+        "persona_module_care_light",
+        "persona_module_deep_pain",
+        "persona_module_functional_shutdown"
+      ],
+      "reason": "Deep-state persona modules are mutually exclusive candidates selected by the prompt compiler.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "tag": "persona_energy",
+      "section_ids": [
+        "persona_module_boundary_touch",
+        "persona_module_cute_obsession",
+        "persona_module_daily_energy",
+        "persona_module_deep_pain",
+        "persona_module_escape_philosophy",
+        "persona_module_functional_shutdown",
+        "persona_module_noise_escape",
+        "persona_module_phase2_growth",
+        "persona_module_triggered_by_kindness"
+      ],
+      "reason": "Energy-state persona modules share one exclusion slot and are selected according to the current conversation state.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "tag": "persona_phase",
+      "section_ids": [
+        "persona_module_phase1_shadow",
+        "persona_module_returning_daily"
+      ],
+      "reason": "The two persona phase modules describe mutually exclusive continuity phases.",
+      "review_by": "2027-01-31"
+    },
+    {
+      "tag": "persona_roleplay",
+      "section_ids": [
+        "persona_module_roleplay_boundary_soft",
+        "persona_module_roleplay_friend_bit"
+      ],
+      "reason": "Roleplay tone modules intentionally compete for the same prompt slot.",
+      "review_by": "2027-01-31"
+    }
+  ]
+}

@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-continuous-message-'));
+process.once('exit', () => fs.rmSync(tempRoot, { recursive: true, force: true }));
 process.env.DATA_DIR = tempRoot;
 process.env.IMAGE_MEMORY_INDEX_FILE = path.join(tempRoot, 'image_memory_index.json');
 process.env.IMAGE_MEMORY_RECALL_ENABLED = 'true';
@@ -127,7 +128,11 @@ async function testRegularGroupPlainTextUsesShortDebounceCap() {
     atBotDebounceMs: 500,
     privateDebounceMs: 450,
     maxHoldMs: 600,
-    sentenceWindowMs: 300
+    sentenceWindowMs: 300,
+    actionClient: {
+      isConnected: () => false,
+      getConnectionState: () => ({ connected: false, readyStateName: 'closed' })
+    }
   });
 
   assert.strictEqual(

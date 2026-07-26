@@ -1,19 +1,36 @@
-const path = require('path');
-const { createRequire } = require('module');
-const { runCommonJsChunks } = require('../../shared/chunkedModule');
+'use strict';
 
-const legacyCoreDir = path.resolve(__dirname, '../../../core');
-const legacyMemeFile = path.join(legacyCoreDir, 'memeManager.js');
-const legacyRequire = createRequire(legacyMemeFile);
+const { analyzeMemeAsset, resolveAssetAnalysis } = require('./asset-analysis-runtime');
+const {
+  cleanupExpiredSessions,
+  consumePendingUploadFromMessage,
+  handleAdminCommand,
+  isSurfaceEnabled,
+  parseMemeCommand,
+  runMemeTest,
+  startUploadSession
+} = require('./admin-runtime');
+const { evaluateMemeGate } = require('./gate');
+const { initializeMemeManager } = require('./lifecycle');
+const { maybeSendMemeFollowup } = require('./followup');
+const { drainReindexQueue, getReindexStatus } = require('./reindex-runtime');
+const { pickBestAssetForSelection, selectCategory } = require('./selector-runtime');
 
-module.exports = runCommonJsChunks(legacyCoreDir, module, [
-  'memeManager.core.chunk.js',
-  'memeManager.selector-normalize.chunk.js',
-  'memeManager.gate.chunk.js',
-  'memeManager.admin.chunk.js',
-  'memeManager.asset-analysis.chunk.js',
-  'memeManager.selector.chunk.js',
-  'memeManager.commands.chunk.js',
-  'memeManager.followup.chunk.js',
-  'memeManager.exports.chunk.js',
-], { require: legacyRequire, filename: legacyMemeFile });
+module.exports = {
+  analyzeMemeAsset,
+  cleanupExpiredSessions,
+  consumePendingUploadFromMessage,
+  drainReindexQueue,
+  getReindexStatus,
+  handleAdminCommand,
+  initializeMemeManager,
+  isSurfaceEnabled,
+  maybeSendMemeFollowup,
+  parseMemeCommand,
+  pickBestAssetForSelection,
+  resolveAssetAnalysis,
+  runMemeTest,
+  selectCategory,
+  startUploadSession,
+  evaluateMemeGate
+};

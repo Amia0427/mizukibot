@@ -6,6 +6,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 # Always run from repo root so relative paths (.env/data) stay stable.
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $repoRoot
+. (Join-Path $PSScriptRoot 'log-archive-maintenance.ps1')
 
 $logDir = Join-Path $repoRoot 'data'
 if (-not (Test-Path $logDir)) {
@@ -76,6 +77,24 @@ function Test-PostReplyWorkerIdleRecycleEnabled {
 
 function Test-ExternalPostReplyWorkerResidentExpected {
   return ((Test-ExternalPostReplyWorkerEnabled) -and (-not (Test-PostReplyWorkerIdleRecycleEnabled)))
+}
+
+function Resolve-ExternalWorkerStartReason {
+  param(
+    [string]$QueueReason = '',
+    [bool]$MainBotStartedByDaemon = $false
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($QueueReason)) {
+    return $QueueReason
+  }
+  if ($MainBotStartedByDaemon -and (Test-ExternalPostReplyWorkerEnabled)) {
+    return 'main bot started by daemon; ensure external worker'
+  }
+  if (Test-ExternalPostReplyWorkerResidentExpected) {
+    return 'external worker expected resident; restart missing worker'
+  }
+  return ''
 }
 
 function Test-DaemonTcpPortListening {
@@ -161,6 +180,22 @@ function Record-MainHttpReversePortRecovery {
   [void](Write-JsonFileSafe -Path $mainPortRecoveryStateFile -Value $state)
 }
 
+function Resolve-MainBotEarlyExitAction {
+  param(
+    [Parameter(Mandatory = $true)]$EarlyExitState,
+    [Parameter(Mandatory = $true)]$HttpReverseIngressState,
+    [bool]$RecentPortRecovery = $false
+  )
+
+  if (-not $EarlyExitState.Blocked) {
+    return 'continue'
+  }
+  if ($HttpReverseIngressState.Outage -and (-not $RecentPortRecovery)) {
+    return 'recover_http_reverse'
+  }
+  return 'block'
+}
+
 function Rotate-DaemonLogIfNeeded {
   param(
     [Parameter(Mandatory = $true)]
@@ -186,8 +221,9 @@ function Rotate-DaemonLogIfNeeded {
     $archiveStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $archivePath = "$logFile.$archiveStamp"
     Move-Item -LiteralPath $logFile -Destination $archivePath -Force
+    Invoke-ManagedLogArchiveMaintenance -LogDirectory $logDir
   } catch {
-    # Logging must never stop the daemon from starting the bot.
+    Write-Warning "daemon log rotation failed; skipped path=$logFile error=$($_.Exception.Message)"
   }
 }
 
@@ -271,6 +307,7 @@ function Resolve-DaemonWritableLogPath {
   $archivePath = Archive-DaemonRedirectLogIfNeeded -Path $Path
   if (-not [string]::IsNullOrWhiteSpace($archivePath)) {
     Write-DaemonLog -Message "archived runtime redirect log before restart. source=$Path archive=$archivePath"
+    Invoke-ManagedLogArchiveMaintenance -LogDirectory $logDir
   }
 
   if (New-EmptyDaemonLogFile -Path $Path) {
@@ -1185,6 +1222,8 @@ function Get-PostReplyQueueStartReason {
   return ''
 }
 
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 Write-DaemonLog -Message 'daemon task started'
 
 $exitCode = 0
@@ -1218,11 +1257,16 @@ try {
       $earlyExitState = Update-MainBotEarlyExitState -LockPath $lockFile -OwnerPid $previousMainPid
       Record-MainBotExitObservation -OwnerPid $previousMainPid -Reason 'lock_present_not_owned' -LockDiagnostics $lockDiag -Evidence $earlyExitState.Evidence -EarlyExitState $earlyExitState
       if ($earlyExitState.Blocked) {
-        if ($httpReverseIngressState.Outage -and (-not (Test-RecentMainHttpReversePortRecovery -Port $httpReverseIngressState.Port))) {
-          Record-MainHttpReversePortRecovery -Port $httpReverseIngressState.Port -PreviousPid $previousMainPid -EarlyExitCount $earlyExitState.Count -CooldownUntil $earlyExitState.CooldownUntil
-          Write-DaemonLog -Message "main bot early-exit backoff bypassed for HTTP reverse port outage. port=$($httpReverseIngressState.Port), previous_pid=$previousMainPid, count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil)"
-        } else {
-          throw "main bot exited repeatedly soon after startup; backoff active (reason=$($earlyExitState.Reason), count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil), http_reverse_enabled=$($httpReverseIngressState.Enabled), http_reverse_port=$($httpReverseIngressState.Port), http_reverse_listening=$($httpReverseIngressState.Listening), $lockDiag)"
+        $recentPortRecovery = $httpReverseIngressState.Outage -and (Test-RecentMainHttpReversePortRecovery -Port $httpReverseIngressState.Port)
+        $earlyExitAction = Resolve-MainBotEarlyExitAction -EarlyExitState $earlyExitState -HttpReverseIngressState $httpReverseIngressState -RecentPortRecovery $recentPortRecovery
+        switch ($earlyExitAction) {
+          'recover_http_reverse' {
+            Record-MainHttpReversePortRecovery -Port $httpReverseIngressState.Port -PreviousPid $previousMainPid -EarlyExitCount $earlyExitState.Count -CooldownUntil $earlyExitState.CooldownUntil
+            Write-DaemonLog -Message "main bot early-exit backoff bypassed for HTTP reverse port outage. port=$($httpReverseIngressState.Port), previous_pid=$previousMainPid, count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil)"
+          }
+          'block' {
+            throw "main bot exited repeatedly soon after startup; backoff active (reason=$($earlyExitState.Reason), count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil), http_reverse_enabled=$($httpReverseIngressState.Enabled), http_reverse_port=$($httpReverseIngressState.Port), http_reverse_listening=$($httpReverseIngressState.Listening), $lockDiag)"
+          }
         }
       }
       if ($earlyExitState.Reason -ne 'disabled' -and $earlyExitState.Reason -ne 'no_owner_pid') {
@@ -1246,12 +1290,7 @@ try {
     $detail = if ($workerState.Count -gt 1) { " count=$($workerState.Count)" } else { '' }
     Write-DaemonLog -Message "post-reply worker already running, skip duplicate start. pid=$($workerState.Pid) source=$($workerState.Source)$detail"
   } else {
-    $workerStartReason = Get-PostReplyQueueStartReason
-    if ([string]::IsNullOrWhiteSpace($workerStartReason) -and $mainBotStartedByDaemon -and (Test-ExternalPostReplyWorkerEnabled)) {
-      $workerStartReason = 'main bot started by daemon; ensure external worker'
-    } elseif ([string]::IsNullOrWhiteSpace($workerStartReason) -and (Test-ExternalPostReplyWorkerResidentExpected)) {
-      $workerStartReason = 'external worker expected resident; restart missing worker'
-    }
+    $workerStartReason = Resolve-ExternalWorkerStartReason -QueueReason (Get-PostReplyQueueStartReason) -MainBotStartedByDaemon $mainBotStartedByDaemon
     if ([string]::IsNullOrWhiteSpace($workerStartReason)) {
       Write-DaemonLog -Message 'post-reply worker not running, queue idle; skip idle restart.'
     } else {

@@ -1,6 +1,9 @@
-const passiveAwareness = require('./index');
+const {
+  shouldSuppressPresenceAck,
+  shouldSuppressTrivialPresenceReply
+} = require('./core');
 
 module.exports = {
-  shouldSuppressPresenceAck: passiveAwareness.shouldSuppressPresenceAck,
-  shouldSuppressTrivialPresenceReply: passiveAwareness.shouldSuppressTrivialPresenceReply
+  shouldSuppressPresenceAck,
+  shouldSuppressTrivialPresenceReply
 };

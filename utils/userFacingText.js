@@ -98,7 +98,9 @@ function sanitizeUserFacingText(text = '', options = {}) {
     next = next.replace(/\/%\s*$/, '').trimEnd();
   }
 
-  if (preserveThink) return { text: next, hasSafetyRestriction };
+  if (preserveThink) {
+    return options && options.returnMeta ? { text: next, hasSafetyRestriction } : next;
+  }
   let previous = null;
 
   while (next !== previous) {

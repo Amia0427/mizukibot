@@ -6,6 +6,12 @@ const { loadMemoryEvents } = require('./events');
 const { loadEmbeddingIndex } = require('./embeddingIndex');
 const { loadEpisodeProjection } = require('./storage');
 const { readDailyJournalUsers, scanDailyJournalDays } = require('./journalDocs');
+const { formatDateInTz } = require('../time');
+const { shiftDate } = require('../dailyJournal/text');
+const {
+  safeReadJson,
+  SUMMARY_STATE_FILE
+} = require('../dailyJournal/storage');
 
 function fileExists(filePath = '') {
   try {
@@ -27,6 +33,16 @@ function countLines(filePath = '') {
   return safeReadJsonLines(filePath).length;
 }
 
+function resolveSummaryDueDay(options = {}) {
+  const date = options.now instanceof Date ? options.now : new Date();
+  return shiftDate(formatDateInTz(date, config.TIMEZONE), -1);
+}
+
+function loadDailySummaryState() {
+  const state = safeReadJson(SUMMARY_STATE_FILE, {});
+  return state && typeof state === 'object' ? state : {};
+}
+
 function summarizeEmbeddingRows(userId = '') {
   const uid = normalizeText(userId);
   const rows = loadEmbeddingIndex().rows.filter((row) => {
@@ -41,10 +57,11 @@ function summarizeEmbeddingRows(userId = '') {
   };
 }
 
-function summarizeJournalUser(userId = '', events = [], episodeProjection = {}) {
+function summarizeJournalUser(userId = '', events = [], episodeProjection = {}, options = {}) {
   const uid = normalizeText(userId);
   const dir = path.join(config.DAILY_JOURNAL_DIR, uid);
   const days = scanDailyJournalDays(uid);
+  const summaryDueDay = normalizeText(options.summaryDueDay || resolveSummaryDueDay(options));
   const dayRows = days.map((day) => {
     const journalFile = path.join(dir, `${day}.journal.md`);
     const entriesFile = path.join(dir, `${day}.entries.jsonl`);
@@ -77,7 +94,10 @@ function summarizeJournalUser(userId = '', events = [], episodeProjection = {}) 
     v3EpisodeItems: episodeItems.length,
     embeddings,
     latestUpdatedAt: Math.max(0, ...dayRows.map((row) => row.updatedAt)),
-    missingSummaryDays: dayRows.filter((row) => row.hasJournal && !row.hasSummary).map((row) => row.day).slice(-14)
+    missingSummaryDays: dayRows
+      .filter((row) => row.hasJournal && !row.hasSummary && (!summaryDueDay || row.day <= summaryDueDay))
+      .map((row) => row.day)
+      .slice(-14)
   };
 }
 
@@ -87,7 +107,12 @@ function buildJournalHealthSummary(options = {}) {
     : readDailyJournalUsers();
   const events = loadMemoryEvents();
   const episodeProjection = loadEpisodeProjection();
-  const users = userIds.map((userId) => summarizeJournalUser(userId, events, episodeProjection));
+  const summaryDueDay = resolveSummaryDueDay(options);
+  const summaryState = loadDailySummaryState();
+  const users = userIds.map((userId) => summarizeJournalUser(userId, events, episodeProjection, {
+    ...options,
+    summaryDueDay
+  }));
   const totals = users.reduce((acc, row) => {
     acc.users += 1;
     acc.days += row.days;
@@ -100,6 +125,7 @@ function buildJournalHealthSummary(options = {}) {
     acc.embeddingReady += row.embeddings.ready;
     acc.embeddingPending += row.embeddings.pending;
     acc.embeddingFailed += row.embeddings.failed;
+    acc.missingSummaryDays += row.missingSummaryDays.length;
     acc.latestUpdatedAt = Math.max(acc.latestUpdatedAt, row.latestUpdatedAt);
     return acc;
   }, {
@@ -114,10 +140,18 @@ function buildJournalHealthSummary(options = {}) {
     embeddingReady: 0,
     embeddingPending: 0,
     embeddingFailed: 0,
+    missingSummaryDays: 0,
     latestUpdatedAt: 0
   });
   return {
     ok: true,
+    summaryScheduler: {
+      tickEngineEnabled: config.TICK_ENGINE_ENABLED === true,
+      standaloneEnabled: config.DAILY_JOURNAL_SUMMARY_SCHEDULER_ENABLED === true,
+      summaryDueDay,
+      lastSummaryRunDay: normalizeText(summaryState.last_day),
+      lastSummaryRunAt: Number(summaryState.last_run_at || 0) || 0
+    },
     totals,
     users: users
       .sort((a, b) => Number(b.latestUpdatedAt || 0) - Number(a.latestUpdatedAt || 0))
@@ -127,5 +161,6 @@ function buildJournalHealthSummary(options = {}) {
 
 module.exports = {
   buildJournalHealthSummary,
+  resolveSummaryDueDay,
   summarizeJournalUser
 };

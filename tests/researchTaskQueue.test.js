@@ -70,6 +70,41 @@ module.exports = (async () => {
   assert.strictEqual(raceCalls, 2);
   assert.strictEqual(raceMaxActive, 1, 'single-flight drain should preserve max concurrency');
 
+  let timeoutActive = 0;
+  let timeoutMaxActive = 0;
+  let timeoutCalls = 0;
+  const timeoutQueue = new ResearchTaskQueue({
+    config: {
+      RESEARCH_SUBAGENT_ENABLED: true,
+      RESEARCH_SUBAGENT_MAX_CONCURRENCY: 1,
+      RESEARCH_SUBAGENT_TIMEOUT_MS: 1000
+    },
+    runner: async (_task, options) => {
+      timeoutCalls += 1;
+      timeoutActive += 1;
+      timeoutMaxActive = Math.max(timeoutMaxActive, timeoutActive);
+      try {
+        if (timeoutCalls === 1) {
+          await new Promise((resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          });
+        }
+        await delay(10);
+        return { status: 'completed' };
+      } finally {
+        timeoutActive -= 1;
+      }
+    }
+  });
+  const timedOut = timeoutQueue.enqueue({ sessionKey: 'timeout', userId: 'u1', query: 'first' });
+  timeoutQueue.enqueue({ sessionKey: 'timeout', userId: 'u1', query: 'second' });
+  await delay(1100);
+  assert.strictEqual(timedOut.task.status, 'failed');
+  assert.match(timedOut.task.error, /timeout/);
+  await delay(50);
+  assert.strictEqual(timeoutCalls, 2);
+  assert.strictEqual(timeoutMaxActive, 1, 'timed out runner must stop before the next task starts');
+
   console.log('researchTaskQueue.test.js passed');
 })().catch((error) => {
   console.error(error);

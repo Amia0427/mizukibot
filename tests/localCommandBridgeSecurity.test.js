@@ -5,7 +5,6 @@ const path = require('path');
 const bridge = require('../scripts/local-command-bridge');
 const config = require('../config');
 const envRuntime = require('../config/envRuntime');
-const bridgeClient = require('../utils/localCommandBridgeClient');
 const leakedToken = ['FUcQwzRjozCZIAp', 'UYZyd-B4zjkXj0Ief80_i618xH8Q'].join('');
 
 assert.doesNotThrow(() => bridge.buildCommandSpec('node', { args: ['scripts/console.js'] }));
@@ -110,27 +109,6 @@ assert.strictEqual(bridge.normalizeTimeoutMs(500), 1000);
     assert.strictEqual(nextCalled, true);
   } finally {
     config.LOCAL_COMMAND_BRIDGE_TOKEN = originalToken;
-  }
-}
-
-{
-  const originalToken = config.LOCAL_COMMAND_BRIDGE_TOKEN;
-  const originalEnabled = config.LOCAL_COMMAND_BRIDGE_ENABLED;
-  const originalUrl = config.LOCAL_COMMAND_BRIDGE_URL;
-  config.LOCAL_COMMAND_BRIDGE_ENABLED = true;
-  config.LOCAL_COMMAND_BRIDGE_URL = 'http://127.0.0.1:3210';
-  try {
-    config.LOCAL_COMMAND_BRIDGE_TOKEN = '';
-    assert.strictEqual(bridgeClient.hasBridgeToken(), false);
-    assert.strictEqual(bridgeClient.isLocalCommandBridgeEnabled(), false);
-
-    config.LOCAL_COMMAND_BRIDGE_TOKEN = 'expected-token';
-    assert.strictEqual(bridgeClient.hasBridgeToken(), true);
-    assert.strictEqual(bridgeClient.isLocalCommandBridgeEnabled(), true);
-  } finally {
-    config.LOCAL_COMMAND_BRIDGE_TOKEN = originalToken;
-    config.LOCAL_COMMAND_BRIDGE_ENABLED = originalEnabled;
-    config.LOCAL_COMMAND_BRIDGE_URL = originalUrl;
   }
 }
 

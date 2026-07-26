@@ -9,10 +9,10 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : (value ? [value] : []);
 }
 
-async function fetchYahooDividend(symbol = '') {
+async function fetchYahooDividend(symbol = '', request = axios.get) {
   const normalized = normalizeText(symbol);
   if (!normalized) return null;
-  const response = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normalized)}`, {
+  const response = await request(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normalized)}`, {
     params: {
       interval: '1mo',
       range: '5y',
@@ -27,10 +27,10 @@ async function fetchYahooDividend(symbol = '') {
   return response?.data?.chart?.result?.[0] || null;
 }
 
-async function fetchTwelveDataDividends(symbol = '') {
+async function fetchTwelveDataDividends(symbol = '', request = axios.get) {
   const normalized = normalizeText(symbol);
   if (!normalized) return [];
-  const response = await axios.get('https://api.twelvedata.com/dividends', {
+  const response = await request('https://api.twelvedata.com/dividends', {
     params: {
       symbol: normalized,
       apikey: normalizeText(process.env.TWELVEDATA_API_KEY || 'demo') || 'demo'
@@ -88,7 +88,7 @@ function formatDividendLine(symbol = '', items = [], source = '') {
   return `${symbol} | recent dividends (${sourceLabel}): ${items.map((item) => `${item.date}:${item.amount}`).join(', ')}`;
 }
 
-async function queryDividends({ tickers = [], ticker = '' } = {}) {
+async function queryDividends({ tickers = [], ticker = '' } = {}, options = {}) {
   const raw = normalizeArray(tickers).concat([ticker]);
   const symbols = raw
     .flatMap((item) => String(item || '').split(/[,\s]+/))
@@ -98,10 +98,11 @@ async function queryDividends({ tickers = [], ticker = '' } = {}) {
   if (symbols.length === 0) return 'Missing ticker or tickers.';
 
   const lines = [];
+  const request = options.request || axios.get;
   for (const symbol of symbols) {
     let yahooError = null;
     try {
-      const result = await fetchYahooDividend(symbol);
+      const result = await fetchYahooDividend(symbol, request);
       const items = extractYahooDividendItems(result);
       if (items.length === 0) {
         yahooError = new Error('Yahoo returned no dividend items');
@@ -114,7 +115,7 @@ async function queryDividends({ tickers = [], ticker = '' } = {}) {
     }
 
     try {
-      const items = extractTwelveDataDividendItems(await fetchTwelveDataDividends(symbol));
+      const items = extractTwelveDataDividendItems(await fetchTwelveDataDividends(symbol, request));
       if (items.length === 0) {
         lines.push(`${symbol} | no dividend data`);
         continue;

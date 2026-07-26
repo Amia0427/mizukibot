@@ -1,4 +1,4 @@
-const fs = require('fs');
+// @ts-check
 const path = require('path');
 const crypto = require('crypto');
 const {
@@ -7,19 +7,164 @@ const {
 } = require('./logRotation');
 
 let sequence = 0;
+let traceHashSecret = null;
 const phaseSeqByRequestId = new Map();
 const MAX_TRACKED_REQUEST_PHASES = 5000;
+const MAX_TRACE_TEXT_LENGTH = 400;
+const TRACE_TEXT_FIELDS = new Set([
+  'requestId', 'tracePhase', 'stage', 'source', 'chatType',
+  'category', 'type', 'node', 'threadId', 'routePolicyKey', 'routeDebugKey', 'topRouteType',
+  'dispatchBranch', 'triggerBranch', 'purpose', 'provider', 'model', 'protocol', 'channel',
+  'reason', 'triggerReason', 'action', 'failureType', 'failureStage', 'fallbackSource', 'fallbackReason', 'fallbackScope',
+  'mainFallbackScope', 'apiBaseUrlHost', 'modelSource', 'apiBaseUrlSource', 'apiKeySource',
+  'finalErrorCode', 'errorCode', 'concurrencyLane', 'concurrencyScope', 'foreground_lane',
+  'foreground_request_id', 'inbound_lane', 'inbound_pool', 'inbound_request_id',
+  'ignoreSessionLimitReason', 'executor', 'planner', 'apiBaseUrl', 'requestUrl',
+  'retry', 'tool', 'toolName', 'replyPath', 'finishReason', 'mode', 'jobId', 'postReplyJobId',
+  'decisionSource', 'plannerDecisionSource', 'plannerModel', 'plannerMode', 'unavailableReason',
+  'needsMemoryReason', 'recallFacet', 'downgradeReason', 'relationship', 'fastPath'
+]);
+const TRACE_NUMBER_FIELDS = new Set([
+  'phaseSeq', 'requestStartedAt', 'elapsedSinceRequestStartMs', 'durationMs', 'statusCode',
+  'chunkIndex', 'chunkCount', 'chunkLength', 'messageLength', 'queueWaitMs', 'rawMessageTimestampMs', 'elapsedSinceHandlerStartMs',
+  'lagFromMessageMs', 'foreground_active_admin', 'foreground_active_general',
+  'foreground_active_total', 'foreground_wait_ms', 'inbound_active_admin',
+  'inbound_active_general', 'inbound_active_total', 'inbound_wait_ms', 'attempt', 'retryCount',
+  'maxRetry', 'pid', 'plannerMs', 'executorMs', 'streamMs', 'firstTokenMs', 'sendMs',
+  'prepareMs', 'routeMs', 'dispatchMs', 'validateMs', 'persistMs', 'toolMs', 'maxAttempts',
+  'allowedToolCount', 'plannerStepCount', 'tokens'
+]);
+const TRACE_BOOLEAN_FIELDS = new Set([
+  'isAdmin', 'applied', 'success', 'ok', 'cache', 'richMessage', 'fallbackActive', 'fallbackForced',
+  'mainFallbackActive', 'mainFallbackForced', 'privilegedPrivateChat', 'ignoreSessionLimit',
+  'needsBackground', 'streamCompleted', 'retryable', 'saved', 'shouldPersistBridge',
+  'shouldPersistJournal', 'shouldLearn', 'shouldEnqueuePostReplyJob', 'workerStarted',
+  'stream', 'sent', 'streamDoneSeen', 'allowTools', 'shouldUseTools', 'plannerFallbackUsed',
+  'hasContext', 'needsMemory', 'forceMemoryContext'
+]);
+const TRACE_IDENTITY_FIELDS = new Map([
+  ['messageId', ['messageId', 'message_id']],
+  ['groupId', ['groupId', 'group_id']],
+  ['userId', ['userId', 'user_id']]
+]);
 
 function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function stableHash(value = '') {
+function sanitizeTraceText(value) {
+  let text = normalizeText(value instanceof Error ? value.message : value).slice(0, MAX_TRACE_TEXT_LENGTH);
+  text = text
+    .replace(/((?:^|[_-])(?:api_?key|access_?token|refresh_?token|token|client_?secret|secret|password)\s*=)[^\s,;}&]+/gi, '$1[REDACTED]')
+    .replace(/(["']?\b(?:authorization|proxy-authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|token|set-cookie|cookie|client[-_ ]?secret|password|secret)\b["']?\s*:\s*)["'][^"']*["']/gi, '$1"[REDACTED]"')
+    .replace(/(["']?\b(?:authorization|proxy-authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|token|set-cookie|cookie|client[-_ ]?secret|password|secret)\b["']?\s*[:=]\s*)["']?([^"'\s,;}&]+)["']?/gi, '$1[REDACTED]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
+    .replace(/([?&](?:api_?key|token|access_?token|refresh_?token|key|client_?secret|secret|password)=)[^&#\s]*/gi, '$1[REDACTED]')
+    .replace(/(https?:\/\/)[^/@\s]+:[^/@\s]+@/gi, '$1[REDACTED]@');
+  return text;
+}
+
+function resolveTraceHashSecret() {
+  if (traceHashSecret) return traceHashSecret;
+  const configured = normalizeText(process.env.REQUEST_TRACE_HASH_SECRET);
+  if (configured) {
+    traceHashSecret = configured;
+    return traceHashSecret;
+  }
+  try {
+    const config = require('../config');
+    const configSecret = normalizeText(
+      config.REQUEST_TRACE_HASH_SECRET
+      || config.API_KEY
+      || config.NAPCAT_HTTP_REVERSE_SECRET
+    );
+    if (configSecret) {
+      traceHashSecret = configSecret;
+      return traceHashSecret;
+    }
+  } catch (_) {}
+  traceHashSecret = crypto.randomBytes(32).toString('hex');
+  return traceHashSecret;
+}
+
+function hashTraceIdentifier(field = '', value = '') {
+  const normalizedField = normalizeText(field);
+  const normalizedValue = normalizeText(value);
+  if (!normalizedField || !normalizedValue) return '';
   return crypto
-    .createHash('sha1')
-    .update(String(value || ''))
+    .createHmac('sha256', resolveTraceHashSecret())
+    .update(`${normalizedField}\0${normalizedValue}`, 'utf8')
     .digest('hex')
     .slice(0, 16);
+}
+
+function sanitizeTraceUrl(value) {
+  try {
+    const parsed = new URL(normalizeText(value));
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    return parsed.origin;
+  } catch (_) {
+    return '';
+  }
+}
+
+function serializeRequestTraceEvent(payload = {}) {
+  const serialized = {};
+  for (const [field, aliases] of TRACE_IDENTITY_FIELDS.entries()) {
+    const value = aliases.map((alias) => payload[alias]).find((item) => item !== undefined && item !== null);
+    const hash = hashTraceIdentifier(field, value);
+    if (hash) serialized[`${field}Hash`] = hash;
+  }
+  for (const field of TRACE_TEXT_FIELDS) {
+    if (payload[field] === undefined || payload[field] === null) continue;
+    const value = sanitizeTraceText(payload[field]);
+    if (value) serialized[field] = value;
+  }
+  for (const field of ['apiBaseUrl', 'requestUrl']) {
+    if (payload[field] === undefined || payload[field] === null) continue;
+    const value = sanitizeTraceUrl(payload[field]);
+    if (value) serialized[field] = value;
+    else delete serialized[field];
+  }
+  for (const field of TRACE_NUMBER_FIELDS) {
+    if (payload[field] === null) {
+      serialized[field] = null;
+      continue;
+    }
+    const value = Number(payload[field]);
+    if (Number.isFinite(value)) serialized[field] = value;
+  }
+  for (const field of TRACE_BOOLEAN_FIELDS) {
+    if (typeof payload[field] === 'boolean') serialized[field] = payload[field];
+  }
+  const error = payload.error || payload.rawErrorMessage;
+  if (error) serialized.error = sanitizeTraceText(error);
+  if (payload.modelRouteDiagnostic && typeof payload.modelRouteDiagnostic === 'object') {
+    const diagnostic = serializeRequestTraceEvent(payload.modelRouteDiagnostic);
+    if (Object.keys(diagnostic).length > 0) serialized.modelRouteDiagnostic = diagnostic;
+  }
+  if (payload.cache && typeof payload.cache === 'object') {
+    const cache = {};
+    const breakpoints = Number(payload.cache.anthropicCacheBreakpoints);
+    if (Number.isFinite(breakpoints)) cache.anthropicCacheBreakpoints = breakpoints;
+    for (const field of ['openaiPromptCacheKey', 'openaiPromptCacheRetention', 'anthropicPromptCacheTtl', 'anthropicBeta', 'anthropicOneHourCacheHeader', 'downgradeReason']) {
+      const value = sanitizeTraceText(payload.cache[field]);
+      if (value) cache[field] = value;
+    }
+    if (Object.keys(cache).length > 0) serialized.cache = cache;
+  }
+  for (const field of ['allowedToolNames', 'plannerTools']) {
+    if (!Array.isArray(payload[field])) continue;
+    serialized[field] = payload[field]
+      .slice(0, 100)
+      .map((value) => sanitizeTraceText(value).slice(0, 120))
+      .filter(Boolean);
+  }
+  return serialized;
+}
+
+function stableHash(value = '') {
+  return hashTraceIdentifier('requestId', value);
 }
 
 function rememberRequestPhaseSeq(requestId = '', phaseSeq = 0) {
@@ -132,8 +277,10 @@ function cloneTraceForMeta(trace = null) {
 }
 
 function appendRequestTraceEvent(event = {}) {
-  const payload = event && typeof event === 'object' && !Array.isArray(event) ? event : {};
-  const requestId = normalizeText(payload.requestId || payload.request_id);
+  const payload = /** @type {Record<string, unknown>} */ (
+    event && typeof event === 'object' && !Array.isArray(event) ? event : {}
+  );
+  const requestId = sanitizeTraceText(payload.requestId || payload.request_id).slice(0, 160);
   if (!requestId) return;
   const explicitSeq = Math.max(0, Number(payload.phaseSeq || payload.phase_seq || 0) || 0);
   if (explicitSeq > 0) {
@@ -144,7 +291,7 @@ function appendRequestTraceEvent(event = {}) {
     appendFileWithRotationBatched(logFile, `${JSON.stringify({
       recordedAt: new Date().toISOString(),
       processId: process.pid,
-      ...payload,
+      ...serializeRequestTraceEvent(payload),
       requestId
     })}\n`, {
       encoding: 'utf8'
@@ -162,6 +309,7 @@ function flushRequestTraceEventsSync() {
 
 function resetRequestTraceStateForTests() {
   sequence = 0;
+  traceHashSecret = null;
   phaseSeqByRequestId.clear();
 }
 
@@ -203,6 +351,7 @@ module.exports = {
   extractErrorCode,
   extractHttpStatus,
   getTraceFromContainer,
+  hashTraceIdentifier,
   nextTracePhase,
   normalizeRequestTrace,
   resetRequestTraceStateForTests,

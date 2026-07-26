@@ -2,7 +2,7 @@
 
 ## Daily Use
 
-- `run-tests.js`：测试入口；更新 2026-05-24 02:16 +08:00，逐测试文件子进程隔离执行，避免全局 stub/env/模块缓存和后台异步任务跨测试污染
+- `run-tests.js`：测试入口；更新 2026-07-12 +08:00，默认以 2 个独立 Node 子进程并发执行，锁与多进程竞态测试进入显式串行组；单文件默认 60 秒超时并终止完整进程树，结果按文件顺序输出并附慢测榜
 - `pre-release-smoke.js`：发布前最小冒烟入口；更新 2026-06-17 20:04 +08:00，支持 `npm run smoke:pre-release -- --root D:\mizuki_release`，串联 expected-shutdown 未确认重启保护、主模型 fallback 重启恢复、普通群纯文本短 debounce 与群/入站并发回归
 - `check-agent.js`：LangGraph / agent 自检
 - `check-prompts.js`：prompt 资源检查
@@ -58,6 +58,7 @@
 - `install-periodic-restart.ps1`
 - `uninstall-windows-daemon.ps1`
 - `install-skill-deps.ps1`
+- `harden-local-acl.ps1`：Windows 敏感路径 ACL 收口；必须显式提供 `-ServiceIdentity`，默认只预览，确认快照后再使用 `-Apply` 修改仓库 `.env`、`data` 及其子项，仅保留服务账号、SYSTEM 和 Administrators。
 
 ## Migration / Maintenance
 

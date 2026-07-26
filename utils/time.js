@@ -37,11 +37,12 @@ function getDatePartsInTz(date = now(), timezone = getTimezone()) {
   }).formatToParts(date);
 
   const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  const hour = Number(map.hour);
   return {
     year: Number(map.year),
     month: Number(map.month),
     day: Number(map.day),
-    hour: Number(map.hour),
+    hour: hour === 24 ? 0 : hour,
     minute: Number(map.minute),
     second: Number(map.second)
   };

@@ -1,8 +1,13 @@
-const passiveAwareness = require('./index');
+const { buildCompactPersonaPrompt } = require('./core');
+const {
+  buildDecisionPrompt,
+  buildReplyPrompt,
+  parseDecision
+} = require('./prompt-runtime');
 
 module.exports = {
-  buildCompactPersonaPrompt: passiveAwareness.buildCompactPersonaPrompt,
-  buildDecisionPrompt: passiveAwareness.buildDecisionPrompt,
-  buildReplyPrompt: passiveAwareness.buildReplyPrompt,
-  parseDecision: passiveAwareness.parseDecision
+  buildCompactPersonaPrompt,
+  buildDecisionPrompt,
+  buildReplyPrompt,
+  parseDecision
 };

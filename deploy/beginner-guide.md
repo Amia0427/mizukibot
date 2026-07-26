@@ -14,7 +14,7 @@
 
 第一次部署建议按这个顺序来：
 
-1. 在本机或服务器装好 Node.js 20+ 和 npm。
+1. 在本机或服务器装好 Node.js 20.x 和 npm（以项目根目录 `.nvmrc` 为准）。
 2. 拉代码，安装依赖。
 3. 复制 `.env.example` 为 `.env`，填最少配置。
 4. 创建私有 prompt 文件。
@@ -30,7 +30,7 @@
 
 安装：
 
-- Node.js 20 或更高版本
+- Node.js 20.x
 - Git
 - npm，通常会随 Node.js 一起安装
 
@@ -65,7 +65,7 @@ npm -v
 git --version
 ```
 
-Node.js 版本必须是 20 或更高。
+Node.js 版本必须是项目 `.nvmrc` 声明的 20.x。
 
 ## 第二步：获取代码并安装依赖
 
@@ -261,8 +261,10 @@ NAPCAT_HTTP_REVERSE_PORT=3002
 默认地址：
 
 ```text
-http://127.0.0.1:3005/?token=你的WEB_TOKEN
+http://127.0.0.1:3005/login
 ```
+
+在登录页输入 `WEB_TOKEN`，成功后浏览器使用短期 `HttpOnly` 会话；不要把令牌写进 URL。（更新：2026-07-12 20:10 +08:00）
 
 如果部署在服务器上，初学者不建议直接把 `WEB_BIND_HOST` 改成 `0.0.0.0` 暴露公网。更稳妥的做法是先用 SSH 隧道或 Nginx 反代加 HTTPS。
 
@@ -366,7 +368,7 @@ npm run diag:provider-request
 
 - 主进程是否还在运行
 - `WEB_PORT` 是否被占用
-- 地址是否带了 `?token=WEB_TOKEN`
+- 是否已在 `/login` 重新登录；服务重启、注销或会话过期后旧 cookie 会失效
 - 服务器防火墙是否放行端口
 
 ## 最小验收清单
@@ -384,4 +386,4 @@ npm run diag:napcat-health -- --text
 - NapCat 能把消息推到 MizukiBot。
 - MizukiBot 能通过 NapCat 发出回复。
 - `logs/` 或 `data/restart-bot.log` 没有连续报错。
-- Web 面板能用 `WEB_TOKEN` 打开。
+- Web 面板能在 `/login` 使用 `WEB_TOKEN` 创建短期会话并打开。

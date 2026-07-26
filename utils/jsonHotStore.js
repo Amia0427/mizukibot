@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { rotateFileIfNeeded } = require('./logRotation');
+const { appendFileWithRotation, rotateFileIfNeeded } = require('./logRotation');
 
 const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_MAX_DELAY_MS = 3000;
@@ -59,12 +59,9 @@ function atomicWriteFile(filePath, text, encoding = 'utf8') {
       }
     }
     try {
-      try {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-      } catch (_) {}
-    } finally {
-      if (fallbackError) throw fallbackError;
-    }
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    } catch (_) {}
+    if (fallbackError) throw fallbackError;
     throw error;
   }
 }
@@ -93,16 +90,7 @@ function defaultJsonSerialize(value) {
 function registerFlushHooks() {
   if (process[JSON_HOT_STORE_HOOK_KEY]) return;
   process[JSON_HOT_STORE_HOOK_KEY] = true;
-  const flushAll = () => flushAllHotStoresSync();
-  process.once('beforeExit', flushAll);
-  process.once('SIGINT', () => {
-    flushAll();
-    process.exit(130);
-  });
-  process.once('SIGTERM', () => {
-    flushAll();
-    process.exit(143);
-  });
+  process.once('beforeExit', flushAllHotStoresSync);
 }
 
 function createHotStore(filePath, options = {}) {
@@ -333,6 +321,7 @@ function createJsonLineHotWriter(filePath, options = {}) {
     maxDelayMs: Math.max(0, Number(options.maxDelayMs) || DEFAULT_MAX_DELAY_MS),
     rotateMaxBytes: options.rotateMaxBytes,
     rotateMaxFiles: options.rotateMaxFiles,
+    retentionManaged: options.retentionManaged === true,
     serializeLine: typeof options.serializeLine === 'function'
       ? options.serializeLine
       : ((value) => JSON.stringify(value)),
@@ -359,11 +348,21 @@ function createJsonLineHotWriter(filePath, options = {}) {
     clearTimer();
     try {
       const body = `${lines.join('\n')}\n`;
-      rotateFileIfNeeded(writer.filePath, Buffer.byteLength(body, writer.encoding), {
-        maxBytes: writer.rotateMaxBytes,
-        maxFiles: writer.rotateMaxFiles
-      });
-      fs.appendFileSync(writer.filePath, body, writer.encoding);
+      if (writer.retentionManaged) {
+        appendFileWithRotation(writer.filePath, body, {
+          encoding: writer.encoding,
+          maxBytes: writer.rotateMaxBytes,
+          maxFiles: writer.rotateMaxFiles
+        });
+      } else if (writer.rotateMaxBytes !== undefined || writer.rotateMaxFiles !== undefined) {
+        rotateFileIfNeeded(writer.filePath, Buffer.byteLength(body, writer.encoding), {
+          maxBytes: writer.rotateMaxBytes,
+          maxFiles: writer.rotateMaxFiles
+        });
+        fs.appendFileSync(writer.filePath, body, writer.encoding);
+      } else {
+        fs.appendFileSync(writer.filePath, body, writer.encoding);
+      }
       writer.flushCount += 1;
       return true;
     } catch (error) {
@@ -403,7 +402,8 @@ function createJsonLineHotWriter(filePath, options = {}) {
       filePath: writer.filePath,
       dirty: writer.dirty,
       pendingLines: writer.pendingLines.length,
-      flushCount: writer.flushCount
+      flushCount: writer.flushCount,
+      retentionManaged: writer.retentionManaged
     };
   }
 

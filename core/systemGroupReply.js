@@ -14,6 +14,10 @@ const {
 const { recordBotReply: recordStyleBotReply } = require('../utils/styleProfileRuntime');
 const { recordBotReply: recordSocialBotReply } = require('../utils/socialContextRuntime');
 const { recordBotOutbound } = require('./initiativeState');
+const {
+  buildOutboundMessageMeta,
+  recordOutboundMessageEvent
+} = require('./outboundMessageDiagnostics');
 
 function getReplyChunkChars(runtimeConfig = config) {
   const n = Number(runtimeConfig.AI_REPLY_CHUNK_CHARS);
@@ -187,6 +191,24 @@ function getGroupReplySendQueueSize() {
   return groupReplySendQueueByGroupId.size;
 }
 
+async function sendWithOutboundDiagnostics({
+  sendWithRetry,
+  payload,
+  retries,
+  waitMs,
+  meta,
+  eventPayload
+}) {
+  const startedAt = Date.now();
+  recordOutboundMessageEvent('send_start', meta, eventPayload);
+  const ok = await sendWithRetry(payload, retries, waitMs);
+  recordOutboundMessageEvent(ok ? 'send_success' : 'send_failure', meta, {
+    ...eventPayload,
+    durationMs: Math.max(0, Date.now() - startedAt)
+  });
+  return ok;
+}
+
 async function sendGroupReply({
   sendWithRetry,
   groupId,
@@ -195,16 +217,50 @@ async function sendGroupReply({
   atSender = true,
   retries = 2,
   waitMs = 500,
-  runtimeConfig = config
+  runtimeConfig = config,
+  source = '',
+  routePolicyKey = '',
+  triggerReason = '',
+  topRouteType = '',
+  requestTrace = null,
+  routeMeta = null
 }) {
   return enqueueGroupSend(groupId, async () => {
     const normalized = sanitizeReplyPayloadText(replyText);
+    const outboundMeta = buildOutboundMessageMeta({
+      source,
+      routePolicyKey,
+      triggerReason,
+      topRouteType,
+      requestTrace,
+      routeMeta
+    }, {
+      source: 'system_group_reply',
+      triggerReason: 'group_reply'
+    });
     const richPayload = buildQqRichMessagePayload(normalized, { atSender, senderId });
     if (richPayload) {
-      const ok = await sendWithRetry({
-        action: 'send_group_msg',
-        params: { group_id: groupId, message: richPayload }
-      }, retries, waitMs);
+      const ok = await sendWithOutboundDiagnostics({
+        sendWithRetry,
+        payload: {
+          action: 'send_group_msg',
+          params: { group_id: groupId, message: richPayload }
+        },
+        retries,
+        waitMs,
+        meta: outboundMeta,
+        eventPayload: {
+          channel: 'group',
+          action: 'send_group_msg',
+          groupId: String(groupId || '').trim(),
+          senderId: String(senderId || '').trim(),
+          atSender: atSender !== false,
+          chunkIndex: 0,
+          chunkCount: 1,
+          richMessage: true,
+          messageLength: normalized.length
+        }
+      });
 
       if (!ok) {
         console.error('[reply] send_group_msg failed', {
@@ -212,7 +268,10 @@ async function sendGroupReply({
           senderId,
           chunkIndex: 0,
           chunkCount: 1,
-          richMessage: true
+          richMessage: true,
+          source: outboundMeta.source,
+          routePolicyKey: outboundMeta.routePolicyKey,
+          triggerReason: outboundMeta.triggerReason
         });
       }
 
@@ -225,17 +284,38 @@ async function sendGroupReply({
     let sentAny = false;
     for (let i = 0; i < chunks.length; i += 1) {
       const prefix = (atSender && i === 0 && senderId) ? `[CQ:at,qq=${senderId}] ` : '';
-      const ok = await sendWithRetry({
-        action: 'send_group_msg',
-        params: { group_id: groupId, message: `${prefix}${chunks[i]}` }
-      }, retries, waitMs);
+      const message = `${prefix}${chunks[i]}`;
+      const ok = await sendWithOutboundDiagnostics({
+        sendWithRetry,
+        payload: {
+          action: 'send_group_msg',
+          params: { group_id: groupId, message }
+        },
+        retries,
+        waitMs,
+        meta: outboundMeta,
+        eventPayload: {
+          channel: 'group',
+          action: 'send_group_msg',
+          groupId: String(groupId || '').trim(),
+          senderId: String(senderId || '').trim(),
+          atSender: atSender !== false && i === 0,
+          chunkIndex: i,
+          chunkCount: chunks.length,
+          richMessage: false,
+          messageLength: message.length
+        }
+      });
 
       if (!ok) {
         console.error('[reply] send_group_msg failed', {
           groupId,
           senderId,
           chunkIndex: i,
-          chunkCount: chunks.length
+          chunkCount: chunks.length,
+          source: outboundMeta.source,
+          routePolicyKey: outboundMeta.routePolicyKey,
+          triggerReason: outboundMeta.triggerReason
         });
         return sentAny;
       }
@@ -256,22 +336,57 @@ async function sendPrivateReply({
   replyText,
   retries = 2,
   waitMs = 500,
-  runtimeConfig = config
+  runtimeConfig = config,
+  source = '',
+  routePolicyKey = '',
+  triggerReason = '',
+  topRouteType = '',
+  requestTrace = null,
+  routeMeta = null
 }) {
   const normalized = sanitizeReplyPayloadText(replyText);
+  const outboundMeta = buildOutboundMessageMeta({
+    source,
+    routePolicyKey,
+    triggerReason,
+    topRouteType,
+    requestTrace,
+    routeMeta
+  }, {
+    source: 'system_private_reply',
+    triggerReason: 'private_reply'
+  });
   const richPayload = buildQqRichMessagePayload(normalized, { atSender: false, senderId: '' });
   if (richPayload) {
-    const ok = await sendWithRetry({
-      action: 'send_private_msg',
-      params: { user_id: userId, message: richPayload }
-    }, retries, waitMs);
+    const ok = await sendWithOutboundDiagnostics({
+      sendWithRetry,
+      payload: {
+        action: 'send_private_msg',
+        params: { user_id: userId, message: richPayload }
+      },
+      retries,
+      waitMs,
+      meta: outboundMeta,
+      eventPayload: {
+        channel: 'private',
+        action: 'send_private_msg',
+        userId: String(userId || '').trim(),
+        chunkIndex: 0,
+        chunkCount: 1,
+        richMessage: true,
+        messageLength: normalized.length
+      }
+    });
 
     if (!ok) {
       console.error('[reply] send_private_msg failed', {
         userId,
         chunkIndex: 0,
         chunkCount: 1,
-        richMessage: true
+        richMessage: true,
+        source: outboundMeta.source,
+        routePolicyKey: outboundMeta.routePolicyKey,
+        triggerReason: outboundMeta.triggerReason
       });
     }
 
@@ -283,16 +398,34 @@ async function sendPrivateReply({
 
   let sentAny = false;
   for (let i = 0; i < chunks.length; i += 1) {
-    const ok = await sendWithRetry({
-      action: 'send_private_msg',
-      params: { user_id: userId, message: chunks[i] }
-    }, retries, waitMs);
+    const ok = await sendWithOutboundDiagnostics({
+      sendWithRetry,
+      payload: {
+        action: 'send_private_msg',
+        params: { user_id: userId, message: chunks[i] }
+      },
+      retries,
+      waitMs,
+      meta: outboundMeta,
+      eventPayload: {
+        channel: 'private',
+        action: 'send_private_msg',
+        userId: String(userId || '').trim(),
+        chunkIndex: i,
+        chunkCount: chunks.length,
+        richMessage: false,
+        messageLength: chunks[i].length
+      }
+    });
 
     if (!ok) {
       console.error('[reply] send_private_msg failed', {
         userId,
         chunkIndex: i,
-        chunkCount: chunks.length
+        chunkCount: chunks.length,
+        source: outboundMeta.source,
+        routePolicyKey: outboundMeta.routePolicyKey,
+        triggerReason: outboundMeta.triggerReason
       });
       return sentAny;
     }

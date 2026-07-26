@@ -23,7 +23,13 @@ const {
   getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('./streamingSegmentation');
+const config = require('../config');
 const { getGroupReplySensitiveGuard } = require('../utils/groupReplySensitiveGuard');
+const { isAdminUserId } = require('../utils/privilegedPrivateChat');
+const {
+  buildOutboundMessageMeta,
+  recordOutboundMessageEvent
+} = require('./outboundMessageDiagnostics');
 
 function createReplyTelemetryEvent(type = '', payload = {}) {
   return {
@@ -256,25 +262,40 @@ function emitSensitiveGuardEvent(telemetry = null, payload = {}) {
   try {
     telemetry.onEvent(createReplyTelemetryEvent('group_reply_sensitive_blocked', {
       node: 'reply_sensitive_guard',
-      channel: 'group',
       ...payload
     }));
   } catch (_) {}
 }
 
-function applyGroupReplySensitiveGuard(text = '', context = {}) {
+function shouldApplyReplySensitiveGuard(context = {}, runtimeConfig = {}) {
+  const channel = String(context.channel || '').trim().toLowerCase();
+  if (channel === 'group') return true;
+  if (channel !== 'private') return false;
+  const effectiveConfig = runtimeConfig && Object.keys(runtimeConfig).length ? runtimeConfig : config;
+  return !isAdminUserId(context.userId || context.senderId, effectiveConfig);
+}
+
+function applyReplySensitiveGuard(text = '', context = {}, runtimeConfig = {}) {
+  if (!shouldApplyReplySensitiveGuard(context, runtimeConfig)) {
+    return { text, blocked: false, matchedCount: 0 };
+  }
   const guard = getGroupReplySensitiveGuard();
   const check = guard.check(extractReplyTextValue(text));
   if (!check.blocked) return { text, blocked: false, matchedCount: 0 };
 
   const matchedCount = check.matchedWords.length;
-  console.warn('[reply-sensitive-guard] group reply blocked', {
+  const channel = String(context.channel || '').trim().toLowerCase() || 'group';
+  console.warn('[reply-sensitive-guard] reply blocked', {
+    channel,
     groupId: String(context.groupId || '').trim(),
+    userId: String(context.userId || '').trim(),
     senderId: String(context.senderId || '').trim(),
     matchedCount
   });
   emitSensitiveGuardEvent(context.telemetry, {
+    channel,
     groupId: String(context.groupId || '').trim(),
+    userId: String(context.userId || '').trim(),
     senderId: String(context.senderId || '').trim(),
     matchedCount,
     source: String(context.source || '').trim()
@@ -296,7 +317,13 @@ function createStreamingDispatcher({
   userId,
   senderId,
   shouldSend = null,
-  telemetry = null
+  telemetry = null,
+  source = '',
+  routePolicyKey = '',
+  triggerReason = '',
+  topRouteType = '',
+  routeMeta = null,
+  requestTrace = null
 }) {
   const effectiveConfig = runtimeConfig && Object.keys(runtimeConfig).length ? runtimeConfig : (config || {});
   const maxSegments = getStreamMaxSegments(effectiveConfig);
@@ -342,13 +369,20 @@ function createStreamingDispatcher({
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
       const guarded = isPrivate
-        ? { text, blocked: false }
-        : applyGroupReplySensitiveGuard(text, {
+        ? applyReplySensitiveGuard(text, {
+            channel: 'private',
+            userId,
+            senderId,
+            telemetry,
+            source: 'stream_chunk'
+          }, effectiveConfig)
+        : applyReplySensitiveGuard(text, {
+            channel: 'group',
             groupId,
             senderId,
             telemetry,
             source: 'stream_chunk'
-          });
+          }, effectiveConfig);
       const sendText = guarded.text;
 
       const payload = isPrivate
@@ -365,7 +399,34 @@ function createStreamingDispatcher({
           };
       const startedAt = Date.now();
       if (!state.sendStartedAt) state.sendStartedAt = startedAt;
+      const outboundMeta = buildOutboundMessageMeta({
+        source,
+        routePolicyKey,
+        triggerReason,
+        topRouteType,
+        routeMeta,
+        requestTrace,
+        telemetry
+      }, {
+        source: 'main_reply_stream',
+        triggerReason: 'stream_chunk'
+      });
+      const outboundPayload = {
+        channel: isPrivate ? 'private' : 'group',
+        action: payload.action,
+        groupId: String(groupId || '').trim(),
+        userId: String(userId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        chunkIndex: state.sentSegments + 1,
+        chunkCount: 0,
+        messageLength: String(sendText || '').length
+      };
+      recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
       const sent = await sendWithRetry(payload, 1, 300);
+      recordOutboundMessageEvent(sent ? 'send_success' : 'send_failure', outboundMeta, {
+        ...outboundPayload,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
 
       if (!sent) {
         state.failedChunks += 1;
@@ -480,6 +541,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     retries = 2,
     waitMs = 500,
     telemetry = null,
+    source = '',
+    routePolicyKey = '',
+    triggerReason = '',
+    topRouteType = '',
+    routeMeta = null,
+    requestTrace = null,
     shouldSend = null
   }) {
     if (typeof shouldSend === 'function' && shouldSend() === false) return false;
@@ -508,12 +575,13 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       replyLength: String(replyText || '').trim().length
     });
 
-    const guardedReply = applyGroupReplySensitiveGuard(replyText, {
+    const guardedReply = applyReplySensitiveGuard(replyText, {
+      channel: 'group',
       groupId,
       senderId,
       telemetry,
       source: 'send_group_reply'
-    });
+    }, runtimeConfig);
     const sent = await sendSystemGroupReply({
       sendWithRetry,
       groupId,
@@ -522,7 +590,13 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       atSender,
       retries,
       waitMs,
-      runtimeConfig
+      runtimeConfig,
+      source: source || telemetry?.source,
+      routePolicyKey: routePolicyKey || telemetry?.routePolicyKey,
+      triggerReason: triggerReason || telemetry?.triggerReason,
+      topRouteType: topRouteType || telemetry?.topRouteType,
+      routeMeta: routeMeta || telemetry?.routeMeta,
+      requestTrace: requestTrace || telemetry?.requestTrace || telemetry?.routeMeta?.requestTrace
     });
 
     emitReplyTelemetry(telemetry, sent ? 'reply_send_success' : 'reply_send_failure', {
@@ -560,6 +634,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     retries = 2,
     waitMs = 500,
     telemetry = null,
+    source = '',
+    routePolicyKey = '',
+    triggerReason = '',
+    topRouteType = '',
+    routeMeta = null,
+    requestTrace = null,
     shouldSend = null
   }) {
     if (typeof shouldSend === 'function' && shouldSend() === false) return false;
@@ -585,13 +665,25 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       replyLength: String(replyText || '').trim().length
     });
 
+    const guardedReply = applyReplySensitiveGuard(replyText, {
+      channel: 'private',
+      userId,
+      telemetry,
+      source: 'send_private_reply'
+    }, runtimeConfig);
     const sent = await sendSystemPrivateReply({
       sendWithRetry,
       userId,
-      replyText,
+      replyText: guardedReply.text,
       retries,
       waitMs,
-      runtimeConfig
+      runtimeConfig,
+      source: source || telemetry?.source,
+      routePolicyKey: routePolicyKey || telemetry?.routePolicyKey,
+      triggerReason: triggerReason || telemetry?.triggerReason,
+      topRouteType: topRouteType || telemetry?.topRouteType,
+      routeMeta: routeMeta || telemetry?.routeMeta,
+      requestTrace: requestTrace || telemetry?.requestTrace || telemetry?.routeMeta?.requestTrace
     });
 
     emitReplyTelemetry(telemetry, sent ? 'reply_send_success' : 'reply_send_failure', {
@@ -630,6 +722,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     retries = 2,
     waitMs = 500,
     telemetry = null,
+    source = '',
+    routePolicyKey = '',
+    triggerReason = '',
+    topRouteType = '',
+    routeMeta = null,
+    requestTrace = null,
     shouldSend = null
   }) {
     if (String(chatType || '').trim() === 'private') {
@@ -639,6 +737,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
         retries,
         waitMs,
         telemetry,
+        source,
+        routePolicyKey,
+        triggerReason,
+        topRouteType,
+        routeMeta,
+        requestTrace,
         shouldSend
       });
     }
@@ -650,6 +754,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       retries,
       waitMs,
       telemetry,
+      source,
+      routePolicyKey,
+      triggerReason,
+      topRouteType,
+      routeMeta,
+      requestTrace,
       shouldSend
     });
   }
@@ -659,7 +769,9 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     groupId,
     senderId,
     replyText,
-    senderName = 'Mizuki'
+    senderName = 'Mizuki',
+    source = '',
+    routePolicyKey = ''
   }) {
     if (String(chatType || '').trim() === 'private') return;
     recordSystemGroupSend({
@@ -669,7 +781,9 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       senderName,
       updatePresence: true,
       updateBotPresence: true,
-      now: Date.now()
+      now: Date.now(),
+      source,
+      routePolicyKey
     });
   }
 

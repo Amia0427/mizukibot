@@ -167,10 +167,32 @@ function scopeKeyForBatch(candidate = {}) {
   ].join('|');
 }
 
-function listMemoryItemsForPipeline() {
+function buildMemoryLookupFilters(candidate = {}) {
+  const scope = normalizeScope(candidate);
+  return {
+    userId: scope.userId,
+    groupId: scope.groupId,
+    scopeType: scope.scopeType,
+    type: normalizeType(candidate.type || candidate.memoryKind),
+    memoryKind: getMemoryKind(candidate),
+    sourceKind: getSourceKind(candidate),
+    strictScope: true,
+    cache: false,
+    limit: Number(config.MEMORY_WRITE_PIPELINE_LOOKUP_LIMIT || 0) || 0
+  };
+}
+
+function listMemoryItemsForPipeline(candidate = {}) {
   try {
     const vectorMemory = require('../vectorMemory');
-    return typeof vectorMemory.getMemoryItems === 'function' ? vectorMemory.getMemoryItems() : [];
+    const filters = buildMemoryLookupFilters(candidate);
+    if (typeof vectorMemory.getMemoryItemsByFilter === 'function' && (filters.userId || filters.groupId)) {
+      return vectorMemory.getMemoryItemsByFilter(filters);
+    }
+    if (filters.userId && typeof vectorMemory.getMemoryItems === 'function') {
+      return vectorMemory.getMemoryItems(filters.userId);
+    }
+    return [];
   } catch (_) {
     return [];
   }
@@ -180,7 +202,7 @@ function findExistingMemory(candidate = {}) {
   const fp = fingerprintText(candidateText(candidate));
   if (!fp) return null;
   const type = normalizeType(candidate.type || candidate.memoryKind);
-  const items = listMemoryItemsForPipeline();
+  const items = listMemoryItemsForPipeline(candidate);
   return items.find((item) => {
     if (!item || String(item.status || 'active') === 'archived') return false;
     if (normalizeType(item.type || item.memoryKind) !== type) return false;
@@ -193,7 +215,7 @@ function findExistingMemory(candidate = {}) {
 function findConflict(candidate = {}) {
   const conflictKey = normalizeText(candidate.conflictKey || candidate.meta?.conflictKey || '');
   if (!conflictKey) return null;
-  return listMemoryItemsForPipeline().find((item) => {
+  return listMemoryItemsForPipeline(candidate).find((item) => {
     if (!item || String(item.status || 'active') === 'archived') return false;
     if (!sameScope(candidate, item)) return false;
     return normalizeText(item.conflictKey || item.meta?.conflictKey || '') === conflictKey

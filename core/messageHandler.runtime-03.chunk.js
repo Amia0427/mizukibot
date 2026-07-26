@@ -25,6 +25,21 @@
     );
     const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
+    const luckinHandled = await getLuckinCommandService().handleIncomingMessage(msg, {
+      chatType,
+      groupId,
+      senderId,
+      botQQ: resolveEffectiveBotQQ(msg, config)
+    });
+    if (luckinHandled) {
+      appendRequestCompleteTrace({
+        routePolicyKey: 'act/luckin-command',
+        topRouteType: 'direct_chat',
+        replyPath: 'luckin_command',
+        sent: true
+      });
+      return;
+    }
     const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
       if (isPrivateChatType(chatType) && !privilegedPrivateChat) {
@@ -65,6 +80,47 @@
 
       const createAgentExecutor = getCreateAgentExecutorModule();
       if (!createAgentExecutor.isCreateAgentUserAllowed(senderId)) {
+        if (isPrivateChatType(chatType)) {
+          const sendStartedAt = Date.now();
+          appendTraceTiming('final_reply_send_start', {
+            stage: 'final_reply_send_start',
+            ...buildTraceBase(),
+            routePolicyKey: 'admin/create',
+            topRouteType: 'admin',
+            replyPath: 'create_private_blocked'
+          });
+          const sent = await sendGroupReply({
+            chatType,
+            groupId,
+            userId: senderId,
+            senderId,
+            replyText: PRIVATE_CHAT_WHITELIST_REPLY,
+            atSender: false,
+            retries: 1,
+            waitMs: 300,
+            source: 'message_handler',
+            routePolicyKey: 'admin/create',
+            triggerReason: 'create_private_blocked',
+            topRouteType: 'admin'
+          });
+          appendTraceTiming('final_reply_send_done', {
+            stage: 'final_reply_send_done',
+            ...buildTraceBase(),
+            routePolicyKey: 'admin/create',
+            topRouteType: 'admin',
+            replyPath: 'create_private_blocked',
+            sent: Boolean(sent),
+            durationMs: Math.max(0, Date.now() - sendStartedAt),
+            finalErrorCode: 'private_chat_disabled'
+          });
+          appendRequestCompleteTrace({
+            routePolicyKey: 'admin/create',
+            topRouteType: 'admin',
+            finalErrorCode: 'private_chat_disabled',
+            sent: Boolean(sent)
+          });
+          return;
+        }
         try {
           await sendGroupPoke(groupId, senderId, {
             actionClient: {
@@ -241,7 +297,8 @@
         effectiveBotQQ,
         resolveReply: Boolean(syntheticContinuousMeta.replyMessageId),
         resolveForward: Array.isArray(syntheticContinuousMeta.forwardIds) && syntheticContinuousMeta.forwardIds.length > 0,
-        resolveCards: Array.isArray(syntheticContinuousMeta.qqCardUrls) && syntheticContinuousMeta.qqCardUrls.length > 0
+        resolveCards: (Array.isArray(syntheticContinuousMeta.cardContexts) && syntheticContinuousMeta.cardContexts.length > 0)
+          || (Array.isArray(syntheticContinuousMeta.qqCardUrls) && syntheticContinuousMeta.qqCardUrls.length > 0)
       });
       syntheticContinuousMeta.sessionKey = '';
       syntheticContinuousMeta.freshnessSessionKey = rawInboundFreshnessSessionKey;
@@ -535,7 +592,7 @@
         });
       }
       if (restartResult?.restartRequested) {
-        triggerRemoteRestart({
+        remoteRestartTrigger({
           delayMs: 800,
           meta: {
             source: 'admin_chat_command',
@@ -543,7 +600,7 @@
             userId: String(senderId || '').trim(),
             groupId: String(groupId || '').trim(),
             messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-            requestId: String(inboundRequestId || '').trim(),
+            requestId: String(inboundLock?.requestId || '').trim(),
             command: String(slashCommandText || '').trim()
           }
         });

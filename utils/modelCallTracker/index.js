@@ -15,6 +15,7 @@ const {
   nowIso,
   safeClone
 } = require('./common');
+const { hashTraceIdentifier } = require('../requestTrace');
 const { createModelCallLogWriter } = require('./logFile');
 const { summarizePromptCaching } = require('./promptCaching');
 const { summarizeRequest } = require('./requestSummary');
@@ -86,7 +87,7 @@ function startModelCall(meta = {}) {
     ),
     prompt_integrity: requestSummary.prompt_integrity || null,
     prompt_caching: promptCaching,
-    user_id: normalizeText(meta.userId),
+    user_id: hashTraceIdentifier('userId', meta.userId),
     task_id: normalizeText(meta.taskId),
     route_policy_key: routeDiagnostics.routePolicyKey,
     route_debug_key: routeDiagnostics.routeDebugKey,

@@ -1,0 +1,30 @@
+{"id":"memory-stability:no-retrieval:001","query":"你记得我喜欢什么吗","class":"no_retrieval","expectedFacet":"preference","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:002","query":"我之前说我是谁","class":"no_retrieval","expectedFacet":"identity","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:003","query":"我上次在干嘛","class":"no_retrieval","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:004","query":"群里之前怎么说这个活动","class":"no_retrieval","expectedFacet":"group_context","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:005","query":"宝我打过哪些歌","class":"no_retrieval","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:006","query":"我之前发过哪些图","class":"no_retrieval","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:007","query":"你还记得我讨厌什么吗","class":"no_retrieval","expectedFacet":"preference","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:008","query":"我们刚才聊到哪了","class":"no_retrieval","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:009","query":"上次说的计划是什么","class":"no_retrieval","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:no-retrieval:010","query":"群友之前把这个叫什么","class":"no_retrieval","expectedFacet":"group_context","shouldUseMemory":true}
+{"id":"memory-stability:wrong-hit:001","query":"今天天气怎么样","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:002","query":"现在几点","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:003","query":"今天股票行情怎么样","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:004","query":"最新新闻讲一下","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:005","query":"你觉得这首歌怎么样","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:006","query":"哈哈收到","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:007","query":"plan a study roadmap","class":"wrong_hit","expectedFacet":"task_or_plan","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:008","query":"check my notebook for LangGraph notes","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:009","query":"帮我查一下官网文档","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:wrong-hit:010","query":"今天日期是几号","class":"wrong_hit","expectedFacet":"default_continuity","shouldUseMemory":false}
+{"id":"memory-stability:quality:001","query":"我打过哪些歌","class":"quality","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:quality:002","query":"哪些歌我打过","class":"quality","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:quality:003","query":"我发过什么战绩图","class":"quality","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:quality:004","query":"你记得我喜欢喝什么吗","class":"quality","expectedFacet":"preference","shouldUseMemory":true}
+{"id":"memory-stability:quality:005","query":"我是不是说过要学什么","class":"quality","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:quality:006","query":"之前我们关系聊到哪了","class":"quality","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:quality:007","query":"群里最近怎么说开荒","class":"quality","expectedFacet":"group_context","shouldUseMemory":true}
+{"id":"memory-stability:quality:008","query":"你都记得我什么","class":"quality","expectedFacet":"broad_recall","shouldUseMemory":true}
+{"id":"memory-stability:quality:009","query":"我之前买过什么","class":"quality","expectedFacet":"recent_continuity","shouldUseMemory":true}
+{"id":"memory-stability:quality:010","query":"我之前说过哪些活动","class":"quality","expectedFacet":"recent_continuity","shouldUseMemory":true}

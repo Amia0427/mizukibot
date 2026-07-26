@@ -89,6 +89,12 @@ module.exports = (async () => {
   assert.ok(!plan.rowsData.some((item) => item.nodeId === nodes.find((node) => node.text === '喜欢毒蘑菇汤')?.id), 'embedding plan should skip not_recallable nodes');
   const syncPlan = buildLanceDbSyncPlan(nodes);
   assert.strictEqual(syncPlan.sourceNodes, 1, 'LanceDB plan should count only recallable active nodes');
+  const injectedSyncPlan = buildLanceDbSyncPlan(nodes, {
+    embeddingRows: [{ nodeId: nodes.find((item) => item.text === '喜欢柚子茶')?.id, status: 'ready', embedding: [1] }]
+  });
+  assert.strictEqual(injectedSyncPlan.readyRows, 1, 'LanceDB plan should accept preloaded embedding rows');
+  const missingInjectedSyncPlan = buildLanceDbSyncPlan(nodes, { embeddingRows: [] });
+  assert.strictEqual(missingInjectedSyncPlan.readyRows, 0, 'LanceDB plan should not load global embedding cache when rows are injected');
 
   const verification = await verifyMemoryRecall({
     userId: 'u_filter',

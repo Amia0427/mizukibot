@@ -59,6 +59,43 @@ function getRouteText(input = {}) {
   );
 }
 
+function hasCardInput(input = {}) {
+  const candidates = [
+    input.cardContexts,
+    input.inboundContext?.cardContexts,
+    input.route?.meta?.cardContexts
+  ];
+  return candidates.some((cards) => Array.isArray(cards) && cards.length > 0);
+}
+
+function isGroupChat(input = {}) {
+  const route = input.route || {};
+  const routeMeta = route.meta && typeof route.meta === 'object' ? route.meta : {};
+  const executionPlan = getRouteExecutionPlan(input);
+  const chatType = normalizeText(input.chatType || routeMeta.chatType || executionPlan.chatType).toLowerCase();
+  if (chatType === 'private') return false;
+  if (chatType === 'group') return true;
+  return Boolean(normalizeText(input.groupId || input.group_id || routeMeta.groupId || routeMeta.group_id || executionPlan.groupId || executionPlan.group_id));
+}
+
+function getDirectedContext(input = {}) {
+  if (input.directedContext && typeof input.directedContext === 'object') return input.directedContext;
+  const routeMeta = input.route?.meta && typeof input.route.meta === 'object' ? input.route.meta : {};
+  if (routeMeta.directedContext && typeof routeMeta.directedContext === 'object') return routeMeta.directedContext;
+  return null;
+}
+
+function hasGroupBotDirectedContext(input = {}) {
+  if (!isGroupChat(input)) return true;
+  const directedContext = getDirectedContext(input);
+  const scene = normalizeText(directedContext?.scene).toLowerCase();
+  if (scene === 'reply_to_bot' || scene === 'address_bot') return true;
+  const addressee = directedContext?.addressee && typeof directedContext.addressee === 'object'
+    ? directedContext.addressee
+    : {};
+  return normalizeText(addressee.kind).toLowerCase() === 'bot';
+}
+
 function matchesBlockedIntent(text = '') {
   const t = normalizeText(text);
   if (!t) return { blocked: true, reason: 'empty_text' };
@@ -82,12 +119,14 @@ const FAST_REPLY_CHECKS = Object.freeze([
   { key: 'enabled', reason: 'disabled', label: 'NORMAL_FAST_REPLY_ENABLED=true', exitFlag: 'permission' },
   { key: 'has_user_id', reason: 'missing_user_id', label: 'user id present', exitFlag: 'permission' },
   { key: 'normal_user', reason: 'admin_user', label: 'not admin user', exitFlag: 'permission' },
+  { key: 'group_bot_directed', reason: 'group_not_directed_to_bot', label: 'group message is directed to bot', exitFlag: 'permission' },
   { key: 'direct_chat_route', reason: 'not_direct_chat', label: 'top route is direct_chat', exitFlag: 'route' },
   { key: 'direct_executor', reason: 'non_direct_executor', label: 'executor is direct', exitFlag: 'route' },
   { key: 'route_available', reason: 'route_unavailable', label: 'route execution is available', exitFlag: 'route' },
   { key: 'tools_not_allowed', reason: 'tools_allowed', label: 'route does not allow tools', exitFlag: 'tools' },
   { key: 'no_tools_present', reason: 'tools_present', label: 'no planner/tool allowlist present', exitFlag: 'tools' },
   { key: 'no_image_input', reason: 'image_present', label: 'no image or visual input', exitFlag: 'image' },
+  { key: 'no_card_input', reason: 'card_present', label: 'no card input', exitFlag: 'continuity' },
   { key: 'no_route_action_or_safety', reason: 'route_action_or_safety', label: 'no action/safety route metadata', exitFlag: 'permission' },
   { key: 'no_memory_cli_turn', reason: 'memory_cli_turn', label: 'no memory_cli turn state', exitFlag: 'continuity' },
   { key: 'text_present', reason: 'empty_text', label: 'text is not empty', exitFlag: 'continuity' },
@@ -147,6 +186,9 @@ function explainNormalFastReplyDecision(input = {}, runtimeConfig = {}, options 
 
   const isAdminUser = resolveAdminChecker(runtimeConfig, options);
   checks.push(buildCheck('normal_user', Boolean(userId) && !isAdminUser(userId)));
+  checks.push(buildCheck('group_bot_directed', hasGroupBotDirectedContext(input), {
+    actual: normalizeText(getDirectedContext(input)?.scene || (isGroupChat(input) ? 'missing' : 'private'))
+  }));
 
   const route = input.route || {};
   const routeExecutionPlan = getRouteExecutionPlan(input);
@@ -160,6 +202,7 @@ function explainNormalFastReplyDecision(input = {}, runtimeConfig = {}, options 
   checks.push(buildCheck('tools_not_allowed', routeExecutionPlan.allowTools !== true));
   checks.push(buildCheck('no_tools_present', !hasAllowedTools(input)));
   checks.push(buildCheck('no_image_input', !hasImageInput(input)));
+  checks.push(buildCheck('no_card_input', !hasCardInput(input)));
 
   const routeMeta = route.meta && typeof route.meta === 'object' ? route.meta : {};
   checks.push(buildCheck('no_route_action_or_safety', !(routeMeta.command || routeMeta.qqActionKey || routeMeta.safetyBoundary === true)));

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 const config = require('../config');
 const { getJsonStore } = require('./storeRegistry');
+const { requestSafeHttpUrl } = require('./networkSafety');
 
 const CACHE_DIR = path.join(config.DATA_DIR, 'inbound_image_cache');
 const CACHE_REF_PREFIX = 'cached-image://';
@@ -119,17 +120,25 @@ async function ensureCachedImageRef(url = '', options = {}) {
   const maxBytes = Math.max(1024, Number(options.maxBytes || DEFAULT_MAX_BYTES) || DEFAULT_MAX_BYTES);
 
   try {
-    const response = await axios.get(sourceUrl, {
-      responseType: 'arraybuffer',
-      timeout: timeoutMs,
-      maxContentLength: maxBytes,
-      maxBodyLength: maxBytes,
-      proxy: false,
-      headers: {
-        'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
+    const response = await requestSafeHttpUrl(sourceUrl, {
+      lookup: options.lookup,
+      maxRedirects: 5,
+      request: options.request || axios.get,
+      requestOptions: {
+        responseType: 'arraybuffer',
+        timeout: timeoutMs,
+        maxContentLength: maxBytes,
+        maxBodyLength: maxBytes,
+        proxy: false,
+        headers: {
+          'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
+        }
       }
     });
     const buffer = Buffer.from(response?.data || []);
+    if (buffer.length > maxBytes) {
+      throw new Error(`image exceeds ${maxBytes} byte limit`);
+    }
     if (!buffer.length) {
       return {
         ok: false,

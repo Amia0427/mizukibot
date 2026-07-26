@@ -185,16 +185,38 @@ function getMemoryItemsByFilter(filters = {}) {
   const memoryKind = normalizeMemoryKind(filters.memoryKind);
   const scopeType = filters.scopeType ? normalizeScopeType(filters.scopeType) : '';
   const groupId = sanitizeOptionalText(filters.groupId);
-  const limit = Math.max(1, Math.min(500, Number(filters.limit) || 100));
+  const rawLimit = Number(filters.limit);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.max(1, Math.min(5000, rawLimit))
+    : 0;
+  const strictScope = filters.strictScope === true;
+  const shardMetas = strictScope && (userId || groupId)
+    ? [createShardMetaForItem({
+        userId: userId || `group:${groupId}`,
+        groupId,
+        scopeType: scopeType || (groupId && !userId ? 'group' : 'personal'),
+        memoryKind,
+        sourceKind,
+        type: filters.type
+      })]
+    : userId
+      ? resolveShardMetasForRecall(userId, groupId ? { groupId } : {})
+      : groupId
+        ? resolveShardMetasForRecall(`group:${groupId}`, {})
+        : [];
+  const sourceItems = shardMetas.length > 0
+    ? (filters.cache === false ? readMemoryItemsFromShards(shardMetas) : getMemoryItemsFromShards(shardMetas))
+    : getMemoryItems(null);
 
-  return getMemoryItems(userId || null)
+  return sourceItems
+    .filter((item) => (userId ? String(item.userId || '') === userId : true))
     .filter((item) => (status ? normalizeStatus(item.status, STATUS_ACTIVE) === status : true))
     .filter((item) => (sourceKind ? String(item.sourceKind || '').toLowerCase() === sourceKind : true))
     .filter((item) => (memoryKind ? getItemMemoryKind(item) === memoryKind : true))
     .filter((item) => (scopeType ? normalizeScopeType(item.scopeType) === scopeType : true))
     .filter((item) => (groupId ? String(item.groupId || '') === groupId : true))
     .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
-    .slice(0, limit);
+    .slice(0, limit || undefined);
 }
 
 function rememberExplicitMemory(userId, text, options = {}) {

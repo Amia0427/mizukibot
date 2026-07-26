@@ -59,6 +59,8 @@ const {
   needsWebDetailFetch,
   pickMinimalToolAllowlist
 } = require('./tool-selection.chunk');
+const { extractFirstSupportedSharedLink } = require('../../../api/skills_native/sharedLink/url');
+const { routeHasReadableCardContext } = require('../../../utils/cardContext');
 
 function getPromptNormalizer() {
   return require('./prompt-normalizer.chunk');
@@ -108,9 +110,13 @@ function collectAvailableToolSummary(route = {}, options = {}) {
   const explicitWebToolNames = routeHasExplicitWebSearchRequirement(route)
     ? effectiveRouteAllowedTools.filter((toolName) => isWebLookupTool(toolName))
     : [];
+  const cardWebToolNames = routeHasReadableCardContext(route)
+    ? effectiveRouteAllowedTools.filter((toolName) => toolName === 'web_fetch')
+    : [];
   const allowedByCompanionMode = new Set([
     ...companionAllowedToolNames,
-    ...explicitWebToolNames
+    ...explicitWebToolNames,
+    ...cardWebToolNames
   ]);
   const toolCatalog = explicitFilteredCatalog.filter((item) => allowedByCompanionMode.has(normalizeText(item?.name)));
   return {
@@ -135,6 +141,8 @@ function isCompanionPlannerSafeReadTool(toolName = '') {
 
 function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], options = {}) {
   if (!isCompanionPlannerMode(options)) return 'not_companion_mode';
+  const topRouteType = normalizeText(route?.topRouteType || route?.meta?.topRouteType || 'direct_chat');
+  if (topRouteType !== 'direct_chat') return 'blocked_route';
   const allowed = normalizeToolNames(toolNames);
   if (allowed.length === 0) return 'no_tools_requested';
   if (
@@ -144,6 +152,7 @@ function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], optio
   ) {
     return 'allow_safe_explicit_web_search';
   }
+  if (allowed.includes('web_fetch') && routeHasReadableCardContext(route)) return 'allow_safe_card_fetch';
   const unsafe = allowed.filter((toolName) => !isCompanionPlannerSafeReadTool(toolName));
   if (unsafe.length > 0) return `blocked_unsafe_tools:${unsafe.join(',')}`;
   const cleanText = getPlannerRequestText(route);
@@ -156,6 +165,7 @@ function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], optio
   if ((shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) && allowed.includes('memory_cli')) return 'allow_safe_memory_recall';
   if ((sourceScope === 'notebook' || responseIntent === 'summary') && allowed.some((toolName) => toolName === 'notebook_search' || toolName === 'notebook_list_docs' || toolName === 'memory_cli')) return 'allow_safe_notebook';
   if (allowed.includes('url_safety_check') && /https?:\/\//i.test(cleanText)) return 'allow_safe_url_check';
+  if (allowed.includes('read_shared_link') && extractFirstSupportedSharedLink(cleanText)) return 'allow_safe_shared_link';
   return 'blocked_non_companion_intent';
 }
 

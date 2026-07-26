@@ -48,7 +48,9 @@
           chatType,
           groupId: isPrivateChatType(chatType) ? '' : groupId,
           senderId,
-          replyText: persistedReplyText || reply
+          replyText: persistedReplyText || reply,
+          source: 'main_reply',
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan)
         });
         await maybeSendReasoningForward(replyEnvelope, {
           chatType,

@@ -20,7 +20,8 @@ function ensureChatCompletionsUrl(url) {
 function containsBotCue(text = '') {
   const t = normalizeText(text).toLowerCase();
   if (!t) return false;
-  return /(?:bot|瑞希|机器人|ai|模型|napcat|回复|插件|接入|说话|在吗|还在|出来)/i.test(t);
+  return /^(?:瑞希|毛毛)[,，:：!！?？\s]*(?:你|出来|在吗|还在|说话|看看|帮|能|可以|要不要|耍|玩吗|来|救|解释|怎么看|继续|细说|评价|聊)/i.test(t)
+    || /^(?:bot|机器人)[,，:：!！?？\s]*(?:你|you|can|please|help|look|see|出来|在吗|还在|说话|不说话|看看|帮|能|可以|要不要|来|救|解释|怎么看|继续|细说|没反应|坏了|坏掉)/i.test(t);
 }
 
 function containsGroupCue(text = '') {
@@ -577,7 +578,7 @@ async function resolveMessageDirectedContext(input = {}) {
 
   if (!resolved) {
     const llmResolved = await resolveByLlmFallback(input, base, recentMessages);
-    if (llmResolved) {
+    if (llmResolved && (llmResolved.scene !== 'address_bot' || base.signals.hasAtBot || base.signals.hasBotCue)) {
       resolved = llmResolved;
       base.fallbackUsed = true;
     }

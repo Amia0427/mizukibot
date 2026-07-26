@@ -218,6 +218,56 @@ module.exports = (async () => {
   assert.ok(sentText.includes('[MemOSRecall]'), 'main reply messages should include MemOS recall text');
   assert.ok(!sentText.includes('[OpenVikingRecall]'), 'main reply messages should not include deduped OpenViking recall');
 
+  let plainFallbackContextBuilt = false;
+  const plainPrepareNode = createPrepareNode(createDeps({
+    buildFallbackMemoryContextImpl(_userId, _question, options = {}) {
+      plainFallbackContextBuilt = true;
+      return {
+        promptRetrievedMemoryText: '旧 profile：用户以前聊过完全无关的话题。',
+        promptDailyJournalText: '2026-05-18 无关旧日记。',
+        diagnostics: {
+          memoryTrace: {
+            retrieval_path: 'prepare_fallback_no_rag',
+            retrieved_count: 0,
+            injected_block_ids: ['retrieved_memory_lite', 'daily_journal'],
+            hits: []
+          }
+        }
+      };
+    }
+  }));
+  const plainResult = await plainPrepareNode({
+    request: {
+      userId: 'u_timeout_plain',
+      userInfo: { level: 'friend' },
+      question: '区',
+      runtimeQuestionText: '区',
+      persistUserText: '区',
+      routeMeta: {
+        chatType: 'group',
+        groupId: 'g_timeout_plain'
+      },
+      sessionKey: 's_timeout_plain',
+      allowTools: false,
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat'
+    },
+    thread: { threadId: 't_timeout_plain' },
+    memory: {},
+    plan: {},
+    execution: { latencyDecision: {} },
+    output: {}
+  });
+
+  const plainDynamicIds = plainResult.memory.dynamicContextBlocks.map((block) => block.id);
+  const plainText = plainResult.memory.mainConversationMessages.map((message) => String(message.content || '')).join('\n');
+
+  assert.strictEqual(plainFallbackContextBuilt, false, 'plain chat fallback should not build ambient memory context');
+  assert.ok(!plainDynamicIds.includes('retrieved_memory_lite'), 'plain chat fallback should not inject retrieved memory');
+  assert.ok(!plainDynamicIds.includes('daily_journal'), 'plain chat fallback should not inject daily journal');
+  assert.ok(!plainText.includes('[RetrievedMemoryLite]'), 'plain chat fallback messages should not include retrieved memory text');
+  assert.ok(!plainText.includes('[DailyJournal]'), 'plain chat fallback messages should not include daily journal text');
+
   console.log('runtimeV2PromptTimeoutMemoryFallback.test.js passed');
 })().catch((error) => {
   console.error(error);

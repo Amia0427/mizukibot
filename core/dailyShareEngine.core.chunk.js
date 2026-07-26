@@ -57,6 +57,7 @@ const {
   recordSystemGroupSend,
   sendGroupReply
 } = require('./systemGroupReply');
+const { shouldAllowProactiveGroupOutbound } = require('./proactiveGroupOutboundControl');
 const { getRecentMessages } = require('../utils/groupAwarenessState');
 const {
   buildConversationWindow,
@@ -133,6 +134,7 @@ function logDailyShare({ groupId = '', windowKey = '', type = '', reason = '', s
       });
     } else {
       require('../utils/storeRegistry').getJsonLineWriter(config.DAILY_SHARE_EVENT_LOG_FILE, {
+        retentionManaged: true,
         debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
         maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
       }).append({

@@ -51,6 +51,7 @@ function createPostReplyWorkerRuntime(options = {}) {
   const staleProcessingMs = Math.max(1000, Number(options.staleProcessingMs || config.POST_REPLY_WORKER_STALE_PROCESSING_MS) || 5 * 60 * 1000);
   const concurrency = Math.max(1, Number(options.concurrency || config.POST_REPLY_WORKER_CONCURRENCY) || 1);
   const processJobImpl = options.processJob || processPostReplyJob;
+  const flushMaterialize = options.flushMaterialize || flushPostReplyMaterialize;
   const circuitBreakerThreshold = Math.max(1, Number(config.POST_REPLY_CIRCUIT_BREAKER_THRESHOLD) || 3);
   const rateLimitCooldownMs = Math.max(0, Number(config.POST_REPLY_RATE_LIMIT_COOLDOWN_MS) || 0);
   const rateLimitMaxConcurrency = Math.max(1, Number(config.POST_REPLY_RATE_LIMIT_MAX_CONCURRENCY) || 1);
@@ -82,6 +83,7 @@ function createPostReplyWorkerRuntime(options = {}) {
   let lastActiveAt = Date.now();
   let recycleRequested = false;
   const activeUserIds = new Set();
+  const idleWaiters = [];
   let scheduledTick = false;
   const phaseCircuitState = new Map();
   const phaseRateLimitState = new Map();
@@ -110,6 +112,30 @@ function createPostReplyWorkerRuntime(options = {}) {
           : []
       }
     };
+  }
+
+  function resolveIdleWaiters() {
+    if (activeCount > 0) return;
+    while (idleWaiters.length > 0) idleWaiters.shift().resolve(getStats());
+  }
+
+  function waitForIdle(timeoutMs = 0) {
+    if (activeCount === 0) return Promise.resolve({ ...getStats(), timedOut: false });
+    const timeout = Math.max(0, Number(timeoutMs || 0) || 0);
+    return new Promise((resolve) => {
+      const waiter = { resolve };
+      idleWaiters.push(waiter);
+      if (timeout <= 0) return;
+      const timer = setTimeout(() => {
+        const index = idleWaiters.indexOf(waiter);
+        if (index >= 0) idleWaiters.splice(index, 1);
+        resolve({ ...getStats(), timedOut: true });
+      }, timeout);
+      waiter.resolve = (value) => {
+        clearTimeout(timer);
+        resolve({ ...value, timedOut: false });
+      };
+    });
   }
 
   function hasPendingQueueWorkForRecycle() {
@@ -564,6 +590,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       activeCount = Math.max(0, activeCount - 1);
       if (activeCount === 0) lastActiveAt = Date.now();
       if (activeUserId) activeUserIds.delete(activeUserId);
+      resolveIdleWaiters();
       scheduleTick(0);
     }
   }
@@ -639,6 +666,18 @@ function createPostReplyWorkerRuntime(options = {}) {
     }
   }
 
+  async function drainAndStop(options = {}) {
+    stop();
+    const idle = await waitForIdle(options.timeoutMs);
+    if (idle.timedOut) return { ...idle, flushed: false };
+    const flushResult = await flushMaterialize({ force: true, source: options.source || 'worker_shutdown' });
+    return {
+      ...getStats(),
+      timedOut: false,
+      flushed: flushResult?.flushed !== false
+    };
+  }
+
   return {
     queue,
     concurrency,
@@ -646,6 +685,8 @@ function createPostReplyWorkerRuntime(options = {}) {
     staleProcessingMs,
     start,
     stop,
+    drainAndStop,
+    waitForIdle,
     tick,
     runOneJob,
     requeueTransientFailedJobs,

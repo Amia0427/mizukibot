@@ -2,6 +2,7 @@
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const WebSocket = require('ws');
 
 const execFileAsync = promisify(execFile);
 const fsp = fs.promises;
@@ -14,6 +15,7 @@ config.validateRequiredConfig();
 
 const { startServer } = require('./web/server');
 const { startTickEngine } = require('./core/tickEngine');
+const { startDailyJournalSummaryScheduler } = require('./core/dailyJournalSummaryScheduler');
 const { createMessageHandler } = require('./core/messageHandler');
 const { initializeMemeManager } = require('./core/memeManager');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
@@ -31,11 +33,17 @@ const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer
 const { createMessageIngressDispatcher } = require('./core/messageIngressDispatcher');
 const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
 const { maybeSendRestartResultFeedback } = require('./utils/restartResultFeedback');
+const { flushAllHotStoresSync } = require('./utils/jsonHotStore');
+const { sendNapCatActionWithRetry } = require('./utils/napcatActionRetry');
+const { createRuntimeReadiness } = require('./utils/runtimeReadiness');
+const { closeServer, waitForServerListening } = require('./utils/serverLifecycle');
+const { createMainProcessLifecycle } = require('./utils/mainProcessLifecycle');
+const { closeLoadedSqliteConnections } = require('./utils/sqliteRuntime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
-const LOCK_FILE = process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE
-  ? process.env.MIZUKIBOT_LOCK_FILE
-  : path.join(__dirname, '.mizukibot.lock');
+const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
+  || (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE)
+  || path.join(__dirname, '.mizukibot.lock');
 const EXPECTED_SHUTDOWN_FILE = path.join(config.DATA_DIR, 'bot-main-expected-shutdown.json');
 const RUNTIME_STATE_FILE = path.join(config.DATA_DIR, 'bot-main-runtime-state.json');
 const EXIT_OBSERVATIONS_FILE = path.join(config.DATA_DIR, 'bot-main-exit-observations.jsonl');
@@ -45,6 +53,7 @@ let preserveSingleInstanceLockOnExit = false;
 let messageIngressDispatcher = null;
 let mainRuntimeHeartbeatTimer = null;
 const mainRuntimeStartedAt = new Date();
+const runtimeReadiness = createRuntimeReadiness();
 
 function configureNodeProcessReports() {
   try {
@@ -189,19 +198,19 @@ function logFatalStartupError(kind, error) {
   });
 }
 
-process.on('uncaughtException', (error) => {
+function handleMainUncaughtException(error) {
   preserveSingleInstanceLockOnExit = true;
   logFatalStartupError('uncaughtException', error);
   process.exit(1);
-});
+}
 
-process.on('unhandledRejection', (error) => {
+function handleMainUnhandledRejection(error) {
   preserveSingleInstanceLockOnExit = true;
   logFatalStartupError('unhandledRejection', error);
   process.exit(1);
-});
+}
 
-process.on('beforeExit', (code) => {
+function handleMainBeforeExit(code) {
   appendMainExitObservation('beforeExit', {
     code,
     messageIngress: messageIngressDispatcher?.getSnapshot?.()
@@ -213,9 +222,9 @@ process.on('beforeExit', (code) => {
     uptimeMs: Math.round(process.uptime() * 1000),
     messageIngress: messageIngressDispatcher?.getSnapshot?.()
   });
-});
+}
 
-process.on('exit', (code) => {
+function handleMainExit(code) {
   appendMainExitObservation('exit', { code });
   recordMainRuntimeState('exit', { code });
   console.warn('[process] exit', {
@@ -223,7 +232,12 @@ process.on('exit', (code) => {
     code,
     uptimeMs: Math.round(process.uptime() * 1000)
   });
-});
+}
+
+process.on('uncaughtException', handleMainUncaughtException);
+process.on('unhandledRejection', handleMainUnhandledRejection);
+process.on('beforeExit', handleMainBeforeExit);
+process.on('exit', handleMainExit);
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -295,56 +309,72 @@ function cleanupSingleInstanceLockSync() {
     if (!fs.existsSync(LOCK_FILE)) return;
     const ownerPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
     if (ownerPid === process.pid) {
-      fs.writeFileSync(LOCK_FILE, '', { encoding: 'utf8', flag: 'w' });
+      fs.unlinkSync(LOCK_FILE);
     }
   } catch (_) {}
 }
 
 async function acquireSingleInstanceLock() {
-  const writeLock = async () => {
-    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
-  };
-
-  const replaceStaleLock = async () => {
-    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'w' });
-  };
-
-  try {
-    await writeLock();
-  } catch (err) {
-    if (!err || err.code !== 'EEXIST') throw err;
-
-    const existingPid = await readLockOwnerPid();
-
-    if (existingPid === process.pid) {
+  const acquireGuardDir = `${LOCK_FILE}.acquire`;
+  const acquireGuard = async () => {
+    while (true) {
       try {
-        await replaceStaleLock();
-      } catch (replaceErr) {
-        console.error('[Startup] Failed to replace self-owned lock file:', replaceErr?.message || replaceErr);
-        process.exit(1);
+        await fsp.mkdir(acquireGuardDir);
+        return async () => {
+          await fsp.rm(acquireGuardDir, { recursive: true, force: true });
+        };
+      } catch (error) {
+        if (!error || error.code !== 'EEXIST') throw error;
+        try {
+          const stat = await fsp.stat(acquireGuardDir);
+          if (Date.now() - stat.mtimeMs > 30_000) {
+            await fsp.rm(acquireGuardDir, { recursive: true, force: true });
+            continue;
+          }
+        } catch (statError) {
+          if (statError?.code === 'ENOENT') continue;
+          throw statError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      process.on('exit', cleanupSingleInstanceLockSync);
-      return cleanupSingleInstanceLockSync;
     }
+  };
 
-    if (await isMainBotProcess(existingPid)) {
-      console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
-      process.exit(1);
-    }
+  await fsp.mkdir(path.dirname(LOCK_FILE), { recursive: true });
+  try {
+    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    if (!error || error.code !== 'EEXIST') throw error;
 
-    if (isProcessAlive(existingPid)) {
-      const commandLine = await getProcessCommandLine(existingPid);
-      console.warn('[Startup] Replacing stale lock owned by non-bot process:', {
-        pid: existingPid,
-        commandLine: commandLine.slice(0, 240)
-      });
-    }
-
+    const releaseGuard = await acquireGuard();
     try {
-      await replaceStaleLock();
-    } catch (replaceErr) {
-      console.error('[Startup] Failed to replace stale lock file:', replaceErr?.message || replaceErr);
-      process.exit(1);
+      await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
+    } catch (guardedError) {
+      if (!guardedError || guardedError.code !== 'EEXIST') throw guardedError;
+
+      const existingPid = await readLockOwnerPid();
+      if (existingPid !== process.pid) {
+        if (await isMainBotProcess(existingPid)) {
+          console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
+          await releaseGuard();
+          process.exit(1);
+        }
+
+        if (isProcessAlive(existingPid)) {
+          const commandLine = await getProcessCommandLine(existingPid);
+          console.warn('[Startup] Replacing stale lock owned by non-bot process:', {
+            pid: existingPid,
+            commandLine: commandLine.slice(0, 240)
+          });
+        }
+
+        await fsp.unlink(LOCK_FILE).catch((unlinkError) => {
+          if (unlinkError?.code !== 'ENOENT') throw unlinkError;
+        });
+        await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
+      }
+    } finally {
+      await releaseGuard();
     }
   }
 
@@ -379,11 +409,15 @@ async function cleanupStaleTmpFilesOnStartup() {
 }
 let webServer = null;
 let resourceSnapshotLoop = null;
+let ws = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
 
 let shuttingDown = false;
-let shutdownInProgress = false;
 let tickStarted = false;
 let tickRuntime = null;
+let dailyJournalSummaryStarted = false;
+let dailyJournalSummaryRuntime = null;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
@@ -393,17 +427,12 @@ function askAIByGraph(...args) {
 }
 
 async function sendWithRetry(payload, retries = 1, waitMs = 500) {
-  const maxRetry = Math.max(0, Number(retries) || 0);
-  for (let i = 0; i <= maxRetry; i++) {
-    try {
-      await napcatActionClient.callAction(payload.action, payload.params);
-      return true;
-    } catch (error) {
-      console.error(`[HTTP action] ${payload.action} failed (attempt ${i + 1}/${maxRetry + 1}):`, error.message);
-      if (i < maxRetry) await new Promise((r) => setTimeout(r, waitMs));
-    }
-  }
-  return false;
+  return sendNapCatActionWithRetry({
+    actionClient: napcatActionClient,
+    payload,
+    retries,
+    waitMs
+  });
 }
 
 const { handleIncomingMessage } = createMessageHandler({
@@ -427,6 +456,12 @@ async function acceptIncomingMessage(msg, source = '') {
   await handleIncomingMessage(msg);
   return true;
 }
+
+async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = prepareNapCatEventPacket) {
+  if (preparePacket(msg)) return false;
+  await acceptIncomingMessage(msg, source);
+  return true;
+}
 const napcatLogFollower = createNapcatLogFollower({
   sendWithRetry,
   sendGroupReply: async ({
@@ -446,9 +481,10 @@ const napcatLogFollower = createNapcatLogFollower({
 });
 
 const schedulerRuntime = getSchedulerRuntime({
-  sendGroupMessage: async (groupId, message) => {
+  sendGroupMessage: async (groupId, message, meta = {}) => {
     await sendGroupMessage(groupId, message, {
-      actionClient: napcatActionClient
+      actionClient: napcatActionClient,
+      ...meta
     });
     return true;
   }
@@ -459,25 +495,155 @@ function startResourceSnapshots() {
     component: 'main_process',
     schedulerStarted,
     tickStarted,
-    postReplyInline: Boolean(postReplyWorkerRuntime)
+    postReplyInline: Boolean(postReplyWorkerRuntime),
+    wsReadyState: ws ? ws.readyState : -1,
+    reconnectAttempts
   }));
 }
 
 let httpReverseServer = null;
+
+function prepareNapCatEventPacket(msg) {
+  appendNapcatPacketToLog(msg);
+  if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
+    void napcatLogFollower.handleLivePacket(msg).catch((error) => {
+      console.error('[NapCat follower live packet error]', error?.message || error);
+    });
+  }
+  return napcatActionClient.handleMessage(msg);
+}
+
+function startConnectedRuntimes() {
+  if (config.TICK_ENGINE_ENABLED && !tickStarted) {
+    tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
+    tickStarted = true;
+  }
+  if (!config.TICK_ENGINE_ENABLED && !dailyJournalSummaryStarted) {
+    dailyJournalSummaryRuntime = startDailyJournalSummaryScheduler();
+    dailyJournalSummaryStarted = true;
+  }
+  if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
+    schedulerRuntime.start();
+    schedulerStarted = true;
+  }
+  if (postReplyWorkerRuntime) {
+    postReplyWorkerRuntime.start();
+  }
+  napcatLogFollower.start();
+}
+
+function scheduleReconnect() {
+  if (shuttingDown || reconnectTimer) return;
+  const delay = Math.min(30000, 1500 * Math.max(1, reconnectAttempts));
+  reconnectAttempts += 1;
+  console.log(`[NapCat ws] disconnected, retry in ${delay}ms...`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectNapCat();
+  }, delay);
+  reconnectTimer.unref?.();
+}
+
+function connectNapCat() {
+  if (shuttingDown) return;
+  const wsUrl = String(config.NAPCAT_WS_URL || '').trim();
+  if (!wsUrl) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+  const headers = {};
+  const wsToken = String(config.NAPCAT_WS_TOKEN || '').trim();
+  if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
+
+  ws = new WebSocket(wsUrl, { headers });
+  napcatActionClient.setWebSocket(ws);
+
+  ws.on('open', () => {
+    reconnectAttempts = 0;
+    recordNapCatConnectionState('online', getWebSocketConnectionState(), {
+      mode: 'websocket',
+      reason: 'NapCat websocket connected'
+    });
+    startConnectedRuntimes();
+    console.log('✅ NapCat WebSocket 已连接');
+  });
+
+  ws.on('close', (code, reason) => {
+    const closeReason = reason ? reason.toString() : '';
+    console.warn('[NapCat ws close]', { code, reason: closeReason });
+    recordNapCatConnectionState('offline', getWebSocketConnectionState({ closed: true, reason: closeReason || `close:${code}` }), {
+      mode: 'websocket',
+      reason: closeReason || `close:${code}`
+    });
+    if (!shuttingDown) scheduleReconnect();
+  });
+
+  ws.on('error', (error) => {
+    console.error('[NapCat ws error]', error?.message || error);
+  });
+
+  ws.on('message', async (data) => {
+    if (shuttingDown) return;
+    try {
+      const msg = JSON.parse(data);
+      await acceptNapCatIncomingMessage(msg, 'napcat_ws');
+    } catch (e) {
+      console.error('[NapCat ws message error]', e);
+    }
+  });
+}
+
+function getWebSocketConnectionState(extra = {}) {
+  const now = Date.now();
+  const readyState = extra.closed ? WebSocket.CLOSED : (ws ? ws.readyState : WebSocket.CLOSED);
+  const connected = readyState === WebSocket.OPEN;
+  const readyStateNames = {
+    [WebSocket.CONNECTING]: 'connecting',
+    [WebSocket.OPEN]: 'open',
+    [WebSocket.CLOSING]: 'closing',
+    [WebSocket.CLOSED]: 'closed'
+  };
+  return {
+    connected,
+    readyState,
+    readyStateName: readyStateNames[readyState] || 'unknown',
+    pendingCount: null,
+    connectedSince: connected ? now : 0,
+    lastConnectedAt: connected ? now : 0,
+    lastDisconnectedAt: connected ? 0 : now,
+    lastDisconnectReason: connected ? '' : String(extra.reason || ''),
+    disconnectCount: connected ? 0 : 1,
+    offlineMs: 0
+  };
+}
+
+function closeNapCatWebSocket() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (!ws) return;
+  const current = ws;
+  ws = null;
+  try {
+    current.removeAllListeners();
+    if (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING) {
+      current.close();
+    } else {
+      current.terminate?.();
+    }
+  } catch (error) {
+    console.error('[NapCat ws cleanup failed]', error?.message || error);
+  } finally {
+    napcatActionClient.setWebSocket(null);
+  }
+}
 
 function startNapCatTransport() {
   httpReverseServer = startNapCatHttpReverseServer({
     handleMessage: async (msg) => {
       if (shuttingDown) return;
       try {
-        appendNapcatPacketToLog(msg);
-        if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
-          void napcatLogFollower.handleLivePacket(msg).catch((error) => {
-            console.error('[NapCat follower live packet error]', error?.message || error);
-          });
-        }
-        if (napcatActionClient.handleMessage(msg)) return;
-        await acceptIncomingMessage(msg, 'napcat_http_reverse');
+        await acceptNapCatIncomingMessage(msg, 'napcat_http_reverse');
       } catch (e) {
         console.error('[HTTP reverse message error]', e);
       }
@@ -489,18 +655,8 @@ function startNapCatTransport() {
     reason: 'HTTP reverse mode started'
   });
 
-  if (config.TICK_ENGINE_ENABLED && !tickStarted) {
-    tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
-    tickStarted = true;
-  }
-  if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
-    schedulerRuntime.start();
-    schedulerStarted = true;
-  }
-  if (postReplyWorkerRuntime) {
-    postReplyWorkerRuntime.start();
-  }
-  napcatLogFollower.start();
+  startConnectedRuntimes();
+  connectNapCat();
   console.log('✅ HTTP 反向连接模式启动，等待 NapCat POST 消息');
 }
 
@@ -520,131 +676,146 @@ function scheduleRestartResultFeedback(attempt = 1) {
   }, 4000).unref?.();
 }
 
-async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
-  if (shutdownInProgress) return;
-  shutdownInProgress = true;
-  shuttingDown = true;
-  const reason = String(signal || 'shutdown').trim() || 'shutdown';
-  recordExpectedShutdown(reason, { exitCode });
-  console.log('[shutdown] begin', { reason, pid: process.pid });
+const mainProcessLifecycle = createMainProcessLifecycle({
+  begin: ({ reason, exitCode, marker }) => {
+    shuttingDown = true;
+    runtimeReadiness.beginDrain(reason);
+    recordExpectedShutdown(reason, { exitCode, ...marker });
+    console.log('[shutdown] begin', { reason, pid: process.pid });
+  },
+  stopAccepting: async () => {
+    const serverClose = Promise.all([
+      closeServer(webServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS }),
+      closeServer(httpReverseServer, { timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS })
+    ]);
+    let disconnectError = null;
+    try {
+      napcatActionClient.handleDisconnect('MizukiBot shutdown');
+      napcatActionClient.setWebSocket(null);
+    } catch (error) {
+      disconnectError = error;
+    } finally {
+      closeNapCatWebSocket();
+    }
+    const [webCloseResult, reverseCloseResult] = await serverClose;
+    if (!webCloseResult.closed) console.error('[shutdown] web server close incomplete:', webCloseResult);
+    if (!reverseCloseResult.closed) console.error('[shutdown] http reverse server close incomplete:', reverseCloseResult);
+    if (disconnectError) throw disconnectError;
+  },
+  stopRuntimes: [
+    { name: 'scheduler', run: () => schedulerRuntime.stop() },
+    { name: 'tick', run: () => tickRuntime?.stop?.() },
+    { name: 'daily_journal_summary', run: () => dailyJournalSummaryRuntime?.stop?.() },
+    { name: 'napcat_follower', run: () => napcatLogFollower.stop() },
+    { name: 'resource_snapshots', run: () => resourceSnapshotLoop?.stop?.() }
+  ],
+  drainWorkers: [
+    {
+      name: 'post_reply_worker',
+      run: ({ reason }) => postReplyWorkerRuntime?.drainAndStop?.({
+        timeoutMs: config.RUNTIME_SHUTDOWN_TIMEOUT_MS,
+        source: reason
+      })
+    },
+    {
+      name: 'message_ingress',
+      run: () => messageIngressDispatcher?.stop?.({
+        drain: true,
+        timeoutMs: config.MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS
+      })
+    }
+  ],
+  cleanupExternal: [
+    { name: 'mcp_runtime', run: () => clearMcpRuntimeCaches() },
+    { name: 'create_agent_runtime', run: () => clearRuntimeSlotsForCurrentProcess() },
+    { name: 'minecraft', run: () => shutdownMinecraftAgent() },
+    { name: 'cycletls', run: () => shutdownCycleTLS() }
+  ],
+  finalize: [
+    { name: 'hot_stores', run: () => flushAllHotStoresSync() },
+    { name: 'sqlite', run: () => closeLoadedSqliteConnections() },
+    { name: 'single_instance_lock', run: () => cleanupSingleInstanceLock?.() }
+  ],
+  complete: ({ reason, exitCode }) => {
+    runtimeReadiness.markStopped('shutdown_complete');
+    stopMainRuntimeHeartbeat('shutdown_complete', { reason, exitCode });
+    console.log('[shutdown] complete', { reason, pid: process.pid });
+  },
+  exit: (exitCode) => process.exit(exitCode)
+});
 
-  try {
-    napcatActionClient.handleDisconnect('MizukiBot shutdown');
-  } catch (_) {}
-
-  try { schedulerRuntime.stop(); } catch (error) {
-    console.error('[shutdown] scheduler stop failed:', error?.message || error);
-  }
-  try { tickRuntime?.stop?.(); } catch (error) {
-    console.error('[shutdown] tick stop failed:', error?.message || error);
-  }
-  try { napcatLogFollower.stop(); } catch (error) {
-    console.error('[shutdown] follower stop failed:', error?.message || error);
-  }
-  try { postReplyWorkerRuntime?.stop?.(); } catch (error) {
-    console.error('[shutdown] post-reply worker stop failed:', error?.message || error);
-  }
-  try {
-    await messageIngressDispatcher?.stop?.({
-      drain: true,
-      timeoutMs: config.MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS
-    });
-  } catch (error) {
-    console.error('[shutdown] message ingress drain failed:', error?.message || error);
-  }
-  try { resourceSnapshotLoop.stop(); } catch (error) {
-    console.error('[shutdown] resource snapshot stop failed:', error?.message || error);
-  }
-  try { webServer?.close?.(); } catch (error) {
-    console.error('[shutdown] web server close failed:', error?.message || error);
-  }
-  try { httpReverseServer?.close?.(); } catch (error) {
-    console.error('[shutdown] http reverse server close failed:', error?.message || error);
-  }
-
-  try { clearMcpRuntimeCaches(); } catch (error) {
-    console.error('[shutdown] mcp cleanup failed:', error?.message || error);
-  }
-  try { clearRuntimeSlotsForCurrentProcess(); } catch (error) {
-    console.error('[shutdown] create-agent runtime cleanup failed:', error?.message || error);
-  }
-  try { await shutdownMinecraftAgent(); } catch (error) {
-    console.error('[shutdown] minecraft cleanup failed:', error?.message || error);
-  }
-  try { await shutdownCycleTLS(); } catch (error) {
-    console.error('[shutdown] cycletls cleanup failed:', error?.message || error);
-  }
-
-  cleanupSingleInstanceLock();
-  stopMainRuntimeHeartbeat('shutdown_complete', { reason, exitCode });
-  console.log('[shutdown] complete', { reason, pid: process.pid });
-  process.exit(exitCode);
+function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
+  return mainProcessLifecycle.drain({
+    reason: String(signal || 'shutdown').trim() || 'shutdown',
+    exitCode,
+    exitProcess: true
+  });
 }
 
-function drainForScheduledRestart(meta = {}) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  const delayMs = Math.max(0, Number(meta?.delayMs || 0) || 0);
-  recordExpectedShutdown('remote_restart_scheduled', {
-    delayMs,
+function buildScheduledRestartMarker(meta = {}) {
+  return {
+    delayMs: Math.max(0, Number(meta?.delayMs || 0) || 0),
     source: String(meta?.source || 'remote_restart').trim() || 'remote_restart',
     requestedBy: String(meta?.userId || '').trim(),
     requestId: String(meta?.requestId || '').trim(),
     messageId: String(meta?.messageId || '').trim(),
     groupId: String(meta?.groupId || '').trim(),
     command: String(meta?.command || '').trim()
-  });
+  };
+}
+
+function drainForScheduledRestart(meta = {}) {
+  const marker = buildScheduledRestartMarker(meta);
   console.log('[restart] drain old instance before external restart', {
     pid: process.pid,
-    delayMs,
-    source: String(meta?.source || '').trim(),
-    requestedBy: String(meta?.userId || '').trim(),
-    requestId: String(meta?.requestId || '').trim(),
-    messageId: String(meta?.messageId || '').trim(),
-    groupId: String(meta?.groupId || '').trim()
+    delayMs: marker.delayMs,
+    source: marker.source
   });
-  try { schedulerRuntime.stop(); } catch (_) {}
-  try { tickRuntime?.stop?.(); } catch (_) {}
-  try { napcatLogFollower.stop(); } catch (_) {}
-  try { postReplyWorkerRuntime?.stop?.(); } catch (_) {}
-  try { messageIngressDispatcher?.stop?.({ drain: false }); } catch (_) {}
-  try { resourceSnapshotLoop.stop(); } catch (_) {}
-  try {
-    napcatActionClient.handleDisconnect('MizukiBot restart draining');
-  } catch (_) {}
+  const drain = mainProcessLifecycle.drain({
+    reason: 'remote_restart_scheduled',
+    marker
+  });
+  if (typeof meta.waitUntil === 'function') meta.waitUntil(drain);
+  return drain;
 }
 
 process.on('mizuki:restartScheduled', drainForScheduledRestart);
 
-process.on('SIGINT', () => {
+function handleMainSigint() {
   void shutdownMainProcess('SIGINT', 130);
-});
-process.on('SIGTERM', () => {
+}
+
+function handleMainSigterm() {
   void shutdownMainProcess('SIGTERM', 143);
-});
-process.on('SIGBREAK', () => {
+}
+
+function handleMainSigbreak() {
   void shutdownMainProcess('SIGBREAK', 131);
-});
-process.on('SIGHUP', () => {
+}
+
+function handleMainSighup() {
   void shutdownMainProcess('SIGHUP', 129);
-});
+}
+
+process.on('SIGINT', handleMainSigint);
+process.on('SIGTERM', handleMainSigterm);
+process.on('SIGBREAK', handleMainSigbreak);
+process.on('SIGHUP', handleMainSighup);
 
 async function startMainProcess() {
   cleanupSingleInstanceLock = await acquireSingleInstanceLock();
   startMainRuntimeHeartbeat('lock_acquired');
   await cleanupStaleTmpFilesOnStartup();
-  webServer = startServer();
+  webServer = startServer({ readiness: runtimeReadiness });
   initializeMemeManager();
-  if (config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) {
-    const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
-    enqueueMissingEmbeddings(null, {
-      schedule: true,
-      delayMs: 15000,
-      continueDelayMs: 60000
-    });
-  }
+  scheduleMainProcessEmbeddingBackfill();
   startResourceSnapshots();
   startNapCatTransport();
+  await Promise.all([
+    waitForServerListening(webServer),
+    waitForServerListening(httpReverseServer)
+  ]);
+  runtimeReadiness.markReady('startup_complete');
   scheduleRestartResultFeedback();
   recordMainRuntimeState('initialized', {
     mode: 'http_reverse'
@@ -656,21 +827,62 @@ async function startMainProcess() {
   });
 }
 
+function scheduleMainProcessEmbeddingBackfill() {
+  if (!config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) return false;
+  const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
+  enqueueMissingEmbeddings(null, {
+    schedule: true,
+    delayMs: 15000,
+    continueDelayMs: 60000
+  });
+  return true;
+}
+
 if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
   module.exports = {
     __test: {
       acquireSingleInstanceLock,
+      acceptIncomingMessage,
+      acceptNapCatIncomingMessage,
+      appendMainExitObservation,
+      buildScheduledRestartMarker,
       commandLineLooksLikeMainBot,
       cleanupSingleInstanceLockSync,
+      connectNapCat,
+      configureNodeProcessReports,
+      drainForScheduledRestart,
+      expectedShutdownFile: EXPECTED_SHUTDOWN_FILE,
+      exitObservationsFile: EXIT_OBSERVATIONS_FILE,
       getProcessCommandLine,
+      handleMainBeforeExit,
+      handleMainExit,
+      handleMainSigbreak,
+      handleMainSighup,
+      handleMainSigint,
+      handleMainSigterm,
+      handleMainUncaughtException,
+      handleMainUnhandledRejection,
       isMainBotProcess,
       isProcessAlive,
-      readLockOwnerPid
+      nodeReportDir: NODE_REPORT_DIR,
+      readLockOwnerPid,
+      recordExpectedShutdown,
+      recordMainRuntimeState,
+      runtimeStateFile: RUNTIME_STATE_FILE,
+      runtimeReadiness,
+      scheduleMainProcessEmbeddingBackfill,
+      setMessageIngressDispatcherForTest(dispatcher) {
+        messageIngressDispatcher = dispatcher;
+      },
+      startMainRuntimeHeartbeat,
+      stopMainRuntimeHeartbeat,
+      stopNapCatWebSocketForTest: closeNapCatWebSocket
     }
   };
 } else {
   startMainProcess().catch((error) => {
     preserveSingleInstanceLockOnExit = true;
+    runtimeReadiness.markStopped('startup_failed');
     logFatalStartupError('startup', error);
     process.exit(1);
   });

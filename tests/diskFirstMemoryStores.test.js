@@ -13,7 +13,8 @@ const {
   createSessionBackedStore,
   getSessionContext,
   listUserSessionKeys,
-  updateSessionState
+  updateSessionState,
+  withSessionContextBatch
 } = require('../utils/shortTermSessionStore');
 const {
   getRecentSessionContextSummaries,
@@ -32,8 +33,17 @@ module.exports = (() => {
   assert.ok(listUserSessionKeys(userId).includes(sessionKey));
 
   const historyStore = createSessionBackedStore('history');
-  historyStore[sessionKey].push({ role: 'assistant', content: 'saved' });
-  assert.strictEqual(getSessionContext(sessionKey).history.length, 2);
+  const sessionFile = path.join(tempRoot, 'short_term_sessions', `${encodeURIComponent(sessionKey)}.json`);
+  const beforeBatchMtime = fs.statSync(sessionFile).mtimeMs;
+  withSessionContextBatch(sessionKey, () => {
+    historyStore[sessionKey].push({ role: 'assistant', content: 'saved' });
+    historyStore[sessionKey].push({ role: 'user', content: 'batched' });
+    updateSessionState(sessionKey, { activeTopic: 'batched update' });
+    assert.strictEqual(fs.statSync(sessionFile).mtimeMs, beforeBatchMtime);
+  });
+  assert.strictEqual(getSessionContext(sessionKey).history.length, 3);
+  assert.strictEqual(getSessionContext(sessionKey).state.activeTopic, 'batched update');
+  assert.ok(fs.statSync(sessionFile).mtimeMs >= beforeBatchMtime);
 
   const saved = saveSessionContextSummary({
     sessionKey,

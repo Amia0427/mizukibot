@@ -2,6 +2,7 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
+const { openSqliteDatabase } = require('../utils/sqliteConnection');
 
 function formatSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1);
@@ -63,7 +64,7 @@ if (fs.existsSync(dbPath)) {
 
   let db;
   try {
-    db = new Database(dbPath, { readonly: true });
+    db = openSqliteDatabase(Database, dbPath, { readonly: true, fileMustExist: true });
 
     // 统计各状态记录数
     const profileStats = db.prepare(`

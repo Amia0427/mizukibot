@@ -128,6 +128,32 @@ module.exports = (() => {
   assert.ok(recentTurnText.includes('CURRENT_TURN_USER'));
   assert.ok(recentTurnText.includes('CURRENT_TURN_ASSISTANT'));
   assert.ok(recentTurnText.includes('DIRECT_TURN_ASSISTANT'));
+  assert.ok(!sharedContext.shortTermSummary.includes('[RecentTurns]'), 'raw turns should not be duplicated inside state summary when recent history exists');
+
+  const limitedSiblingChatHistory = {
+    [currentSessionKey]: [{ role: 'user', content: 'current limited' }]
+  };
+  const limitedSiblingMemory = {
+    [currentSessionKey]: applyPersonaContinuityDelta(defaultShortTermState(), {
+      activeTopic: 'current limited'
+    })
+  };
+  for (let index = 0; index < 5; index += 1) {
+    const key = `qq-group:g_${index}:user:${userId}`;
+    limitedSiblingChatHistory[key] = [{ role: 'user', content: `sibling ${index}` }];
+    limitedSiblingMemory[key] = applyPersonaContinuityDelta(defaultShortTermState(), {
+      activeTopic: `sibling ${index}`
+    });
+  }
+  const limitedSiblingContext = buildSharedShortTermContextMessages(userId, { level: 'friend' }, {
+    chatHistory: limitedSiblingChatHistory,
+    shortTermMemory: limitedSiblingMemory,
+    routeMeta: { groupId: 'g_current' },
+    sessionKey: currentSessionKey,
+    maxSiblingSessions: 2
+  });
+  assert.strictEqual(limitedSiblingContext.sharedSessionKeys.length, 3);
+  assert.ok(limitedSiblingContext.sharedSessionKeys.includes(currentSessionKey));
 
   const isolatedContext = buildSharedShortTermContextMessages(userId, { level: 'friend' }, {
     chatHistory,

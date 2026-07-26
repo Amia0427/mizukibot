@@ -72,14 +72,14 @@ module.exports = (async () => {
       msg: {
         group_id: 'g-force',
         user_id: 'u-force',
-        raw_message: 'bot好像又出问题了',
+        raw_message: 'bot 你是不是又出问题了',
         message_id: 'm-force',
         sender: { nickname: '测试用户' },
         __continuousMessageMeta: { firstTimestamp: Date.now() }
       },
       inboundContext: {
-        rawText: 'bot好像又出问题了',
-        cleanText: 'bot好像又出问题了'
+        rawText: 'bot 你是不是又出问题了',
+        cleanText: 'bot 你是不是又出问题了'
       },
       sendGroupReply: async () => true,
       sendWithRetry: async () => true

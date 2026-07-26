@@ -13,6 +13,14 @@ process.env.SHORT_TERM_MEMORY_COMPRESSION_CHUNK_MESSAGES = '24';
 process.env.SHORT_TERM_BRIDGE_RECENT_MESSAGES = '12';
 process.env.SHORT_TERM_BRIDGE_RAW_TTL_HOURS = '1';
 process.env.MEMORY_V3_SESSION_RECENT_MESSAGES = '14';
+process.env.MEMORY_EMBEDDING_ENABLED = 'false';
+process.env.MEMORY_EMBEDDING_MODEL = '';
+process.env.MEMORY_HYBRID_RECALL_ENABLED = 'false';
+process.env.MEMORY_LANCEDB_READ_ENABLED = 'false';
+process.env.MEMORY_RERANK_ENABLED = 'false';
+process.env.MEMOS_MCP_ENABLED = 'false';
+process.env.OPENVIKING_RECALL_ENABLED = 'false';
+process.env.LOCAL_PROMPT_RECALL_ENABLED = 'false';
 process.env.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS = '1800';
 process.env.SHORT_TERM_BRIDGE_FILE = path.join(tempRoot, 'short_term_bridge.json');
 

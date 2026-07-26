@@ -256,6 +256,7 @@ async function handlePassiveGroupAwareness({
         presenceSnapshot
       },
       directedContext,
+      visualCueProbe,
       now
     });
   } catch (error) {
@@ -266,9 +267,14 @@ async function handlePassiveGroupAwareness({
     };
   }
 
-  const allowDecisionFallback = cheapGate.level === 'strong_candidate'
-    && config.PASSIVE_AWARENESS_STRONG_CUE_BYPASS_ON_DECISION_FAILURE
-    && shouldUseLocalDecisionFallback({ decision, addressee, score });
+  const allowDecisionFallback = config.PASSIVE_AWARENESS_STRONG_CUE_BYPASS_ON_DECISION_FAILURE
+    && shouldUseLocalDecisionFallback({
+      decision,
+      addressee,
+      score,
+      visualCueProbe,
+      cheapGateLevel: cheapGate.level
+    });
   const forceStrongCueReply = cheapGate.level === 'strong_candidate'
     && shouldForceStrongCueReply({ decision, addressee, score });
   const decisionReason = normalizeText(decision.reason || '');
@@ -437,7 +443,19 @@ async function handlePassiveGroupAwareness({
     replyText,
     atSender: Boolean(config.PASSIVE_AWARENESS_AT_SENDER),
     retries: 1,
-    waitMs: 300
+    waitMs: 300,
+    source: 'passive_group_awareness',
+    routePolicyKey: 'passive-awareness/reply',
+    triggerReason: presenceReason || decisionReason || cheapGate.reason || 'passive_reply',
+    topRouteType: 'chat',
+    routeMeta: {
+      groupId,
+      userId: senderId,
+      directedContext,
+      presenceAction,
+      presenceReason,
+      decisionReason
+    }
   });
 
   if (!sent) {

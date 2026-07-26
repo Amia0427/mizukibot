@@ -65,6 +65,7 @@ const configCandidates = [
 const HTTP_ACTION_PORT = Number(process.env.NAPCAT_HTTP_API_PORT || 3000);
 const HTTP_REVERSE_PORT = Number(process.env.NAPCAT_HTTP_REVERSE_PORT || 3002);
 const HTTP_ACTION_SECRET = String(process.env.NAPCAT_HTTP_ACTION_SECRET || '').trim();
+const HTTP_REVERSE_SECRET = String(process.env.NAPCAT_HTTP_REVERSE_SECRET || HTTP_ACTION_SECRET).trim();
 
 const defaultOnebotConfig = {
   network: {
@@ -89,7 +90,7 @@ const defaultOnebotConfig = {
         url: `http://127.0.0.1:${HTTP_REVERSE_PORT}`,
         messagePostFormat: 'array',
         reportSelfMessage: false,
-        token: HTTP_ACTION_SECRET,
+        token: HTTP_REVERSE_SECRET,
         debug: false
       }
     ],
@@ -175,7 +176,7 @@ function patchOnebotConfig(obj) {
         url: reverseUrl,
         messagePostFormat: item.messagePostFormat || 'array',
         reportSelfMessage: Boolean(item.reportSelfMessage),
-        token: HTTP_ACTION_SECRET,
+        token: HTTP_REVERSE_SECRET,
         debug: Boolean(item.debug)
       };
     }
@@ -188,7 +189,7 @@ function patchOnebotConfig(obj) {
       url: reverseUrl,
       messagePostFormat: 'array',
       reportSelfMessage: false,
-      token: HTTP_ACTION_SECRET,
+      token: HTTP_REVERSE_SECRET,
       debug: false
     });
   }
@@ -223,7 +224,8 @@ function updateDotEnv() {
   const desired = {
     NAPCAT_HTTP_API_BASE_URL: `http://127.0.0.1:${HTTP_ACTION_PORT}`,
     NAPCAT_HTTP_REVERSE_PORT: String(HTTP_REVERSE_PORT),
-    NAPCAT_HTTP_ACTION_SECRET: HTTP_ACTION_SECRET
+    NAPCAT_HTTP_ACTION_SECRET: HTTP_ACTION_SECRET,
+    NAPCAT_HTTP_REVERSE_SECRET: HTTP_REVERSE_SECRET
   };
 
   if (!fs.existsSync(envPath)) {
@@ -314,4 +316,8 @@ function main() {
   console.log(`Expected OneBot HTTP event ingress: http://127.0.0.1:${HTTP_REVERSE_PORT}`);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = {
+  patchOnebotConfig
+};

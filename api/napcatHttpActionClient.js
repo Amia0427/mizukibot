@@ -19,6 +19,16 @@ function isHttpTransportOfflineError(error = null) {
   return Boolean(error && !error.response);
 }
 
+function isKnownPreDeliveryTransportError(error = null) {
+  return new Set([
+    'ECONNREFUSED',
+    'ENETUNREACH',
+    'EHOSTUNREACH',
+    'ENOTFOUND',
+    'EAI_AGAIN'
+  ]).has(String(error?.code || '').toUpperCase());
+}
+
 function createNapCatHttpActionClient() {
   const baseURL = String(config.NAPCAT_HTTP_API_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
   const secret = String(config.NAPCAT_HTTP_ACTION_SECRET || '').trim();
@@ -108,7 +118,7 @@ function createNapCatHttpActionClient() {
         status: error?.response?.status,
         data: offline ? getConnectionState() : error?.response?.data,
         offline,
-        retryable: offline
+        retryable: offline && isKnownPreDeliveryTransportError(error)
       });
     } finally {
       pendingCount = Math.max(0, pendingCount - 1);
@@ -126,4 +136,9 @@ function createNapCatHttpActionClient() {
   };
 }
 
-module.exports = { createNapCatHttpActionClient, NapCatActionError, isHttpTransportOfflineError };
+module.exports = {
+  createNapCatHttpActionClient,
+  NapCatActionError,
+  isHttpTransportOfflineError,
+  isKnownPreDeliveryTransportError
+};

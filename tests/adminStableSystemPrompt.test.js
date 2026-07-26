@@ -61,14 +61,22 @@ module.exports = (async () => {
     assert.ok(exportedNormalUserBlock.content.includes(normalUserDefaultText));
     assert.strictEqual(exportedNormalUserBlock.appliesWhen?.normal_user_only, true);
 
-    const normalStable = buildMainStableSystemBlocks({
+    const normalPrivateStable = buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT,
       userId: 'normal_1',
-      routeMeta: {}
+      routeMeta: { chatType: 'private' }
     });
-    assert.ok(!normalStable.some((block) => block.id === 'admin_system_prompt'));
-    assert.strictEqual(normalStable[0]?.id, 'root_system_prompt');
-    assert.strictEqual(normalStable[1]?.id, 'normal_user_default_prompt');
+    assert.ok(!normalPrivateStable.some((block) => block.id === 'admin_system_prompt'));
+    assert.ok(!normalPrivateStable.some((block) => block.id === 'normal_user_default_prompt'));
+
+    const normalGroupStable = buildMainStableSystemBlocks({
+      systemPrompt: config.SYSTEM_PROMPT,
+      userId: 'normal_1',
+      routeMeta: { chatType: 'group', groupId: 'group_1' }
+    });
+    assert.ok(!normalGroupStable.some((block) => block.id === 'admin_system_prompt'));
+    assert.strictEqual(normalGroupStable[0]?.id, 'root_system_prompt');
+    assert.strictEqual(normalGroupStable[1]?.id, 'normal_user_default_prompt');
 
     const adminStable = buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT,
@@ -88,7 +96,7 @@ module.exports = (async () => {
     assert.strictEqual(adminGroupStable[1]?.id, 'root_system_prompt');
     assert.ok(!adminGroupStable.some((block) => block.id === 'normal_user_default_prompt'));
 
-    const normalSnapshot = buildPromptSnapshot(normalStable, {
+    const normalSnapshot = buildPromptSnapshot(normalGroupStable, {
       stage: 'main',
       userId: 'normal_1',
       adminUserIds: config.ADMIN_USER_IDS,
@@ -106,10 +114,10 @@ module.exports = (async () => {
       'normal stable prompt order must remain root -> defaut -> security -> stable persona blocks'
     );
 
-    const normalMainPrompt = await buildDynamicPrompt(
+    const normalPrivateMainPrompt = await buildDynamicPrompt(
       { level: 'stranger', points: 0 },
       'normal_1',
-      '瑞希你在群里被问到不想答的问题会怎么接？',
+      '瑞希你在私聊里被问到不想答的问题会怎么接？',
       null,
       {
         routePolicyKey: 'chat/default',
@@ -118,17 +126,35 @@ module.exports = (async () => {
         memoryContext: {}
       }
     );
-    const normalMainStableIds = normalMainPrompt.promptSnapshot.stableBlockIds;
-    const normalMainText = normalMainPrompt.promptSnapshot.renderedSystemMessages
+    const normalPrivateMainText = normalPrivateMainPrompt.promptSnapshot.renderedSystemMessages
       .map((message) => message.content)
       .join('\n');
-    assert.ok(normalMainStableIds.includes('normal_user_default_prompt'), 'normal main reply prompt must inject defaut.txt');
+    assert.ok(!normalPrivateMainPrompt.promptSnapshot.stableBlockIds.includes('normal_user_default_prompt'), 'normal private main reply prompt must not inject defaut.txt');
+    assert.ok(!normalPrivateMainText.includes(normalUserDefaultText));
+
+    const normalGroupMainPrompt = await buildDynamicPrompt(
+      { level: 'stranger', points: 0 },
+      'normal_1',
+      '瑞希你在群里被问到不想答的问题会怎么接？',
+      null,
+      {
+        routePolicyKey: 'chat/default',
+        topRouteType: 'direct_chat',
+        routeMeta: { chatType: 'group', groupId: 'group_1', userId: 'normal_1' },
+        memoryContext: {}
+      }
+    );
+    const normalMainStableIds = normalGroupMainPrompt.promptSnapshot.stableBlockIds;
+    const normalMainText = normalGroupMainPrompt.promptSnapshot.renderedSystemMessages
+      .map((message) => message.content)
+      .join('\n');
+    assert.ok(normalMainStableIds.includes('normal_user_default_prompt'), 'normal group main reply prompt must inject defaut.txt');
     assert.ok(normalMainText.includes(normalUserDefaultText));
     assert.ok(!normalMainText.includes(adminText));
     assertStableOrder(
       normalMainStableIds,
       ['root_system_prompt', 'normal_user_default_prompt', 'security_contract', 'core_baseline_patch', 'main_persona_system'],
-      'normal main reply stable block order must survive defaut.txt boundary edits'
+      'normal group main reply stable block order must survive defaut.txt boundary edits'
     );
 
     const adminSnapshot = buildPromptSnapshot(adminStable, {
@@ -214,7 +240,7 @@ module.exports = (async () => {
     const emptyNormalStable = buildEmptyMainStableSystemBlocks({
       systemPrompt: emptyConfig.SYSTEM_PROMPT,
       userId: 'normal_1',
-      routeMeta: {}
+      routeMeta: { chatType: 'group', groupId: 'group_1' }
     });
     assert.ok(
       !emptyNormalStable.some((block) => block.id === 'normal_user_default_prompt'),

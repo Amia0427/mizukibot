@@ -520,6 +520,76 @@ module.exports = (async () => {
     assert.strictEqual(retried.status, 'queued', '429 should remain retryable for post-reply phase');
     assert.ok(Number(retried.retryDelayMs || 0) >= 1000 || /429/.test(String(retried.lastError || '')));
 
+    const degradedFailures = [];
+    const degradedQueue = {
+      ...circuitQueue,
+      updateProcessingJob(job, patch = {}) {
+        return { ...job, ...patch };
+      },
+      markFailed(job, error) {
+        degradedFailures.push({ job, error });
+        return { ...job, status: 'failed', lastError: error };
+      }
+    };
+    const degradedRuntime = createPostReplyWorkerRuntime({
+      queue: degradedQueue,
+      processJob: async (job, deps) => processPostReplyJob(job, deps)
+    });
+    const successfulSelfImprovement = selfImprovementRuntime.learnSelfImprovement;
+    selfImprovementRuntime.learnSelfImprovement = async (...args) => {
+      calls.push({ type: 'self_495', options: args[3] || {} });
+      throw new Error('Request failed with status code 495');
+    };
+    calls.length = 0;
+    const degradedCore = await degradedRuntime.runOneJob({
+      jobId: 'core_495_degrade_job',
+      phase: 'core',
+      attempt: 1,
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      tasks: {
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    selfImprovementRuntime.learnSelfImprovement = successfulSelfImprovement;
+    assert.strictEqual(degradedCore.status, 'done');
+    assert.strictEqual(degradedCore.taskStates.selfImprovement.status, 'skipped');
+    assert.strictEqual(degradedCore.taskStates.selfImprovement.lastError, 'upstream_495_degraded');
+    assert.strictEqual(degradedCore.taskStates.dailyJournal.status, 'done');
+    assert.strictEqual(degradedFailures.length, 0, 'final 495 degradation should not leave a failed job');
+
+    const successfulEnrich = memoryExtraction.extractPostReplyEnrichment;
+    memoryExtraction.extractPostReplyEnrichment = async () => {
+      throw new Error('Request failed with status code 495');
+    };
+    const degradedEnrich = await degradedRuntime.runOneJob({
+      jobId: 'enrich_495_degrade_job',
+      phase: 'enrich',
+      attempt: 2,
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      turns: [
+        { turnId: 'enrich-495-turn', question: 'q', finalReply: 'r', createdAt: '2026-04-18T10:00:00.000Z' }
+      ],
+      tasks: {
+        dailyJournal: false
+      }
+    });
+    memoryExtraction.extractPostReplyEnrichment = successfulEnrich;
+    assert.strictEqual(degradedEnrich.status, 'done');
+    assert.strictEqual(degradedEnrich.taskStates.enrich.status, 'skipped');
+    assert.strictEqual(degradedEnrich.taskStates.enrich.lastError, 'upstream_495_degraded');
+    assert.strictEqual(degradedFailures.length, 0, 'final enrich 495 degradation should not call markFailed');
+
     calls.length = 0;
     let firstPartialRun = true;
     const partialQueue = {

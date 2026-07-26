@@ -33,6 +33,65 @@ const config = {
 };
 
 assert.strictEqual(isNormalFastReplyEligible(baseInput(), config), true, '普通纯文本应命中 fast path');
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    groupId: 'group_1',
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'group',
+        groupId: 'group_1',
+        directedContext: { scene: 'broadcast', addressee: { kind: 'group' } }
+      }
+    }
+  }), config),
+  false,
+  '群聊非 bot 指向消息不应命中 fast path'
+);
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    groupId: 'group_1',
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'group',
+        groupId: 'group_1'
+      }
+    }
+  }), config),
+  false,
+  '群聊缺少指向上下文时不应命中 fast path'
+);
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    groupId: 'group_1',
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'group',
+        groupId: 'group_1',
+        directedContext: { scene: 'address_bot', addressee: { kind: 'bot', userId: 'bot_test' } }
+      }
+    }
+  }), config),
+  true,
+  '群聊明确指向 bot 时可命中 fast path'
+);
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    groupId: 'group_1',
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'group',
+        groupId: 'group_1',
+        directedContext: { scene: 'reply_to_bot', addressee: { kind: 'bot', userId: 'bot_test' } }
+      }
+    }
+  }), config),
+  true,
+  '群聊回复 bot 时可命中 fast path'
+);
 assert.strictEqual(isNormalFastReplyEligible(baseInput(), { ADMIN_USER_IDS: [] }), false, '未显式开启时应禁用 fast path');
 assert.strictEqual(
   isNormalFastReplyEligible(baseInput(), { NORMAL_FAST_REPLY_ENABLED: false, ADMIN_USER_IDS: [] }),
@@ -49,6 +108,34 @@ assert.strictEqual(
 );
 
 assert.strictEqual(isNormalFastReplyEligible(baseInput({ imageUrl: 'https://example.com/a.png' }), config), false, '图片不应命中');
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'private',
+        cardContexts: [{ kind: 'invite', primaryUrl: '' }],
+        cardOnly: true
+      }
+    }
+  }), config),
+  false,
+  '无 URL 卡片不应命中 fast path'
+);
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput({
+    route: {
+      ...baseInput().route,
+      meta: {
+        chatType: 'private',
+        cardContexts: [{ kind: 'music', primaryUrl: 'https://music.163.com/#/song?id=186016' }],
+        cardOnly: true
+      }
+    }
+  }), config),
+  false,
+  '带 URL 卡片不应命中 fast path'
+);
 
 assert.strictEqual(
   isNormalFastReplyEligible(baseInput({ routeExecutionPlan: { executor: 'direct', topRouteType: 'direct_chat', allowTools: true, allowedTools: ['memory_cli'] } }), config),

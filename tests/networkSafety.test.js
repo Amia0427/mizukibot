@@ -3,7 +3,8 @@ const assert = require('assert');
 const {
   assertSafeHttpUrl,
   assertSafeModelEndpoint,
-  isUnsafeHttpUrl
+  isUnsafeHttpUrl,
+  requestSafeHttpUrl
 } = require('../utils/networkSafety');
 
 async function assertRejectsUnsafe(url, lookupAddress) {
@@ -29,6 +30,9 @@ async function assertRejectsUnsafe(url, lookupAddress) {
   assert.strictEqual(isUnsafeHttpUrl('http://10.0.0.1/x'), true);
   assert.strictEqual(isUnsafeHttpUrl('http://172.16.0.1/x'), true);
   assert.strictEqual(isUnsafeHttpUrl('http://192.168.1.1/x'), true);
+  assert.strictEqual(isUnsafeHttpUrl('http://[::ffff:127.0.0.1]/x'), true);
+  assert.strictEqual(isUnsafeHttpUrl('http://[::ffff:7f00:1]/x'), true);
+  assert.strictEqual(isUnsafeHttpUrl('http://[fe80::1]/x'), true);
   assert.strictEqual(isUnsafeHttpUrl('https://example.com/image.png'), false);
 
   assert.strictEqual(await assertRejectsUnsafe('http://127.0.0.1:3000/x'), false);
@@ -56,6 +60,57 @@ async function assertRejectsUnsafe(url, lookupAddress) {
   );
   const localEndpoint = await assertSafeModelEndpoint('http://127.0.0.1:11434/v1/chat/completions', { allowLocalHttp: true });
   assert.strictEqual(localEndpoint.hostname, '127.0.0.1');
+
+  let privateRequestCalled = false;
+  await assert.rejects(
+    () => requestSafeHttpUrl('https://ssrf.test/', {
+      lookup: async () => [{ address: '127.0.0.1', family: 4 }],
+      request: async () => {
+        privateRequestCalled = true;
+        return { status: 200, data: 'unsafe' };
+      }
+    }),
+    /disallowed/
+  );
+  assert.strictEqual(privateRequestCalled, false);
+
+  const requestedUrls = [];
+  await assert.rejects(
+    () => requestSafeHttpUrl('https://public.test/start', {
+      lookup: async (hostname) => hostname === 'public.test'
+        ? [{ address: '93.184.216.34', family: 4 }]
+        : [{ address: '10.0.0.8', family: 4 }],
+      request: async (url, requestOptions) => {
+        requestedUrls.push(url);
+        assert.strictEqual(requestOptions.maxRedirects, 0);
+        return {
+          status: 302,
+          headers: { location: 'http://internal.test/secret' }
+        };
+      }
+    }),
+    /disallowed/
+  );
+  assert.deepStrictEqual(requestedUrls, ['https://public.test/start']);
+
+  let pinnedAddress = '';
+  const safeResponse = await requestSafeHttpUrl('https://public.test/data', {
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: async (url, requestOptions) => {
+      await new Promise((resolve, reject) => {
+        requestOptions.lookup('public.test', {}, (error, address) => {
+          if (error) reject(error);
+          else {
+            pinnedAddress = address;
+            resolve();
+          }
+        });
+      });
+      return { status: 200, headers: {}, data: 'ok', url };
+    }
+  });
+  assert.strictEqual(pinnedAddress, '93.184.216.34');
+  assert.strictEqual(safeResponse.data, 'ok');
 
   console.log('networkSafety.test.js passed');
 })().catch((error) => {

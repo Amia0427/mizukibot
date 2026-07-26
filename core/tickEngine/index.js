@@ -25,12 +25,14 @@ const {
 } = require('../../utils/dailyJournal');
 const { getRecentMessages } = require('../../utils/groupAwarenessState');
 const { recordSystemGroupSend } = require('../systemGroupReply');
+const { shouldAllowProactiveGroupOutbound } = require('../proactiveGroupOutboundControl');
 const {
   acquireInitiativeLock,
   evaluateInitiativePolicy,
   isStrongCandidate,
   releaseInitiativeLock
 } = require('../initiativePolicyEngine');
+const { recordOutboundMessageEvent } = require('../outboundMessageDiagnostics');
 const { markInitiativeSent, setLastCycleKey } = require('../initiativeState');
 const { getDailyShareEngine } = require('../dailyShareEngine');
 const { getLifeSchedulerEngine } = require('../lifeSchedulerEngine');
@@ -506,6 +508,28 @@ async function sendTouchMessage({
 }) {
   const groupId = String(data?.group_id || '').trim();
   const candidateReason = String(promptPayload.touchReason || promptPayload.fallbackGreetingType || '').trim();
+  const outboundGate = shouldAllowProactiveGroupOutbound({
+    source,
+    groupId,
+    runtimeConfig: config
+  });
+  if (!outboundGate.allowed) {
+    console.log('[proactive-outbound] skip', {
+      source,
+      groupId,
+      userId,
+      reason: outboundGate.reason
+    });
+    return {
+      sent: false,
+      text: '',
+      reason: outboundGate.reason,
+      initiativePolicyReason: outboundGate.reason,
+      decisionModelCalled: false,
+      replyModelCalled: false,
+      decisionReason: ''
+    };
+  }
   const policy = evaluateInitiativePolicy({
     source,
     groupId,
@@ -669,13 +693,40 @@ async function sendTouchMessage({
     }
 
     const prefix = effectiveAtSender ? `[CQ:at,qq=${userId}] ` : '';
+    const outboundMeta = {
+      source,
+      routePolicyKey: 'proactive/default',
+      triggerReason: candidateReason || 'tick_touch',
+      topRouteType: 'proactive',
+      routeMeta: {
+        groupId,
+        userId,
+        initiativeSource: source,
+        initiativeReason: candidateReason
+      }
+    };
+    const outboundPayload = {
+      channel: 'group',
+      action: 'send_group_msg',
+      groupId,
+      senderId: effectiveAtSender ? userId : '',
+      atSender: effectiveAtSender,
+      messageLength: `${prefix}${text}`.length
+    };
+    let sendStartedAt = 0;
     try {
       if (!actionClient || typeof actionClient.callAction !== 'function') {
         throw new Error('napcat action client unavailable');
       }
+      sendStartedAt = Date.now();
+      recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
       await actionClient.callAction('send_group_msg', {
         group_id: groupId,
         message: `${prefix}${text}`
+      });
+      recordOutboundMessageEvent('send_success', outboundMeta, {
+        ...outboundPayload,
+        durationMs: Math.max(0, Date.now() - sendStartedAt)
       });
       recordSystemGroupSend({
         groupId,
@@ -765,6 +816,11 @@ async function sendTouchMessage({
       };
     } catch (error) {
       const reason = getErrorReason(error);
+      recordOutboundMessageEvent('send_failure', outboundMeta, {
+        ...outboundPayload,
+        durationMs: sendStartedAt ? Math.max(0, Date.now() - sendStartedAt) : 0,
+        error: reason
+      });
       console.error('[tick] proactive touch send/status failed:', {
         groupId,
         userId,
@@ -1070,6 +1126,7 @@ module.exports = {
   selectTouchCandidate,
   shouldSendScheduledGreeting,
   shouldTriggerFallbackGreeting,
+  sendTouchMessage,
   runGreetingFallbacks,
   runDailyShareTick,
   runLifeSchedulerTick,

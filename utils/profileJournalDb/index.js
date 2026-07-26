@@ -14,6 +14,7 @@ const {
   normalizeFieldKey
 } = require('../memory-v3/profileLifecycle');
 const { scoreTextMatch, sanitizePreviewText } = require('../memoryCli/text');
+const { openSqliteDatabase } = require('../sqliteConnection');
 
 const PROFILE_FIELDS = new Set([
   'identity',
@@ -127,8 +128,6 @@ function getDbFile() {
 }
 
 function initSchema(db) {
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE IF NOT EXISTS profile_facts (
       id TEXT PRIMARY KEY,
@@ -213,7 +212,7 @@ function getDb(options = {}) {
   try {
     const file = getDbFile();
     ensureDir(file);
-    dbInstance = new Database(file);
+    dbInstance = openSqliteDatabase(Database, file);
     initSchema(dbInstance);
     return dbInstance;
   } catch (error) {
@@ -223,13 +222,17 @@ function getDb(options = {}) {
   }
 }
 
-function resetDbForTests() {
+function closeDb() {
   if (dbInstance) {
     try {
       dbInstance.close();
     } catch (_) {}
   }
   dbInstance = null;
+}
+
+function resetDbForTests() {
+  closeDb();
   dbError = null;
   fallbackCount = 0;
   lastProfileAutoCleanAt = 0;
@@ -1384,6 +1387,7 @@ module.exports = {
   applyProfileAutoClean,
   cleanJournalEntries,
   cleanProfileFacts,
+  closeDb,
   getDb,
   getDbFile,
   getDiagnostics,

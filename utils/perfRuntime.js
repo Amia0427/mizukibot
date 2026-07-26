@@ -34,6 +34,7 @@ function getPerfLogWriter() {
     perfLogWriter = createJsonLineHotWriter(
       normalizePath(config.PERF_LOG_FILE, path.join(config.DATA_DIR, 'perf-events.jsonl')),
       {
+        retentionManaged: true,
         debounceMs: Math.max(0, Number(config.PERF_LOG_DEBOUNCE_MS || 250) || 250),
         maxDelayMs: Math.max(0, Number(config.PERF_LOG_MAX_DELAY_MS || 2000) || 2000)
       }
@@ -48,6 +49,7 @@ function getResourceSnapshotWriter() {
     resourceSnapshotWriter = createJsonLineHotWriter(
       normalizePath(config.RESOURCE_SNAPSHOT_FILE, path.join(config.DATA_DIR, 'resource-snapshots.jsonl')),
       {
+        retentionManaged: true,
         debounceMs: Math.max(0, Number(config.RESOURCE_SNAPSHOT_DEBOUNCE_MS || 500) || 500),
         maxDelayMs: Math.max(0, Number(config.RESOURCE_SNAPSHOT_MAX_DELAY_MS || 3000) || 3000)
       }

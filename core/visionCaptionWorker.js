@@ -232,8 +232,16 @@ function buildPersistUserText(originalUserText = '', shortPersistSummary = '') {
 }
 
 async function runVisionCaptionWorker(input = {}) {
-  const enabled = config.VISION_CAPTION_WORKER_ENABLED === true;
-  const modelConfig = buildVisionCaptionWorkerModelConfig();
+  const enabled = input.enabled === undefined
+    ? config.VISION_CAPTION_WORKER_ENABLED === true
+    : input.enabled === true;
+  const resolvedModelConfig = buildVisionCaptionWorkerModelConfig();
+  const modelConfig = {
+    ...resolvedModelConfig,
+    ...(Number.isFinite(Number(input.timeoutMs)) && Number(input.timeoutMs) > 0
+      ? { timeoutMs: Math.max(1000, Math.floor(Number(input.timeoutMs))) }
+      : {})
+  };
   const baseUrl = normalizeText(modelConfig.baseUrl);
   const apiKey = normalizeText(modelConfig.apiKey);
   const images = normalizeArray(input.images)

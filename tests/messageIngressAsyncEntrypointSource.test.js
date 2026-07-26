@@ -1,26 +1,68 @@
 const assert = require('assert');
-const fs = require('fs');
 const path = require('path');
 
-module.exports = (() => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+module.exports = (async () => {
+  const envSnapshot = { ...process.env };
+  const projectRoot = path.resolve(__dirname, '..') + path.sep;
+  const listenersBefore = new Map([
+    ['beforeExit', new Set(process.listeners('beforeExit'))],
+    ['exit', new Set(process.listeners('exit'))],
+    ['SIGINT', new Set(process.listeners('SIGINT'))],
+    ['SIGTERM', new Set(process.listeners('SIGTERM'))],
+    ['SIGBREAK', new Set(process.listeners('SIGBREAK'))],
+    ['SIGHUP', new Set(process.listeners('SIGHUP'))],
+    ['mizuki:restartScheduled', new Set(process.listeners('mizuki:restartScheduled'))]
+  ]);
 
-  assert.ok(
-    source.includes("require('./core/messageIngressDispatcher')"),
-    'main entrypoint should load the async ingress dispatcher'
-  );
-  assert.ok(
-    /messageIngressDispatcher\.enqueue\(msg,\s*\{\s*source\s*\}\)/.test(source),
-    'main entrypoint should enqueue inbound messages instead of running the full handler inline'
-  );
-  assert.ok(
-    /await\s+acceptIncomingMessage\(msg,\s*'napcat_ws'\)/.test(source),
-    'websocket ingress should route through the async ingress acceptor'
-  );
-  assert.ok(
-    /await\s+acceptIncomingMessage\(msg,\s*'napcat_http_reverse'\)/.test(source),
-    'http reverse ingress should route through the async ingress acceptor'
-  );
+  try {
+    process.env.MIZUKIBOT_INDEX_TEST_MODE = '1';
+    process.env.API_KEY = process.env.API_KEY || 'test-api-key';
+    process.env.ENABLE_DEBUG_LOG = 'false';
+    process.env.FOLLOWER_DIRECT_DISPATCH_ENABLED = 'false';
+    process.env.FOLLOWER_RULE_ENABLED = 'false';
+    process.env.MESSAGE_INGRESS_ASYNC_ENABLED = 'true';
+    process.env.TICK_ENGINE_ENABLED = 'false';
+    process.env.SCHEDULER_RUNTIME_ENABLED = 'false';
+    process.env.POST_REPLY_WORKER_INLINE = 'false';
+
+    const { __test } = require('../index');
+    const enqueued = [];
+    __test.setMessageIngressDispatcherForTest({
+      enqueue(message, meta) {
+        enqueued.push({ message, meta });
+      }
+    });
+
+    const directMessage = { post_type: 'message', message_id: 'direct_1' };
+    assert.strictEqual(await __test.acceptIncomingMessage(directMessage, 'direct_test'), true);
+    assert.deepStrictEqual(enqueued[0], {
+      message: directMessage,
+      meta: { source: 'direct_test' }
+    });
+
+    const napcatMessage = { post_type: 'message', message_id: 'napcat_1' };
+    assert.strictEqual(await __test.acceptNapCatIncomingMessage(napcatMessage, 'napcat_ws', () => false), true);
+    assert.deepStrictEqual(enqueued[1], {
+      message: napcatMessage,
+      meta: { source: 'napcat_ws' }
+    });
+  } finally {
+    for (const [eventName, listeners] of listenersBefore) {
+      for (const listener of process.listeners(eventName)) {
+        if (!listeners.has(listener)) process.removeListener(eventName, listener);
+      }
+    }
+    for (const key of Object.keys(process.env)) {
+      if (!(key in envSnapshot)) delete process.env[key];
+    }
+    Object.assign(process.env, envSnapshot);
+    for (const cacheKey of Object.keys(require.cache)) {
+      if (cacheKey.startsWith(projectRoot)) delete require.cache[cacheKey];
+    }
+  }
 
   console.log('messageIngressAsyncEntrypointSource.test.js passed');
-})();
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

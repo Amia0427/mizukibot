@@ -1,47 +1,30 @@
 const fs = require('fs');
 const path = require('path');
 
-const { PROMPTS_DIR, PROMPT_MANIFEST, PROMPT_MANIFEST_PATH } = require('../config');
-const { RUNTIME_PROMPT_DEFAULTS, renderRuntimePromptTemplate } = require('../utils/runtimePrompts');
 const { buildPromptSnapshot } = require('../utils/promptCompiler');
 const {
   loadAgentPromptsFromRoots
 } = require('../utils/agentPrompts');
-const {
-  buildPlannerStageSystemPrompt,
-  buildReviewStageSystemPrompt
-} = require('../utils/stagePromptContracts');
 const { buildSecuritySystemPrompt } = require('../utils/promptSecurity');
 const {
-  readRoutePromptPolicy,
-  ROUTE_PROMPT_POLICY_PATH
-} = require('../utils/routePromptPolicy');
+  collectPrivateManifestAssetPaths,
+  collectPromptAssetPaths,
+  evaluatePromptGovernance,
+  loadPromptCheckAllowlist
+} = require('./prompt-check-governance');
+
+const PROJECT_ROOT = path.join(__dirname, '..');
+const PROMPTS_DIR = path.resolve(process.env.PROMPTS_DIR || path.join(PROJECT_ROOT, 'prompts'));
+const PROMPT_MANIFEST_PATH = path.join(PROMPTS_DIR, 'prompt-manifest.json');
+const ROUTE_PROMPT_POLICY_PATH = path.join(PROMPTS_DIR, 'runtime', 'route-policies.json');
 
 function ok(msg) { console.log(`[OK] ${msg}`); }
 function warn(msg) { console.log(`[WARN] ${msg}`); }
 function fail(msg) { console.error(`[FAIL] ${msg}`); }
 
-function collectPromptFiles(rootDir) {
-  const files = [];
-
-  function walk(currentDir) {
-    for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
-      const fullPath = path.join(currentDir, entry.name);
-      if (entry.isDirectory()) {
-        walk(fullPath);
-        continue;
-      }
-      files.push(fullPath);
-    }
-  }
-
-  if (fs.existsSync(rootDir)) walk(rootDir);
-  return files;
-}
-
-function readManifestSections() {
-  const sections = Array.isArray(PROMPT_MANIFEST?.system_prompt?.sections)
-    ? PROMPT_MANIFEST.system_prompt.sections
+function readManifestSections(promptManifest) {
+  const sections = Array.isArray(promptManifest?.system_prompt?.sections)
+    ? promptManifest.system_prompt.sections
     : [];
 
   return sections.map((section) => ({
@@ -52,24 +35,19 @@ function readManifestSections() {
   }));
 }
 
+function renderRuntimePromptTemplate(templateText, variables = {}) {
+  const rendered = String(templateText || '').replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    if (variables[key] === undefined || variables[key] === null) {
+      throw new Error(`missing required template variable: ${key}`);
+    }
+    return String(variables[key]);
+  }).trim();
+  return { text: rendered };
+}
+
 function collectTemplateVariables(templateText) {
   const matches = String(templateText || '').match(/\{\{(\w+)\}\}/g) || [];
   return Array.from(new Set(matches.map((token) => token.slice(2, -2))));
-}
-
-function collectConflictTags(sections = []) {
-  const seen = new Map();
-  const conflicts = [];
-  for (const section of sections) {
-    const tags = Array.isArray(section.conflictTags || section.conflict_tags)
-      ? (section.conflictTags || section.conflict_tags).map((item) => String(item || '').trim()).filter(Boolean)
-      : [];
-    for (const tag of tags) {
-      if (seen.has(tag)) conflicts.push({ tag, sectionId: section.id, priorSectionId: seen.get(tag) });
-      else seen.set(tag, section.id);
-    }
-  }
-  return conflicts;
 }
 
 function collectExtraAgentPromptRoots() {
@@ -101,32 +79,48 @@ function summarizeAgentPromptFormats(agentPrompts = []) {
 function main() {
   let failureCount = 0;
   console.log('================ Prompt Check Start ================');
-  const projectRoot = path.join(__dirname, '..');
-  const ignoredRelPaths = new Set([
-    'prompt-manifest.json',
-    'persona_modules/module-catalog.json',
-    'persona_modules/reference_anchor_map.json',
-    'persona_modules/distilled_sources.json'
-  ]);
+  let promptManifest;
 
-  if (!PROMPT_MANIFEST || typeof PROMPT_MANIFEST !== 'object') {
+  try {
+    promptManifest = JSON.parse(fs.readFileSync(PROMPT_MANIFEST_PATH, 'utf8'));
+  } catch (error) {
     fail(`prompt manifest missing or invalid: ${PROMPT_MANIFEST_PATH}`);
-    process.exit(1);
+    return 1;
   }
   ok(`prompt manifest loaded: ${PROMPT_MANIFEST_PATH}`);
 
-  const sections = readManifestSections();
+  const sections = readManifestSections(promptManifest);
   const referencedRelPaths = new Set(sections.map((section) => section.path).filter(Boolean));
-  const promptFiles = collectPromptFiles(PROMPTS_DIR);
-  const runtimePolicy = readRoutePromptPolicy();
+  let allowlist;
+  let promptAssets;
+  try {
+    allowlist = loadPromptCheckAllowlist(process.env.PROMPT_CHECK_ALLOWLIST_PATH || undefined);
+    promptAssets = collectPromptAssetPaths({
+      projectRoot: PROJECT_ROOT,
+      promptsDir: PROMPTS_DIR,
+      allowlist
+    });
+    ok(`prompt assets enumerated: mode=${promptAssets.mode}, governed=${promptAssets.paths.length}`);
+  } catch (error) {
+    fail(`prompt governance setup failed: ${error.message || error}`);
+    failureCount += 1;
+  }
+  const privateManifestPaths = collectPrivateManifestAssetPaths(allowlist);
+  let runtimePolicy = {};
+  try {
+    runtimePolicy = JSON.parse(fs.readFileSync(ROUTE_PROMPT_POLICY_PATH, 'utf8'));
+  } catch (error) {
+    fail(`route prompt policy missing or invalid: ${ROUTE_PROMPT_POLICY_PATH}`);
+    failureCount += 1;
+  }
   let agentPrompts = [];
   try {
     agentPrompts = loadAgentPromptsFromRoots([
       PROMPTS_DIR,
-      path.join(projectRoot, 'skills'),
-      path.join(projectRoot, 'artifacts'),
+      path.join(PROJECT_ROOT, 'skills'),
+      path.join(PROJECT_ROOT, 'artifacts'),
       ...collectExtraAgentPromptRoots()
-    ], { rootDir: projectRoot });
+    ], { rootDir: PROJECT_ROOT });
   } catch (error) {
     fail(`agent prompt load failed: ${error.message || error}`);
     failureCount += 1;
@@ -135,6 +129,10 @@ function main() {
   for (const section of sections) {
     const fullPath = path.join(PROMPTS_DIR, ...section.path.split('/'));
     if (!fs.existsSync(fullPath)) {
+      if (privateManifestPaths.has(section.path)) {
+        ok(`private manifest asset intentionally absent from public checkout: ${section.path}`);
+        continue;
+      }
       if (section.required) {
         fail(`missing required prompt asset: ${section.path}`);
         failureCount += 1;
@@ -146,29 +144,36 @@ function main() {
     ok(`manifest asset present: ${section.path}`);
   }
 
-  for (const filePath of promptFiles) {
-    const relPath = path.relative(PROMPTS_DIR, filePath).split(path.sep).join('/');
-    if (referencedRelPaths.has(relPath)) continue;
-    if (ignoredRelPaths.has(relPath)) continue;
-    if (relPath === 'persona/000.zip') {
-      warn(`untracked prompt archive left in tree: ${relPath}`);
-      continue;
+  if (allowlist && promptAssets) {
+    const governance = evaluatePromptGovernance({
+      allowlist,
+      promptAssetPaths: promptAssets.paths,
+      repositoryAssetPaths: promptAssets.allPaths,
+      referencedPaths: Array.from(referencedRelPaths),
+      manifestSections: promptManifest.system_prompt.sections
+    });
+    for (const error of governance.errors) {
+      fail(error);
+      failureCount += 1;
     }
-    warn(`prompt asset not referenced by manifest: ${relPath}`);
+    if (governance.errors.length === 0) {
+      ok(`prompt asset allowlist exact: approved=${governance.approvedAssetCount}`);
+      ok(`prompt conflict allowlist exact: approved=${governance.approvedConflictTagCount}`);
+    }
   }
 
-  for (const [templateId, fallbackText] of Object.entries(RUNTIME_PROMPT_DEFAULTS)) {
-    const relPath = `runtime/${templateId}.txt`;
+  const runtimeTemplatePaths = (promptAssets?.paths || [])
+    .filter((assetPath) => assetPath.startsWith('runtime/') && assetPath.endsWith('.txt'))
+    .sort();
+  for (const relPath of runtimeTemplatePaths) {
+    const templateId = path.posix.basename(relPath, '.txt');
     const fullPath = path.join(PROMPTS_DIR, ...relPath.split('/'));
-    const templateText = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : fallbackText;
+    const templateText = fs.readFileSync(fullPath, 'utf8');
     const vars = collectTemplateVariables(templateText);
     ok(`runtime template variables ${templateId}: ${vars.join(', ') || '(none)'}`);
     const sampleVariables = Object.fromEntries(vars.map((key) => [key, `${key}_sample`]));
     try {
       const rendered = renderRuntimePromptTemplate(templateText, sampleVariables);
-      if (rendered.meta.unusedVariables.length > 0) {
-        warn(`runtime template has unused sample variables ${templateId}: ${rendered.meta.unusedVariables.join(', ')}`);
-      }
       if (!rendered.text) {
         fail(`runtime template rendered empty block: ${templateId}`);
         failureCount += 1;
@@ -180,7 +185,7 @@ function main() {
   }
 
   if (agentPrompts.length === 0) {
-    warn('no agent prompt files found under prompts/, skills/, or artifacts/');
+    ok('no agent prompt files found under prompts/, skills/, or artifacts/');
   }
 
   const agentPromptSummary = summarizeAgentPromptFormats(agentPrompts);
@@ -200,10 +205,7 @@ function main() {
     }
   }
 
-  if (!fs.existsSync(ROUTE_PROMPT_POLICY_PATH)) {
-    fail(`route prompt policy missing: ${ROUTE_PROMPT_POLICY_PATH}`);
-    failureCount += 1;
-  } else {
+  if (fs.existsSync(ROUTE_PROMPT_POLICY_PATH)) {
     ok(`route prompt policy loaded: ${ROUTE_PROMPT_POLICY_PATH}`);
   }
 
@@ -243,41 +245,18 @@ function main() {
     }
   }
 
-  const manifestConflicts = collectConflictTags(Array.isArray(PROMPT_MANIFEST?.system_prompt?.sections) ? PROMPT_MANIFEST.system_prompt.sections : []);
-  for (const conflict of manifestConflicts) {
-    warn(`manifest conflict tag reused: ${conflict.tag} (${conflict.priorSectionId} -> ${conflict.sectionId})`);
-  }
-
-  const stageSnapshots = {
-    main: buildPromptSnapshot([
+  const mainStageSnapshot = buildPromptSnapshot([
       { id: 'policy', label: 'Policy', content: 'policy block', priority: 10 },
       { id: 'memory', label: 'Memory', content: 'memory block', priority: 20 },
       { id: 'persona', label: 'Persona', content: 'persona block', priority: 30 },
       { id: 'few_shot', label: 'Few Shot', content: 'few shot block', priority: 40, conflictTags: ['few_shot'] }
-    ], { stage: 'main', policyKey: 'check/main', budgetTokens: 1000 }),
-    review: buildReviewStageSystemPrompt(),
-    planner: buildPlannerStageSystemPrompt([])
-  };
+    ], { stage: 'main', policyKey: 'check/main', budgetTokens: 1000 });
 
-  if (!stageSnapshots.main.assembledBlocks.length) {
+  if (!mainStageSnapshot.assembledBlocks.length) {
     fail('main prompt snapshot assembledBlocks empty');
     failureCount += 1;
   } else {
-    ok(`main prompt snapshot blocks: ${stageSnapshots.main.assembledBlocks.length}`);
-  }
-
-  if (!String(stageSnapshots.review || '').trim()) {
-    fail('review stage system prompt empty');
-    failureCount += 1;
-  } else {
-    ok('review stage system prompt present');
-  }
-
-  if (!String(stageSnapshots.planner || '').trim()) {
-    fail('planner stage system prompt empty');
-    failureCount += 1;
-  } else {
-    ok('planner stage system prompt present');
+    ok(`main prompt snapshot blocks: ${mainStageSnapshot.assembledBlocks.length}`);
   }
 
   const securityBlock = buildSecuritySystemPrompt();

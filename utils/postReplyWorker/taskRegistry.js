@@ -4,7 +4,8 @@ const TASK_DEFINITIONS = Object.freeze({
     phase: 'core',
     step: 'learnSomethingNew',
     dependsOn: [],
-    failurePolicy: 'fatal'
+    failurePolicy: 'fatal',
+    upstreamFailurePolicy: 'degrade'
   }),
   selfImprovement: Object.freeze({
     key: 'selfImprovement',
@@ -12,6 +13,7 @@ const TASK_DEFINITIONS = Object.freeze({
     step: 'learnSelfImprovement',
     dependsOn: [],
     failurePolicy: 'fatal',
+    upstreamFailurePolicy: 'degrade',
     pressureSkippable: true
   }),
   dailyJournal: Object.freeze({
@@ -64,7 +66,8 @@ const TASK_DEFINITIONS = Object.freeze({
     phase: 'enrich',
     step: 'runEnrichPhase',
     dependsOn: [],
-    failurePolicy: 'fatal'
+    failurePolicy: 'fatal',
+    upstreamFailurePolicy: 'degrade'
   })
 });
 

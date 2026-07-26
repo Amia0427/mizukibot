@@ -1,3 +1,304 @@
+## 运行维护 2026-07-25 13:52 +08:00
+
+- 小目标：完成目标5的第四个生产入口迁移，取消 `memory/vector` 的源码拼接和共享词法作用域执行。
+- 最小实现：将7个legacy chunk的169个函数按40/55/28/2/24/14/6拆入规范化、存储、写入、统计、评分核心、评分选择和召回编排模块；旧chunk保持未修改，生产入口不再读取或执行。
+- 契约保持：23项主入口API、5个门面和legacy facade身份不变；3项store状态与 `writePipelineActive` 各归唯一owner，未知自由变量为0，依赖图为15条本地边加3条embedding边且0循环，lazy/native加载与semantic、embedding、LanceDB singleton边界保持不变。
+- 验收：Node 20.20.2与Node 24.14.1的九项聚焦回归均为9/9；754文件lint、typecheck、107项prompt清单、全仓secrets和diff check通过，Node 24设置并发4后523/523个tracked测试自然退出0，全量耗时98.992秒。`npm audit --omit=dev`退出1，仅报告HEAD既有 `body-parser`低危项和 `sharp`高危项。
+- 小目标已完成：动态chunk入口由3个降为2个，仅余 `message/handler`与`runtime-v2/context`；目标5记录为部分完成（4/6），目标6继续等待两个剩余入口迁移后生成权威生产依赖图，未推送远端。
+- 提交后记录：目标5的 `memory/vector` 迁移提交 `4d87c55` 已完成，当前分支未推送。
+
+## 运行维护 2026-07-24 08:21 +08:00
+
+- 小目标：完成目标5的第三个生产入口迁移，取消 `meme` 的源码拼接和共享词法作用域执行。
+- 最小实现：将9个 `memeManager.*.chunk.js` 的职责拆为模型配置、上下文、运行状态、门控、素材分析、索引重建、选择器、管理命令、跟发和生命周期10个显式CommonJS模块；旧chunk保持未修改，生产入口不再读取或执行。
+- 契约保持：93/93个函数完成AST对账，16项主入口API、legacy facade及5个子门面的对象/函数身份保持不变；6项singleton各归唯一模块，本地依赖图为0循环。
+- 验收：Node 20.20.2与Node 24.14.1的七项聚焦回归全部通过；747文件lint、typecheck、prompt、全仓secrets和diff check通过，Node 24设置并发4后521个tracked测试自然退出0，全量耗时150.957秒。`npm audit --omit=dev`退出1，报告HEAD既存的 `sharp@0.33.5` 高危项和 `body-parser@1.20.5` 低危项，本批未修改依赖。
+- 小目标已完成：动态chunk入口由4个降为3个，仅余 `memory/vector`、`message/handler`、`runtime-v2/context`；目标5记录为部分完成（3/6），目标6继续等待全部入口迁移后生成权威生产依赖图，未推送远端。
+- 提交后记录：目标5的 `meme` 迁移提交 `bc1d10f` 已完成，当前分支未推送。
+
+## 运行维护 2026-07-21 21:42 +08:00
+
+- 小目标：完成目标5的第二个生产入口迁移，取消 `passive-awareness` 的源码拼接和共享词法作用域执行。
+- 最小实现：按共享规则、Presence、prompt、模型传输、普通回复和强制插话拆为显式CommonJS模块；旧6个chunk文件保持未修改，但生产入口不再读取或执行，不改其余4个动态入口。
+- 契约修复：精确保持21项主入口API、legacy facade对象/函数身份及5个子门面键集合；AST核对原78个函数无缺失、重复或新增，并恢复损坏的中文触发词和机器人发送者名。
+- 验收：模块边界测试先红后绿；Node 20.20.2的21项定向回归、737文件lint、typecheck、prompt、全仓secrets、diff check和Node 24并发4全量通过，全量耗时130.4秒。`npm audit --omit=dev`仅报告既有 `body-parser@1.20.5` 低危项。
+- 小目标已完成：动态chunk入口由5个降为4个，目标5记录为部分完成（2/6）；目标6继续等待全部入口迁移后生成权威依赖图，未推送远端。
+- 提交后记录：目标5的 `passive-awareness` 迁移提交 `b01491d` 已完成，当前分支未推送。
+
+## 运行维护 2026-07-21 20:52 +08:00
+
+- 小目标：完成目标5的首个生产入口迁移，取消 `daily-share` 的源码拼接和共享词法作用域执行。
+- 最小实现：按核心、调度、QZone、记忆预取、窗口和引擎编排拆为显式CommonJS模块，`index.js`只维护稳定singleton；两个不可独立解析的旧runtime fragment改为静态兼容导出，不删除文件，不改其余5个动态入口。
+- 验收：边界测试先确认旧入口会触发 `daily-share must not execute chunk loader`；迁移后Node 20.20.2的8项定向回归、732文件lint、typecheck、prompt、全仓secrets、diff check和Node 24 `TEST_CONCURRENCY=4 npm test`均通过，全量耗时123.4秒。`npm audit --omit=dev`报告既有 `body-parser@1.20.5` 低危项，本批未改并行中的依赖文件。
+- 小目标已完成：动态chunk入口由6个降为5个，目标5记录为部分完成（1/6）；目标6继续等待全部入口迁移后生成权威依赖图，未推送远端。
+- 提交后记录：目标5的 `daily-share` 首批迁移提交 `5b36f86` 已完成，当前分支未推送。
+
+## 运行维护 2026-07-17 00:19 +08:00
+
+- 小目标：完成目标20中请求追踪标识的 keyed hash 迁移，避免诊断日志直接保存用户、群组和消息标识。
+- 最小实现：`utils/requestTrace.js` 使用 `REQUEST_TRACE_HASH_SECRET` 优先、既有秘密回退和进程随机兜底的 HMAC-SHA256 摘要；`messageId/groupId/userId` 改写为对应 `*Hash` 字段，`buildRequestId` 不再使用无密钥 SHA-1；`model-calls.user_id` 复用同一摘要函数。
+- 验收：新增模型调用日志隐私测试，request trace、消息入口和模型调用定向测试通过；729文件 lint、typecheck、prompt、全仓secrets、production audit（0漏洞）和 `TEST_CONCURRENCY=4 npm test`（104.6秒）通过。
+- 小目标已完成：新写入的 request-trace/model-calls 日志不再暴露原始用户、群组或消息标识；既有历史日志未改写，未推送远端。
+- 提交后记录：目标20 keyed hash迁移提交 `35b0100` 已完成，当前分支未推送。
+
+## 运行维护 2026-07-16 23:46 +08:00
+
+- 小目标：完成目标4中可在并行工作期间安全落地的Windows ACL工具与预览验收批次。
+- 最小实现：新增 `scripts/harden-local-acl.ps1`，强制显式服务身份，默认只输出JSON计划；`-Apply` 会先递归保存 `.env`、`data` ACL快照，再移除继承和无关规则，仅授予服务账号、SYSTEM、Administrators所需权限，不删除文件。
+- 验收：Bot主进程及三个计划任务实际身份为 `MIZUKI\Administrator`；真实仓库预览扫描 `.env` 1项、`data` 49,147项，前后SDDL完全一致。临时目录Apply行为、安全诊断、PowerShell AST、lint、typecheck、prompt、全仓secrets、production audit均通过；并发4全量108.8秒自然退出0。
+- 范围控制：当前真实ACL仍允许 `Authenticated Users`/`Users`访问；为避免使并行代理失效，本轮不执行Apply、不轮换凭据、不宣称目标4完成，未推送远端。
+- 提交后记录：ACL工具批次提交 `ec9d075` 已完成，当前分支未推送；真实权限应用仍待并行工作收口。
+
+## 运行维护 2026-07-16 22:52 +08:00
+
+- 小目标：补齐目标31的真实 Node 20运行时、原生模块与完整全量测试证据。
+- 隔离方式：使用官方 Node 20.20.2 Windows x64运行时，通过 `NODE_OPTIONS=--require=D:\waifu-test-temp\node20-better-sqlite3-hook.js` 仅将 `better-sqlite3` 解析到独立 Node 20依赖目录，不改仓库依赖、不覆盖当前 Node 24安装；探针确认 Node ABI 115且 SQLite `quick_check=ok`。
+- 验收：`TEST_CONCURRENCY=4` 的 tracked完整全量在 Node 20.20.2下自然退出0，耗时151.7秒；729文件 lint、typecheck、prompt、tracked/staged secrets、production audit和diff check均通过。官方归档此前按 nodejs.org SHA-256 `dc3700fdd57a63eedb8fd7e3c7baaa32e6a740a1b904167ff4204bc68ed8bf77` 校验。
+- 小目标已完成：目标31由部分完成更新为完成；本轮仅更新验收文档，未纳入并行覆盖率改动，未推送远端。
+- 提交后记录：目标31验收文档提交 `4dabfcf` 已完成，当前分支未推送。
+
+## 运行维护 2026-07-15 12:17 +08:00
+
+- 小目标：完成目标29的不可变 GitHub Action引用、Git历史泄漏扫描和依赖漏洞扫描配置批次。
+- 最小实现：提交 `a4ce6cc` 将现有 CI和新 workflow的外部 `uses:` 全部固定到官方 release解引用 commit；新增 `source-history`、`dependency-policy`、`dependency-vulnerabilities` 三个独立最小权限作业，分别运行 gitleaks、许可证/SBOM与 OSV，失败不降级，产物保留7天。
+- 验收：GitHub API权威解析并记录 checkout/setup-node/upload-artifact/gitleaks/OSV SHA；当前仓库为个人账号，官方 gitleaks文档确认无需组织许可证。可信 Node 20.20.2与当前 Node定向测试、729文件 lint、typecheck、prompt、tracked/staged secrets、production audit、diff check和 Node 24并发4全量通过，全量耗时105.2秒。
+- 小目标已完成：Action固定与源/依赖扫描 workflow已提交；目标29整体仍为部分完成，workflow未推送所以没有真实 gitleaks/OSV运行结果，Docker Hub官方域名当前异常超时，基础镜像 digest与 Trivy仍待验收。
+
+## 运行维护 2026-07-14 16:50 +08:00
+
+- 小目标：完成目标29中不依赖外部网络的生产许可证与 CycloneDX SBOM 门禁批次。
+- 最小实现：提交 `c12ec87` 新增版本化许可证策略、精确包例外/override、缺版本与 drift/stale/过期检查，以及调用 npm 内置 SBOM、验证根身份和直接生产依赖、输出 SHA-256 的 wrapper；未修改并行覆盖率和 CI 文件。
+- 验收：330个生产 lock 条目全部归类，真实 SBOM 为 CycloneDX 1.5、275个组件、276条依赖；目标测试、729文件 lint、typecheck、prompt、tracked/staged secrets、production audit（0漏洞）和 diff check 通过。串行替代全量515文件中498个通过，17个仅因沙箱子进程 `EPERM` 失败，不能记录为完整全量通过。
+- 小目标已完成：本地确定性许可证/SBOM批次已提交；目标29整体仍为部分完成，Node 20、并发4全量、gitleaks、OSV、Trivy、固定 Action SHA 和基础镜像 digest 等待可信网络与可创建子进程的环境验收。
+
+## 运行维护 2026-07-12 19:21
+
+- 小目标：清理没有 CLI、脚本、测试或运行入口的 OpenViking backfill 分支。
+- 最小修复：删除 `utils/openVikingMemory/backfill.js` 和无调用聚合入口 `utils/openVikingMemory/index.js`，移除三个 `OPENVIKING_BACKFILL_*` 孤立配置及文档中的失效回灌章节，共删除 142 行未接入模块代码。
+- 验收：backfill 导出和配置 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、7 个 OpenViking/Runtime V2 相关测试、配置构建探针、保留模块 require smoke、`npm pack --dry-run`、`git diff --check` 均通过。
+- 小目标已完成：OpenViking 仅保留实际可执行的召回、写入、CLI、调度和诊断链路。
+
+## 运行维护 2026-07-12 19:03
+
+- 小目标：继续清理已退役 `/cot` 状态、零入口 AI 聚合层和无调用的本地命令桥客户端。
+- 最小修复：删除 `utils/cotOnceRuntime.js`、`api/ai.js`、`api/graphPlanning.js`、`utils/localCommandBridgeClient.js` 及孤立的 `cotOnceRuntime` 测试；桥安全测试仅移除客户端断言，保留服务端鉴权和泄密扫描，共删除 254 行生产死代码和 56 行失效测试代码。
+- 验收：运行代码 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、13 个 `/cot`/reasoning/桥安全/LangGraph/Qzone/daily-share 相关测试、保留模块 require smoke、`npm pack --dry-run`、`git diff --check` 均通过。
+- 小目标已完成：第二批死代码已移除，Runtime V2、reasoning 转发、图片生成和本地命令桥服务端保持可用。
+
+## 运行维护 2026-07-12 12:25
+
+- 小目标：清理仓库内已确认零调用的 P0 遗留代码，不触碰动态 chunk、Telegram 和可能对外兼容的 facade。
+- 最小修复：删除 `api/legacy/agentGraphV1Runtime.js`、`api/skills.js`、`api/systemCommandProxy.js`、`api/toolAdapter.js`，共移除 2158 行遗留模块代码；同步移除 `@langchain/anthropic`、`@langchain/openai`、`dayjs` 直接依赖、131 行依赖锁内容及两处失效依赖检查。
+- 验收：运行代码 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、28 个 LangGraph/native skills/tool/runtime 相关测试、关键模块 require smoke、`npm ls`、`npm pack --dry-run`、`git diff --check` 均通过；`npm test` 的 482 个测试在 10 分钟命令上限内未结束，因此未记录为全量通过。
+- 小目标已完成：P0 死代码和独占依赖已移除，V2 LangGraph、native skills 与 npm 发布清单保持可用。
+
+## 运行维护 2026-07-09 19:09
+
+- 小目标：把“瑞希瑞幸”做成相对独立的 QQ 命令功能，只在明确 `瑞希瑞幸` 命令触发，不影响普通聊天、Qzone、定时任务和 MCP lazy discovery。
+- 最小修复：新增 `src/features/luckin/` 专用命令解析、内存会话、位置解析、瑞幸 streamable HTTP MCP 客户端和命令服务；消息入口在主聊天模型前短路处理；安装官方 `skills/my-coffee`，并在 `.mcp.json`、`.env.example`、`.env.skills.example` 增加配置。
+- 安全边界：全局 Token 只允许门店/商品/预览类工具；个人 Token 只在私聊当前命令中使用，不落盘；群聊疑似 Token 会提示撤回；下单前用个人 Token 重新预览，价格上涨则停止创建订单；只展示 `payOrderQrCodeUrl`。
+- 验收：`node scripts/run-tests.js tests/luckinCommand.test.js tests/luckinMcpClient.test.js tests/luckinService.test.js tests/luckinMessageHandler.test.js tests/routerChineseKeywords.test.js tests/messageHandlerAdminCheckConcurrency.test.js tests/mcpLazyDiscovery.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`.mcp.json` 解析、`git diff --check` 均通过；`skills/my-coffee` 校验为有效 instruction-only skill，仅有无 scripts/assets/references/agents 目录和 LICENSE 文件类型提示。
+- 小目标已完成：瑞希瑞幸命令链路、MCP/skill 配置、隐私边界和文档入口已落地。
+
+## 运行维护 2026-07-09 17:45
+
+- 小目标：把当前分支今天新增的 5 个运行时热修复并入一个最小必要本地 smoke，避免后续回退时只靠零散单测发现。
+- 覆盖范围：被动视觉探针 decision 408 兜底、post-reply 上游 495 最终降级收尾、notebook-answer 工具后草稿失败 checkpoint 收口、NapCat 原始包日志与 Memory V3 事件写盘降频、post-reply worker 记忆写入和 vector watchdog 不再常驻全量索引。
+- 最小修复：新增 `smoke:runtime-hotfixes` npm 脚本，复用既有目标回归文件；新增 `tests/runtimeHotfixSmokeScript.test.js` 固定清单，防止 smoke 被扩成全量或漏掉本轮高风险回归。
+- 验收：新增脚本清单回归先因脚本缺失失败，再补脚本后通过；`npm run smoke:runtime-hotfixes` 本地通过。
+- 小目标已完成：今天 5 个运行时热修复已有一个可复跑的最小本地 smoke，未改运行时代码。
+
+## 运行维护 2026-07-09 09:18
+
+- 小目标：修复 post-reply worker 长时间运行后由记忆写入和向量维护导致的 Node heap/RSS 常驻增长。
+- 根因：写入管线去重/冲突检查会无参读取全量 `getMemoryItems()`，触发 `memory_items/memory_index` 聚合缓存长期驻留；Memory V3 LanceDB dry-run plan 和 vector watchdog summary 会把 `embedding_cache.jsonl` 全量索引加载到模块缓存。
+- 最小修复：写入管线改为按候选实际 shard scoped 冷读，保留同进程已加载 shard 的重复检测；`buildLanceDbSyncPlan` 不再默认加载全量 embedding index，支持调用方注入 rows；watchdog 每轮 sync summary 后清理 embedding index 缓存。
+- 验收：`node tests\memoryWritePipeline.test.js`、`node tests\memoryV3RecallVerificationFilter.test.js`、`node tests\postReplyVectorWatchdog.test.js`、相关 `node --check` 通过；真实数据隔离探针显示写入校验后 `heapUsed≈11.3MB`，LanceDB plan 未加载 embedding cache 时 `heapUsed≈11.5MB`。
+- 小目标已完成：post-reply worker 不再在写入热路径和 vector watchdog dry-run plan 中长期持有全量记忆/embedding 索引。
+
+## 运行维护 2026-07-09 09:11
+
+- 小目标：检查 `npm run diag:runtime -- --json` 中的 `langgraph_v2_checkpoint_stale`，定位 `1606790092_direct_1606790092_lookup_notebook-answer` 为什么在 2026-07-08 停在 `validate` 后没有收口。
+- 根因：同名 checkpoint 显示工具步骤已完成、`execution.status=validated`，事件文件最后一个图节点是 `validate`；request trace 随后进入 `draft_reply.followup_after_tools`，主模型请求 151843ms 后 401，外层发送了短兜底回复，但 `draftReplyNode` 的 synthesis 失败路径未落 `draft_reply/final_validate/persist`，checkpoint 因此保持 `running/validate`。
+- 最小修复：只在 `draftReplyNode` 的 synthesis 调用外补失败收口，生成已被现有 failure classifier 识别的短兜底草稿并记录 `draft_reply_fallback` 事件，让后续 humanize、final_validate、persist 把 checkpoint 写成终态。
+- 验收：`npm run test -- tests/draftReplyToolEvidence.test.js` 通过；临时 checkpoint/event 目录完整图调用模拟 notebook-answer 工具完成后模型 401，最终 checkpoint 为 `failed/persist`，事件包含 `draft_reply_fallback` 和 `persist_complete`；目标历史 checkpoint 已补 `checkpoint_reconciled` 事件并标为 `failed/draft_reply`，`npm run diag:runtime -- --json` 复跑显示 `activeCheckpoints=0`、`staleRunningCheckpoints=0`，`langgraph_v2_checkpoint_stale` 消失。
+- 小目标已完成：新的 notebook-answer 工具后合成失败不会再把 LangGraph V2 checkpoint 留在 stale running 状态。
+
+## 运行维护 2026-07-08 13:44
+
+- 小目标：检查今天新出现的 `visual-cue-probe` / `decision-call-failed:Request failed with status code 408`，定位群 `1092700300` 与 `597801651` 图片消息为什么被直接判成不回复，并做最小修复。
+- 根因：`data\passive-awareness-decisions.jsonl` 中 2026-07-08 的图片样本已进入 `visual-cue-probe`，但 `data\model-calls.ndjson` 显示真实 decision 调用是 `route_policy_key=passive-awareness/decision`、`top_route_type=lookup`、`host=catiecli.sukaka.top`、`model=gcli-gemini-3-flash-preview-nothinking`、`attempts=1`、`duration_ms≈3000` 后 408；昨天的短预算修复让视觉探针不再长占锁，但失败被 catch 为 `shouldReply=false`，旧本地兜底只覆盖 `bot_direct/bot_presence_check`，所以 `group_open_question/group_bot_topic` 图片候选被静默误杀。
+- 最小修复：不增加视觉探针重试、不放开所有图片；仅当 decision 失败且当前 cheap gate 是 `visual-cue-probe`、本地 addressee 为 `group_bot_topic` 或 `group_open_question` 时，允许继续进入被动回复模型。纯 `unclear` 图片仍由 decision 成功结果决定，避免无依据插话。
+- 验收：`node --check core\passiveGroupAwareness.model.chunk.js`、`node --check core\passiveGroupAwareness.runtime.chunk.js`、`node --check tests\passiveAwarenessVisualCueProbeFallback.test.js`、`node tests\passiveAwarenessVisualCueProbeFallback.test.js`、`node tests\passiveAwarenessVisualCueProbe.test.js`、`node tests\passiveAwarenessStrongCueForceReply.test.js`、`node tests\passiveAwarenessBotTopicGuard.test.js`、`git diff --check` 通过。
+- 小目标已完成：图片类 bot 话题或开放问题在 decision 上游 408 抖动时不再被直接静默判成不回复，同时不扩大到普通纯图闲聊。
+
+## 运行维护 2026-07-07 17:53
+
+- 小目标：检查今天新出现的 `queued request timed out after 30000ms`，定位卡在拿锁前的 lane/链路，并在私聊完全开放运行态下做最小修复。
+- 根因：`data\bot-runtime.err.log` 的失败来自 `[inbound-concurrency] queued request timed out after 30000ms`；`request-trace` 显示 `req_0f82466d6ad433cd` 是 `group/1092700300/user 1626492260` 的 `default/general` lane，已拿到 `qq-group:1092700300:user:1626492260` 同 session 入站锁，后续 `req_a9fd34e2f1c9f29b` 只有 `message_ingress`、没有 `message_ingress_lock_acquired`。`bot-runtime.out.log` 同窗口显示前者是非 @bot 图片消息，走 `visual-cue-probe` 被动群感知并在锁内运行约 66.3s，后者排队 30s 后超时。
+- 最小修复：不放开同用户并发；新增 `PASSIVE_AWARENESS_VISUAL_CUE_PROBE_TIMEOUT_MS=3000` 和 `PASSIVE_AWARENESS_VISUAL_CUE_PROBE_RETRIES=0`，仅让非 @bot 视觉探针走短预算，普通被动决策仍使用 `PASSIVE_AWARENESS_TIMEOUT_MS` / `PASSIVE_AWARENESS_RETRIES`。
+- 验收：`node tests\passiveAwarenessVisualCueProbe.test.js` 验证视觉探针请求为 `__timeoutMs=3000/retries=0`；`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessStrongCueForceReply.test.js`、`node tests\passiveAwarenessVisionInput.test.js`、`node tests\concurrencyBackpressure.test.js`、`node tests\messageHandlerInboundConcurrency.test.js`、`node --check core\passiveGroupAwareness.model.chunk.js`、`node --check core\passiveGroupAwareness.runtime.chunk.js`、`node --check config\index.js`、`git diff --check` 通过；配置探针显示私聊完全开放 `PRIVATE_CHAT_TEST_USER_IDS=["*"]`，默认入站 `global/general/admin/perUser=5/4/2/1`，私聊入站 `3/3/3/1`，视觉探针短预算 `3000ms/0`。
+- 小目标已完成：`default/general` 同 session 非 @bot 视觉探针不再用 15s * 多次重试长占主入站锁，私聊完全开放状态下不再由该链路把后续消息卡死在拿锁前。
+
+## 运行维护 2026-07-07 11:29
+
+- 小目标：降低远端服务器内存和磁盘压力，并按确认卸载 AstrBot、SillyTavern。
+- 最小修复：停止并禁用 `astrbot.service`、`sillytavern.service`，删除 `/root/.local/share/uv/tools/astrbot`、`/root/.local/bin/astrbot`、`/root/data`、`/opt/SillyTavern` 及对应 systemd unit；`/www/swap` 从 6M 重建为 2G，journal 上限写入 200M，清理 APT 缓存、旧 snap 修订和语言工具缓存。
+- 验收：`systemctl list-unit-files` 不再显示 AstrBot/SillyTavern，相关进程为空，关键路径均为 `gone`；`free -h` 显示可用内存约 2.2GiB、swap 2.0GiB 可用，`df -hT /` 显示根分区使用率 56%，`journalctl --disk-usage` 为 160M。
+- 小目标已完成：服务器释放磁盘和内存压力，未改动 1Panel、Docker、MySQL、Echo LLM、Sub2API、SullyOS 等其他业务服务。
+
+## 运行维护 2026-07-07 11:10
+
+- 小目标：给所有最终外发消息补最小必要来源诊断，能看出 `source`、`routePolicyKey` 和 `triggerReason`。
+- 最小修复：新增 `core\outboundMessageDiagnostics.js`，复用现有 perf/request trace/log 通道；`systemGroupReply`、`qqActionService`、主回复/流式发送、被动群感知、tickEngine、dailyShare、lifeScheduler、schedulerRuntime 在最终发送点传入统一外发元数据。
+- 定向修复：普通私聊 `/create` 未在 create 白名单时不再误走群戳，改为私聊白名单拒绝回复并带 `admin/create` 外发诊断；`bot + 出问题/坏了/没反应` 这类被动群感知强线索归入 presence check，保留空决策降级验收路径。
+- 验收：`node tests\outboundMessageDiagnostics.test.js`、`node tests\messageHandlerCreateCommand.test.js`、`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessBotTopicGuard.test.js` 通过。
+- 小目标已完成：主回复、被动群感知、tickEngine、dailyShare、lifeScheduler 和定时群消息最终外发均可在诊断或日志中看到来源、路由策略和触发原因。
+
+## 运行维护 2026-07-07 10:50
+
+- 小目标：仅对普通用户私聊启用敏感词库出口拦截，管理员用户私聊不做敏感词库拦截。
+- 最小修复：`core\messageReplyRuntime.js` 的出口 guard 从仅群聊改为按 channel/user 判定；群聊继续拦截，普通私聊拦截，管理员私聊通过 `ADMIN_USER_IDS` 豁免。`src\message\streaming\index.js` 同步覆盖独立流式发送实现。
+- 验收：`node tests\messageReplyRuntimeFreshness.test.js`、`node --check core\messageReplyRuntime.js`、`node --check src\message\streaming\index.js` 通过；普通私聊非流式/流式命中测试词会替换，管理员私聊同文本原样发送。
+- 小目标已完成：普通用户私聊保留敏感词库兜底，管理员私聊不受该词库拦截。
+
+## 运行维护 2026-07-07 10:49
+
+- 小目标：按新策略收敛普通用户 `prompts/defaut.txt` 的生效面：不进普通私聊，不进被动群感知后回复，只在群聊主回复相关入口生效。
+- 最小修复：`normal_user_default_prompt` 的主回复注入条件从“普通用户”收紧为“普通用户 + group chat”；被动群感知回复模型不再追加该 system message；普通群聊 fast reply 仍通过主 stable block 复用该边界，普通私聊 fast reply 不注入。
+- 兼容修复：stable prompt 缓存键加入聊天 surface，避免同一用户先私聊后群聊时复用私聊 stable layer，导致群聊主回复漏掉 `defaut.txt`。
+- 验收：`node scripts\run-tests.js tests\normalUserDefaultPromptSendSurfaces.test.js tests\adminStableSystemPrompt.test.js tests\passiveAwarenessReplySystemPrompt.test.js tests\passiveAwarenessReplyMemoryPrompt.test.js tests\normalFastReplyRuntime.test.js tests\prepareNodeStablePromptFallback.test.js`、`npm run check:prompts`、相关 `node --check` 和 `git diff --check` 通过。
+- 小目标已完成：普通用户 `defaut.txt` 只覆盖群聊主回复/群聊 fast reply，不再进入普通私聊或被动群感知回复模型。
+
+## 运行维护 2026-07-07 10:33
+
+- 小目标：收紧群聊出口敏感词 guard，避免用户用“角色扮演/设定”字样绕过政治敏感词库。
+- 根因：上一版把 RP/虚构语境作为全局降误伤条件，会让非强政治词在同时出现 RP 标记时不拦，存在提示词式绕过空间。
+- 最小修复：`utils\groupReplySensitiveGuard.js` 删除 RP/虚构语境豁免；默认逻辑收口为强政治词直接拦，或词库命中且文本出现现实政治语境时拦。普通架空设定短词仍不拦。
+- 验收：`node tests\groupReplySensitiveGuard.test.js`、`node --check utils\groupReplySensitiveGuard.js` 通过；新增“角色扮演设定 + 现实政治 + 中国人权”样例仍会拦截。
+- 小目标已完成：角色扮演标记不能抵消现实政治敏感语境。
+
+## 运行维护 2026-07-07 10:29
+
+- 小目标：检查今天新出现的 `memoryReranker` 1500ms timeout，直接定位新超时来源，不复用昨天 worldbook 700ms 结论。
+- 根因：本地日 2026-07-07（+08）窗口里 `data/model-calls.ndjson` 只有 5 条 `memory_rerank`，全部成功；`memory_v3` 4 条耗时 `405/450/539/1009ms`，`memory_write` 1 条 `484ms`。`data/bot-runtime.err.log` 的 1500ms warning 落在 03:32 附近主回复 `chat/default -> runtime_v2_memoryCliTurn -> memory_v3` 召回链路；不是 persona worldbook 路径，也不是新的 provider 调用路径。
+- 结论：这不是单次底层 API 1500ms 尾延迟样本，底层 API 最大只有 1009ms；更像外层 `memoryReranker` 硬预算把 `postWithRetry` 前后本地准备、endpoint 校验、埋点/配额收尾一起计入后贴到 1500ms floor。
+- 最小修复：共享 `MEMORY_RERANK_TIMEOUT_FLOOR_MS` 默认从 1500ms 提到 2000ms，`.env.example` 和低资源配置断言同步；显式短 timeout 仍保持原样，worldbook 配置型 timeout 继续吃共享 floor。
+- 验收：`node --check utils\memoryReranker.js`、`node --check utils\personaWorldbookSearch\rerank.js`、`node tests\memoryReranker.test.js`、`node tests\lowResourceConfig.test.js`、`node tests\personaModules.test.js`、`git diff --check` 通过；配置探针输出 `{"configFloor":2000,"configTimeout":800,"resolvedDefault":2000,"explicit120":120,"worldbookDefault":2000,"worldbookExplicit":1200}`。
+- 小目标已完成：主回复 Memory V3 rerank 不再贴着 1500ms 外层预算运行，显式短 timeout 行为未扩大。
+
+## 运行维护 2026-07-07 10:28
+
+- 小目标：处理 `npm run diag:runtime -- --json` 里剩余的 `langgraph_v2_checkpoint_stale` 告警，确认旧 LangGraph V2 running checkpoint 是否为已完成但未清理的历史残留，并安全隔离。
+- 核对结果：诊断旧展示最多列 20 条，真实只读审计发现 `data\langgraph_v2_checkpoints` 中共有 25 个 stale active checkpoint；它们更新时间分布在 `2026-04-27` 至 `2026-07-04`，均已到 `direct_reply` 的 `model_reply/final_output/node_complete` 终态，checkpoint 内均有 `finalReply`，且 LangGraph checkpoint/event 目录 30 分钟内无活跃写入。
+- 最小修复：新增 `scripts\archive-langgraph-v2-stale-checkpoints.js`，默认 dry-run，必须显式 `--apply`；只归档超过阈值、已到 direct reply 终态且有 final output/finalReply 的 running checkpoint，并把诊断 stale 总数从样本上限中拆出来。实际将 25 个历史 checkpoint 移到 `data\langgraph_v2_checkpoints_archive\stale-history-20260707-langgraph-v2`，保留原事件文件和 `manifest.json`。
+- 验收：`node scripts\run-tests.js tests\langGraphV2StaleCheckpointArchive.test.js tests\runtimeStatusDiagnostics.test.js` 通过；真实 dry-run/apply 均命中 25 件且 `unsafeThreadIds=[]`；manifest 显示 `selectedCount=25/moved=25`，事件文件无缺失，源 checkpoint 目录无残留；`npm run diag:runtime -- --json` 显示 `overallStatus=ok`、`signals=[]`、`activeCheckpoints=0`、`staleRunningCheckpoints=0`。
+- 小目标已完成：历史 LangGraph V2 stale running checkpoint 已隔离，不再影响运行态诊断，未删除事件日志或真实活跃会话数据。
+
+## 运行维护 2026-07-07 10:24
+
+- 小目标：补一个统一的群聊主动外发总开关和状态探针，一处关闭 tickEngine、dailyShare、lifeScheduler 这类主动群发，不影响明确 @bot 的正常主回复。
+- 现有入口确认：`TICK_ENGINE_ENABLED` 默认关闭；主动群发落点分别是 `core/tickEngine/index.js` 的主动触达/兜底问候、`core/dailyShareEngine.*` 的群 daily share、`core/lifeSchedulerEngine.js` 的 life 广播；明确 @bot 主回复仍走消息路由和主回复发送链路。
+- 最小修复：新增 `PROACTIVE_GROUP_OUTBOUND_ENABLED`，默认 `true` 保持当前行为；设为 `false` 时跳过 tick touch / fallback greeting / daily share 群发送 / life scheduler 群广播，返回 `proactive-group-outbound-disabled`，QZone 发布和明确 @bot 主回复不受影响；`npm run diag:runtime -- --json` 输出 `summary.proactiveGroupOutbound` 和 `components.proactiveGroupOutbound`。
+- 验收：`node scripts\run-tests.js tests\proactiveGroupOutboundControl.test.js tests\proactiveGroupOutboundEntrypoints.test.js tests\runtimeStatusDiagnostics.test.js` 通过；配置探针确认默认 `PROACTIVE_GROUP_OUTBOUND_ENABLED=true`，状态探针列出受影响来源 `tick_touch/fallback_greeting/daily_share/life_scheduler`。
+- 小目标已完成：主动群发可由一个 env 总闸关闭，明确 @bot 主回复链路未接入该总闸。
+
+## 运行维护 2026-07-07 10:15
+
+- 小目标：检查当前未提交的 `prompts/defaut.txt` 删减会影响哪些真实发送链路，并补最小回归避免普通用户边界块后续被绕过。
+- 影响面：当前 `defaut.txt` 非空时仍会作为 `normal_user_default_prompt` 注入普通用户主回复 stable system blocks、被动群感知回复模型的额外 system message，以及仍可能启用的 `normal_fast_reply` system prompt。管理员私聊/群聊不注入；全局 `config.SYSTEM_PROMPT`、被动群感知决策模型和 user prompt 正文不注入。
+- 最小修复：新增 `tests\normalUserDefaultPromptSendSurfaces.test.js`，直接用当前 `prompts/defaut.txt` fixture 验证普通主回复、被动群感知回复和普通 fast reply 三个真实发送前组装入口均带当前普通用户边界块，并验证管理员隔离与 fast reply 的 `/%` 清洗元数据。
+- 验收：`node scripts\run-tests.js tests\normalUserDefaultPromptSendSurfaces.test.js tests\adminStableSystemPrompt.test.js tests\passiveAwarenessReplySystemPrompt.test.js tests\normalFastReplyRuntime.test.js`、`npm run check:prompts`、`git diff --check`、`node --check tests\normalUserDefaultPromptSendSurfaces.test.js` 通过。
+- 小目标已完成：未恢复 `defaut.txt` 旧边界文案，但当前普通用户边界块的主回复、被动群感知和 fast reply 注入链路已可复跑验收。
+
+## 运行维护 2026-07-06 20:10
+
+- 小目标：修复关闭 `normal_fast_reply` 后，群聊仍异常主动发送回复的问题。
+- 根因：异常外发不再来自 `normal_fast_reply`。主回复入口仍把 `reply_to_bot_recent` 当作 `directBotAnchor`，导致 bot 刚回复后的普通群消息绕过被动感知进入正式 `direct_reply`；被动群感知同时把裸 `bot/机器人` 话题误升为 `bot_direct/strong-bot-cue`，在本机 ambient 和 strong force 配置开启时会继续主动发言。
+- 最小修复：群聊正式主回复入口只接受私聊或明确 @ bot，不再用 `reply_to_bot_recent` 放行；裸 `bot/机器人/AI` 只算话题，不再直接成为 bot 点名，只有 @、引用回复 bot、`瑞希你...` / `bot 你...` 等明确地址才进入强点名；被动 follow-up 也只允许强点名续接，`group_bot_topic` 不再走 ambient 直接回复。
+- 验收：`node scripts\run-tests.js tests\messageHandlerDirectAnchorSource.test.js tests\messageDirectedBotCue.test.js tests\passiveAwarenessBotTopicGuard.test.js tests\passiveAwarenessStrongCueForceReply.test.js tests\passiveAwarenessVisionInput.test.js tests\passiveAwarenessVisualCueProbe.test.js tests\normalFastReplyGate.test.js tests\messageDirectedForwardContext.test.js` 通过；`node -e "require('./core/messageHandler'); require('./core/passiveGroupAwareness'); console.log('core load ok')"` 通过；`restart-bot.cmd restart confirm` 后主 bot PID=8756、post-reply worker PID=4436，状态 ok。
+- 小目标已完成：普通群聊消息不会再因近期 bot 回复或裸 bot 话题被误判为 bot 直接点名而主动外发。
+
+## 运行维护 2026-07-06 15:10
+
+- 小目标：定位普通群聊 `normal_fast_reply` 的 `response_parse_empty`，重点复核 `req_f1759e115a4b8739` 和同日 `gcli.ggchan.dev / gemini-3-flash-preview-search` 样本。
+- 根因：不是网关结构不兼容；解析诊断已识别 OpenAI-compatible `choices[0].message`。也不是快回复 prompt 过长；异常样本输入估算只有 `1987/2847/2865` tokens。失败集中为非流式快回复继承主模型 `gemini-3-flash-preview-search` 后返回 HTTP 200、`finish_reason=length`、正文为空，本地正确抛错回落正式主回复。
+- 最小修复：`normal_fast_reply` 支持独立 `NORMAL_FAST_REPLY_*` 模型/端点配置；未显式配置模型时，若继承主模型名以 `-search/_search` 结尾，快回复默认改用非 search 变体。`model-calls` 记录层补齐 JSON 字符串响应的 `usage/finish_reason` 提取，后续同类样本会直接在成功行看到 `length`。
+- 验收：`node --check core\normalFastReplyRuntime.js api\runtimeV2\model\service.js utils\modelCallTracker\usage.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js tests\modelServiceCot.test.js tests\mainModelGenerationParams.test.js`、`git diff --check` 通过。
+- 小目标已完成：快回复空消息已定位为 search 模型非流式 length 空正文风险，默认快回复不再继承 search 变体。
+
+## 运行维护 2026-07-06 18:17
+
+- 小目标：关闭 `normal_fast_reply` 功能，避免普通快速回复链路继续参与运行。
+- 结论：代码默认值和 `.env.example` 已是 `NORMAL_FAST_REPLY_ENABLED=false`；当前实际启用来自本机 `.env` 中显式 `NORMAL_FAST_REPLY_ENABLED=true`。
+- 最小修复：只将本机 `.env` 的 `NORMAL_FAST_REPLY_ENABLED` 改为 `false`，保留代码路径和显式开关能力。
+- 验收：配置加载探针返回 `false`；`node tests\normalFastReplyConfig.test.js`、`node tests\normalFastReplyGate.test.js` 通过。
+- 小目标已完成：当前本地运行配置不会再进入 `normal_fast_reply`。
+
+## 运行维护 2026-07-06 15:15
+
+- 小目标：在不关闭敏感词库的前提下，降低群聊出口检查对角色扮演文本的误伤。
+- 根因：词库 guard 是静态子串匹配，只要回复里出现已加载政治词就会整句替换，不区分虚构台词、角色扮演或现实语境。
+- 最小修复：`config/group-reply-sensitive-words.json` 继续保持 `enabled=true`，新增默认 `politicalContextRequired=true`；`utils\groupReplySensitiveGuard.js` 只有在词库命中且文本具备明确现实政治语境时才拦截，角色扮演/虚构语境命中词库不替换。路由层对明确现实滥用的拒绝规则未改。
+- 验收：默认配置确认词库启用；角色扮演样例不拦截，现实政治样例仍拦截；群聊发送路径回归通过。
+- 小目标已完成：敏感词库未关闭，角色扮演回复不再因单个政治词子串默认被替换。
+
+## 运行维护 2026-07-06 15:10
+
+- 小目标：避免群聊普通消息被 `normal_fast_reply` 误判后主动回复。
+- 根因：fast reply 只校验 `direct_chat`、普通用户、无工具、无图片和非复杂任务，缺少群聊 bot 指向约束；普通群消息一旦被路由判成 `direct_chat` 就会绕过被动群感知发送回复。
+- 最小修复：`utils\normalFastReplyGate.js` 增加群聊 bot 指向检查；私聊保持原逻辑，群聊仅允许 `address_bot`、`reply_to_bot` 或 addressee.kind 为 `bot` 的消息命中 fast path。
+- 验收：`node tests\normalFastReplyGate.test.js`、`node tests\normalFastReplyHandlerSource.test.js`、`node tests\messageHandlerNormalFastReplyRateLimit.test.js` 通过。
+- 小目标已完成：普通群聊消息不会再因 fast reply 误判导致 bot 错误回复。
+
+## 运行维护 2026-07-05 09:28
+
+- 小目标：把群聊出口敏感词库审查收窄到只拦截政治敏感，降低日常聊天误伤。
+- 最小修复：`config/group-reply-sensitive-words.json` 默认只加载 `反动词库.txt` 和 `政治类型.txt`；移除色情、枪爆、暴恐分类的默认加载。路由层通用危险操作拒绝规则未改，避免把账号盗取、攻击步骤等非词库边界一并放开。
+- 验收：`node tests\groupReplySensitiveGuard.test.js`、`node tests\messageReplyRuntimeFreshness.test.js`、`node --check utils\groupReplySensitiveGuard.js` 通过；默认配置探针显示词量降为政治相关词库集合，非政治样例不再拦截，政治相关样例仍拦截。
+- 小目标已完成：群聊出口敏感词库默认审查范围已收窄到政治相关分类。
+
+## 运行维护 2026-06-27 22:20
+
+- 小目标：把 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后“修复后窗口没有 2 万以上主回复输入”的收口条件固化成可复跑本地回归检查。
+- 最小修复：新增 `npm run verify:main-reply-token-budget`，默认交叉读取 `data/model-calls.ndjson` 和 `data/request-trace.ndjson`，只统计 `2026-06-26T22:13:00+08:00` 后带 `requestId` 的主回复模型调用、默认排除图片/vision 路线，阈值为 `20000`；失败时直接列出超阈值 requestId、tokens、route、trigger、发送/完成状态。
+- 验收：`node scripts\run-tests.js mainReplyTokenRegressionCheck.test.js` 通过；`npm run verify:main-reply-token-budget -- --limit=5` 通过，真实日志样本 `36` 条、最大输入 `17876`、超阈值 `0`，最大样本 `req_fadc387a060058e5` 已在 request trace 中 `completed=true` 且 `sent=true`。
+- 范围控制：未重做昨天的原因排查，未改主回复拼装、短期记忆压缩或模型调用链路。
+- 小目标已完成：主回复输入 token 收口条件已有本地 smoke 保护，可直接复跑并定位超阈值样本。
+
+## 运行维护 2026-06-27 22:10
+
+- 小目标：把已恢复并验证过的 NapCat HTTP reverse 与 `NAPCAT_WS_URL` WebSocket 两条入站链路，收口成一个最小本地自检入口。
+- 最小修复：新增 `npm run smoke:napcat-ingress`，只串联现有 `tests/napcatWsIngressSmoke.test.js`、`tests/napcatHttpReverseServer.test.js`、`tests/messageIngressDispatcher.test.js` 和 `tests/messageIngressAsyncEntrypointSource.test.js`，不重做 NapCat 接入。
+- 范围控制：未改 `index.js`、HTTP reverse server、WebSocket 连接逻辑、消息处理主流程或生产配置；未推送远端。
+- 验收：`npm run smoke:napcat-ingress` 通过；`node --check index.js; node --check tests\napcatWsIngressSmoke.test.js; node --check tests\napcatHttpReverseServer.test.js; node --check tests\messageIngressDispatcher.test.js; node --check tests\messageIngressAsyncEntrypointSource.test.js` 通过；`git diff --check` 通过。
+- 小目标已完成：NapCat HTTP reverse 与 `NAPCAT_WS_URL` WebSocket 入站现在有统一的本地 smoke 入口，继续验证二者投递到 `messageIngressDispatcher`。
+
+## 运行维护 2026-06-27 11:05
+
+- 小目标：检查 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后的真实主回复输入 token，确认是否还会冲到 2 万以上。
+- 验收：先跑 `npm run diag:main-reply-token-budget -- --scan=20000 --limit=200 --json`，未过滤时间时仍可看到旧窗口最大 `24353`；再以配置记录时间 `2026-06-26 22:13 +08:00` 为边界，交叉读取 `data/model-calls.ndjson` 和 `data/request-trace.ndjson`，只统计主回复且排除图片类调用，得到修复后主回复样本 `19` 条、token 样本 `19` 条、平均 `10493`、最大 `17876`、`>20k=0`。最大样本 `req_fadc387a060058e5` 为 `lookup/notebook-answer` 工具后续回复，request trace 已完成且 `sent=true`；最新样本 `req_e249a020c5b84e63` 为 `13466`。
+- 结论：修复后真实样本没有 2 万以上主回复输入；本轮未改代码，未做昨天的原因排查，也未扩大到记忆/提示词链路重构。
+- 小目标已完成：短期历史阈值调整后的运行日志已验收，主回复输入已从 2 万级峰值收口。
+
+## 运行维护 2026-06-27 00:08
+
+- 小目标：基于刚恢复的 `NAPCAT_WS_URL` WebSocket 入站链路，补一个可复跑的本地 smoke，确认它会像 HTTP reverse 一样投递到 `messageIngressDispatcher`。
+- 最小修复：`index.js` 将 NapCat 事件包处理和入站投递收口到 `acceptNapCatIncomingMessage`，WebSocket 与 HTTP reverse 都调用同一入口；新增 `tests/napcatWsIngressSmoke.test.js`，用本地假 WebSocket 服务模拟 NapCat 发消息，断言 dispatcher 收到 `source=napcat_ws` 和原始 `message_id`。
+- 范围控制：未重做 NapCat 接入；未恢复旧 WebSocket action client；未改 HTTP action client、消息处理主流程或生产配置默认值；未推送远端。
+- 验收：`node scripts\run-tests.js tests\napcatWsIngressSmoke.test.js tests\napcatHttpReverseServer.test.js tests\messageIngressDispatcher.test.js tests\messageIngressAsyncEntrypointSource.test.js` 通过；`node --check index.js; node --check tests\napcatWsIngressSmoke.test.js; node --check tests\messageIngressAsyncEntrypointSource.test.js` 通过；单独复跑 `node scripts\run-tests.js tests\napcatWsIngressSmoke.test.js` 通过。
+- 复跑记录 2026-06-27 00:26 +08:00：补强 `messageIngressAsyncEntrypointSource` 对 `acceptNapCatIncomingMessage -> acceptIncomingMessage(msg, source)` 的静态断言；再次执行 `node scripts\run-tests.js tests\napcatWsIngressSmoke.test.js tests\napcatHttpReverseServer.test.js tests\messageIngressDispatcher.test.js tests\messageIngressAsyncEntrypointSource.test.js` 和 `node --check index.js; node --check tests\napcatWsIngressSmoke.test.js; node --check tests\messageIngressAsyncEntrypointSource.test.js`，均通过。
+- 小目标已完成：`NAPCAT_WS_URL` WebSocket 入站现在有本地 smoke 保护，能够验证消息进入 `messageIngressDispatcher`。
+
+## 运行维护 2026-06-26 10:38
+
+- 小目标：基于刚修复的 `npm test` 挂住问题，直接跑本地完整测试，只处理这轮全量执行新暴露的真实失败或挂住点，确认是否已从“分片通过”收口到“全量通过”。
+- 根因：全量执行暴露了四类真实缺口：本地私有 `prompts/admin.txt` 缺少管理员 QQ 当前消息格式锚点；`sanitizeUserFacingText(..., { preserveThink: true })` 破坏旧字符串返回契约；路由 safety boundary 被临时禁用；SQL worldbook primary read 在临时测试库为空时没有回退文件 catalog；主入口保留 HTTP reverse 入站但丢了 WebSocket 入站异步队列契约。
+- 最小修复：本机私有 `prompts/admin.txt` 补稳定锚点但仍被 `.gitignore` 忽略不入库；`preserveThink` 默认恢复字符串返回，仅 `returnMeta` 返回元信息；恢复 `SAFETY_BOUNDARY_PATTERNS` 命中；worldbook SQL 空结果回退 catalog 文件；主入口恢复可选 `NAPCAT_WS_URL` WebSocket 入站并与 HTTP reverse 一样投递 `messageIngressDispatcher`，同时保持默认 HTTP action client 路径。
+- 验收：`node --check index.js core\router\safety.js utils\personaWorldbookSearch\documents.js utils\userFacingText.js config\index.js` 通过；定向回归 `node scripts\run-tests.js tests\localRouterFallback.test.js tests\routerSafetyGuards.test.js tests\memoryRecallAutoGoldEval.test.js tests\memoryV3BackfillScript.test.js tests\messageIngressAsyncEntrypointSource.test.js tests\napcatActionClientConnectionState.test.js tests\napcatHttpReverseServer.test.js tests\mainBotEarlyExitDiagnostics.test.js` 通过；完整 `npm test` 自然结束，退出码 0，用时约 292.5s，日志 `D:\waifu\tmp\npm-test-full-20260626-103103.log`，输出 `[test] all tests passed`。
+- 范围控制：未重做测试框架，未删除文件，未推送远端；只修全量执行暴露的失败点和对应运行时契约。
+- 小目标已完成：本仓库测试状态已从“分片通过、未跑全量”收口到“本地完整 `npm test` 全量通过”。
+
 ## 运行维护 2026-06-26 02:30
 
 - 小目标：再次检查仓库和容器镜像是否泄露隐私数据或密钥文件，并单独补一份给初学者看的容器化部署文档。
@@ -22,7 +323,7 @@
 - 小目标：复核刚完成的 Docker/Compose 容器化链路，确认本地是否能按现有 `Dockerfile` 和 `docker-compose.yml` 最小启动并完成基础自检。
 - 结论：真实容器构建尚未在本机完成；最先阻塞点不是项目文件，而是本地 Docker 环境和外部镜像源。Windows 侧 `docker` 不在 PATH、无 Compose 插件且 daemon 未运行；WSL Arch 侧可启动 Docker daemon 且 `docker-compose config` 通过，但 `docker-compose build mizukibot` 在拉取 `node:20-bookworm-slim` 元数据时超时，直接 `docker pull node:20-bookworm-slim` 复核同样超时。
 - 已验收：WSL 临时最小 `.env` 下 `docker-compose config` 解析出 `mizukibot` / `post-reply-worker` 两个服务、共享 volume、私有 prompt 只读挂载和 `0.0.0.0` 监听；Dockerfile 白名单源路径均存在，且精确静态检查确认无 `COPY . .`、真实 `.env`、`prompts/admin.txt` 或 `prompts/persona` 复制；`node --check index.js core/napcatHttpReverseServer.js web/server/index.js scripts/post-reply-worker.js utils/postReplyWorkerSupervisor.js`、`npm run check:secrets`、`better-sqlite3/sharp/@lancedb/lancedb` 原生依赖加载通过。
-- 等价启动自检：按 Dockerfile 运行白名单复制到临时运行根、不复制根目录锁文件和真实 `.env`，使用空闲端口启动主进程 6 秒存活；`/api/security-status` 带 Bearer token 返回 200，NapCat HTTP reverse 空对象 POST 返回 204，`bot-main-runtime-state.json` 写出 heartbeat。默认 3002/3005 在本机被当前宿主 bot 占用，属于本地并行运行端口冲突。
+- 等价启动自检：按 Dockerfile 运行白名单复制到临时运行根、不复制根目录锁文件和真实 `.env`，使用空闲端口启动主进程 6 秒存活；`/api/security-status` 带 Bearer token 返回 200，NapCat HTTP reverse 当时的基础 POST 返回 204，`bot-main-runtime-state.json` 写出 heartbeat。当前版本必须携带兼容 token 或 HMAC 签名，匿名空对象 POST 已失效；默认 3002/3005 在本机被当前宿主 bot 占用，属于本地并行运行端口冲突。
 - 范围控制：未改 `Dockerfile`、`docker-compose.yml` 或业务代码；本轮只补充 README 与维护日志的真实验收记录。真实 `docker compose up -d --build` 仍需在能访问 Docker Hub 或已有 `node:20-bookworm-slim` 缓存、且 3002/3005 未被占用的 Docker 环境中复跑。
 
 ## 运行维护 2026-06-25 23:19
@@ -1013,3 +1314,394 @@
 - 最小修复：改写本地历史并清理可达旧对象；`.gitignore` 增加上述本地数据/生成数据规则，保留磁盘上的未跟踪本地文件，不再纳入版本库。
 - 验收：`git log --all --name-only --pretty=format:`、`git rev-list --all --objects` 和 `git ls-files` 对目标路径均无命中；`npm run diag:security` 通过。
 - 小目标已完成：历史提交不再携带上述本地截图、运行数据、评估样本、备份包和代理本地配置。
+
+## 运行维护 2026-06-28 10:20
+
+- 按仓库审阅优先级修复安全与诊断问题。
+- 最小修复：Web 无 token 本地模式在 socket 为本机且存在 `X-Forwarded-For` 时按转发首地址判断客户端，避免本机反代暴露管理页时误放行远程请求；`.mcp.json` 将 `@memtensor/memos-api-mcp@latest` 锁定为 `1.1.2` 并新增配置回归；`scripts/lint.js` 将 chunk 片段交给组合入口校验，恢复 `npm run lint`；运行态诊断只把 Node 进程计为 post-reply worker，避免 Windows `cmd.exe` 包装进程造成重复 worker 误报。
+- 范围控制：未删除或归档 `data/` 下 21 个 failed post-reply jobs、20 个 stale LangGraph checkpoints 和 1 个 invalid event file；这些属于运行数据清理，删除前需要单独确认。未做大文件拆分，只完成本轮直接服务安全和验收可信度的最小改动。
+- 验收：`node scripts\run-tests.js tests\webAuthSecurity.test.js`、`node scripts\run-tests.js tests\mcpConfigSecurity.test.js`、`npm run lint`、`node scripts\run-tests.js tests\lintChunkEntrypoints.test.js`、`node scripts\run-tests.js tests\runtimeStatusDiagnostics.test.js tests\runtimeHotspotsDiagnostics.test.js`、`npm run diag:security -- --json`、`npm run diag:runtime -- --json` 通过；真实 runtime 诊断中 `post_reply_worker_duplicate` 已消失，post-reply worker `processCount=1`。
+- 小目标已完成：Web 管理入口、MCP 供应链、lint 验收和 worker 诊断误报已按顺序收口，且没有覆盖并行开发改动或擅自清理运行数据。
+
+## 运行维护 2026-07-05 09:06
+
+- 定位 `langgraph_v2_event_file_invalid` 对应文件：`data\langgraph_v2_events\3298446599_qq-group_597801651_user_3298446599_1233140219_image.json`，大小 3099 字节，内容为全 NUL，非半截 JSON。
+- 结论：当前写入链路只通过 `core\messageTelemetry.js -> utils\langgraphV2Store.js` 追加事件数组，且 `atomicWriteJson` 先写临时文件再 rename；诊断要求事件文件为数组，与现行格式一致，不是诊断对历史格式过严。本次按历史坏运行数据处理。
+- 最小修复：诊断报告新增 `components.langGraphV2Store.invalidEventFiles`，以后同类坏文件会直接列出；当前坏文件未删除，已隔离到 `data\langgraph_v2_events_quarantine\3298446599_qq-group_597801651_user_3298446599_1233140219_image.invalid-20260705T0900.json`。
+- 验收：`node --check utils\runtimeStatusDiagnostics\stores.js`、`node scripts\run-tests.js tests\runtimeStatusDiagnostics.test.js`、`npm run diag:runtime -- --json` 通过；真实诊断中 `langgraph_v2_event_file_invalid` 已消失，`invalidEventFileCount=0`、`invalidEventFiles=[]`，剩余告警仅为既有 `post_reply_failed_jobs` 和 `langgraph_v2_checkpoint_stale`。
+- 小目标已完成：后续运行诊断和排障不再被该坏事件文件干扰，且同类问题可在诊断 JSON 中直接定位文件。
+
+## 运行维护 2026-07-05 09:11
+
+- 目标：只处理 `data/post_reply_jobs/failed` 中 21 个历史 failed post-reply jobs，不清理其他 `data/`。
+- 分型：6 个 429/503/timeout 属瞬时上游错误，队列语义上可安全重试；14 个 enrich 阶段 HTTP 400 属永久失败；1 个 `worker-recovered-stale-processing-job` 是 stale processing 恢复标记，应归档忽略。
+- 处理决策：6 个可重试件均为 2026-05-05 至 2026-05-12 的历史回复后学习任务，当前不重新入队，避免迟到写入旧上下文；21 个 JSON 失败件统一归档到 `data\post_reply_jobs\archive\failed-post-reply-jobs\failed-history-20260705-post-reply`，并保留 `manifest.json`。
+- 最小修复：新增 `scripts\archive-post-reply-failed-jobs.js`，默认 dry-run，必须显式 `--apply`，没有 `--all` 或指定 job id 时不会移动失败件；归档后重建 post-reply 队列索引。
+- 验收：真实 dry-run/apply 均命中 21 件，`failed` 目录只剩 2 个 `.old` 修复备份；`node --check scripts\archive-post-reply-failed-jobs.js`、`node --check tests\postReplyFailedArchive.test.js`、`node scripts\run-tests.js tests\postReplyFailedArchive.test.js tests\postReplyFailureRequeue.test.js tests\postReplyQueueRepair.test.js` 通过；`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`、`failedByErrorClass={}`，`post_reply_failed_jobs` 告警已消失，剩余告警仅为既有 `langgraph_v2_checkpoint_stale`。
+- 小目标已完成：历史 post-reply failed jobs 不再让运行态诊断长期告警，且没有删除或清理其他运行数据。
+
+## 运行维护 2026-07-05 09:14
+
+- 目标：定位并修复 `transform_vision-summary_image` 新请求仍留下 stale running checkpoint 的当前漏收尾路径。
+- 根因：前台 `deferPersist` 结束在 `direct_reply`，发送成功后后台持久化重算 threadId 时丢了图片维度，事件写到 `...transform_vision-summary`，原 checkpoint `...transform_vision-summary_image` 仍停在 `running/direct_reply`。
+- 最小修复：后台持久化优先沿用实际 threadId，重算时纳入 `imageUrl/imageUrls[0]`，并把 direct reply 的 `imageUrl` 透传到发送后的 `replyOptions`；历史 checkpoint 未删除。
+- 验收：`node tests\messageTelemetry.test.js` 在临时 store 中将 `u2_qq-group_g2_user_u2_transform_vision-summary_image` 从 stale running 更新为 `completed/persist`；`node tests\messageDispatchCoordinator.test.js`、`node tests\messageRouteFlowGroupStreaming.test.js`、`npm run lint` 通过；`npm run diag:runtime -- --json` 仍显示 20 个历史 stale checkpoint，未新增当前验收样本。
+- 小目标已完成：新图片 deferred persist 不再因为 threadId 丢失图片后缀而留下 stale running checkpoint。
+
+## 运行维护 2026-07-05 20:12
+
+- 目标：把图片理解 direct reply 超时从默认 18 秒提升到 75 秒，并重启本地 bot。
+- 根因：`transform/vision-summary` 会通过图片模型配置写入 `__timeoutMs`，覆盖全局 `REQUEST_TIMEOUT_MS`；当前 `.env` 未显式配置 `IMAGE_MODEL_TIMEOUT_MS`，运行时使用默认 18000ms。
+- 最小修复：在 `.env` 中新增 `IMAGE_MODEL_TIMEOUT_MS=75000`，不改模型路由和回复逻辑。
+- 验收：本地配置加载探针确认 `IMAGE_MODEL_TIMEOUT_MS=75000`；重启脚本完成后检查 bot 主进程和 post-reply worker 状态。
+- 小目标已完成：图片总结请求不会再按默认 18 秒过早触发“刚刚那句没组织稳”兜底。
+
+## 运行维护 2026-07-06 14:58
+
+- 目标：不改 `ANTHROPIC_PROMPT_CACHE_TTL=5m`，只收敛 Anthropic prompt cache 断点结构。
+- 根因：稳定 system 已有断点时，工具自动断点会让最终请求变成 tool + system 多断点；第三方 Anthropic 网关曾出现按最后断点写缓存的表现，多断点会降低稳定前缀复用确定性。
+- 最小修复：`normalizeAnthropicCacheBreakpointSlots` 在存在 system 缓存断点时剥离 tools/messages 上的 `cache_control`，无 system 断点时仍允许工具或历史消息作为兜底断点。
+- 验收：`node tests\httpClientAnthropicPromptCache.test.js`、`node tests\openAIMainPromptCacheDualProtocol.test.js`、`node tests\providerRequestNormalization.test.js`、`node tests\providerRequestDiagnostics.test.js` 通过；`node scripts\diagnose-provider-request.js --scenario admin_reply` 显示 `anthropicCacheBreakpoints=1`、`anthropicPromptCacheTtl=5m`。
+- 小目标已完成：Anthropic 主回复缓存断点优先稳定 system 前缀，且未改成一小时缓存。
+
+## 运行维护 2026-07-06 15:05
+
+- 目标：定位并修复 `memoryReranker` 今天仍触发 `rerank request timed out after 700ms, fallback to base recall` 的链路。
+- 结论：`data/bot-runtime.err.log` 只有一条 700ms timeout；`data/model-calls.ndjson` 今天 32 条 `memoryReranker` 全部成功，p50/p95/max 为 `426/549/611ms`，无超过 700ms 成功尾部，排除并发挤压和网关整体尾延迟。
+- 根因：persona worldbook rerank 读取 `PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS=700` 后以 `timeoutMs` 传给共享 reranker；共享 reranker 会把 `timeoutMs` 视为显式调用参数，因此绕过了 `MEMORY_RERANK_TIMEOUT_FLOOR_MS=1500`。
+- 最小修复：新增 `resolvePersonaWorldbookRerankTimeoutMs()`，配置型 worldbook timeout 低于共享 floor 时抬到 floor；调用方显式传入 `rerankTimeoutMs` 时仍保持原值，避免破坏测试/特殊调用。
+- 验收：`node --check utils\personaWorldbookSearch\rerank.js`、`node tests\personaModules.test.js`、`node tests\memoryReranker.test.js` 通过；日志统计脚本确认今天 `memoryReranker` p95/max 为 `549/611ms`。
+- 小目标已完成：worldbook rerank 不再因配置型 700ms 绕过 timeout floor。
+
+## 运行维护 2026-07-06 15:44
+
+- 目标：按五项优化收敛短期记忆和主回复上下文膨胀问题。
+- 结论：当前短期记忆写盘由 session proxy 多次同步触发，普通短聊也可能每轮生成 session summary，跨 session 合并默认不设 sibling 上限，summary 与 raw recent turns 存在重复，且缺少不泄露正文的上下文诊断入口。
+- 最小修复：新增短期 session 写盘批处理并接入 Runtime V2 persist host；回复后 session summary 增加压缩、restart recall、open loop、历史长度/token 和长任务路由门禁；跨 session sibling 默认最多 3 个且优先读元信息排序；shared summary 默认不再包含 `[RecentTurns]`；新增 `diag:short-term-context` 只输出 session key、profile、计数和 token 估算。
+- 验收：`node --check` 覆盖短期 session store、shared context、persist node、Runtime host 和诊断脚本；短期记忆、persist、主回复上下文与 prompt cache 相关定向测试通过；`npm run diag:short-term-context -- --user 1960901788 --json` smoke 通过且不输出聊天正文。
+- 小目标已完成：短期记忆仍可跨最近上下文续聊，但默认写盘次数、摘要调用次数、sibling 合并范围和上下文重复量都已收敛。
+
+## 运行维护 2026-07-06 15:37
+
+- 目标：检查 `diag:runtime -- --json` 中用户 `1960901788` 从 `2026-06-23` 到 `2026-07-06` 连续缺 `journal summary` 的原因。
+- 结论：原始 daily journal 仍在写，post-reply 队列 `queued=0/processing=0/failed=0`，不是 enrich 卡住；segment 汇总有历史产物但不完整，也不是本轮运行态漏收尾。根因是 `TICK_ENGINE_ENABLED=false` 时 daily summary runner 只挂在 tick engine 上，独立运行态不会调度 daily summary。
+- 最小修复：新增 tick 关闭时的独立 daily journal summary scheduler，复用原 summary 写入链路；诊断报告补充 `summaryScheduler` 和已到期日，当前日不再算缺失；新增 dry-run 优先的 `scripts\backfill-daily-journal-summaries.js` 用于安全补历史日。
+- 补跑结果：已补齐 `1960901788` 的 `2026-06-23` 至 `2026-07-04` summary，`2026-07-05` 由新调度生成；`2026-07-06` 是当前日，按安全策略等 `2026-07-07 00:10 +08:00` 后汇总。
+- 验收：`node scripts\backfill-daily-journal-summaries.js --user-id 1960901788 --from 2026-06-23 --to 2026-07-05` 显示 13 天全部 `skipped_existing`；`npm run diag:runtime -- --json` 显示 `summaryDueDay=2026-07-05`、`tickEngineEnabled=false`、`standaloneEnabled=true`，且 `1960901788` 缺口不再包含 `2026-06-23` 至 `2026-07-05`。
+- 小目标已完成：daily journal summary 在 tick engine 关闭时仍会独立调度，目标用户指定窗口已补齐且当前日不会被误报为缺口。
+
+## 运行维护 2026-07-09 09:02
+
+- 目标：降低运行期对磁盘寿命不友好的高频写盘风险，不改消息主链路行为。
+- 结论：空闲态未发现持续高频落盘；风险主要来自高消息流量下每条 OneBot message 同步写 `napcat-message-events.jsonl`，以及每个 Memory V3 事件立即 flush。
+- 最小修复：新增 `FOLLOWER_PACKET_LOG_ENABLED`，NapCat 原始包日志默认关闭，仅在 follower 监控或显式开关开启时写入；Memory V3 事件复用 JSONL writer 批量缓冲，读取/列事件文件前刷当前进程待写队列，保持同进程读写一致。
+- 范围控制：未改 post-reply 队列、LangGraph 事件格式和 SQLite WAL；这些属于更大结构性优化。原先发现的 `embedding_cache.jsonl.*.tmp` 复查时已不存在，未执行删除。
+- 验收：`node --check core\napcatLogFollower.js`、`node --check utils\memory-v3\events.js`、`node --check tests\napcatPacketLogConfig.test.js`、`node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。`tests\napcatLogFollower.test.js` 与 `tests\memoryCliV3.test.js` 直接运行会留下外部 DNS 句柄，本轮未作为验收依据。
+- 小目标已完成：默认运行不再持续记录 NapCat 原始包，Memory V3 事件写入不再每条同步刷盘，同时保留必要诊断开关和同进程读取一致性。
+
+## 运行维护 2026-07-12 12:20 +08:00
+
+- 目标：修复 JSON 热存储信号监听器抢先退出进程、绕过主进程优雅停机的问题。
+- 最小修复：`jsonHotStore` 只保留 `beforeExit` 兜底刷盘，不再拥有 `SIGINT/SIGTERM` 或调用 `process.exit`；主入口在关闭消息、调度器、HTTP 服务和外部运行时后统一执行同步刷盘。
+- 验收：新增 `jsonHotStoreSignalOwnership.test.js`，先确认旧实现会新增信号监听器并失败；修复后与 `jsonHotStoreCorruptFallback`、`napcatWsIngressSmoke`、`tickEngineStopGuard` 共 4 项定向测试全部通过。
+- 小目标已完成：信号退出权已收口到主入口，存储落盘不再截断后续优雅停机流程。
+
+## 运行维护 2026-07-12 12:25 +08:00
+
+- 目标：修复主进程替换陈旧单实例锁时，两个并发启动都能成功的竞态。
+- 最小修复：锁文件继续使用独占创建，陈旧锁检查与替换增加原子目录门闩串行化；正常退出由锁所有者删除锁文件，不再留下空锁文件。
+- 验收：并发测试先在旧实现稳定复现两个进程同时 `ACQUIRED`；修复后连续 20 轮双进程竞争均只有一个进程获得锁，现有存活主进程拒绝启动场景保持通过。
+- 小目标已完成：并发启动无法再同时越过单实例锁。
+
+## 运行维护 2026-07-12 12:40 +08:00
+
+- 目标：阻止外部请求伪造 NapCat 管理员 OneBot 事件，并收紧 Docker 默认入口暴露。
+- 最小修复：反向 HTTP 入口强制配置 `NAPCAT_HTTP_REVERSE_SECRET`，使用 timing-safe 比较校验 Bearer 或 `X-NapCat-Token`；缺少密钥拒绝启动，Compose 的 3002 端口默认仅发布到宿主 loopback。
+- 验收：新增缺密钥、匿名、错误密钥和正确密钥测试；匿名载荷使用管理员 `/restart confirm` 场景，返回 401 且处理器调用次数保持 0，正确密钥请求返回 204 并仅分发一次。
+- 小目标已完成：访问 3002 已不能直接伪造管理员事件，跨主机接入必须显式配置鉴权和受控转发。
+
+## 运行维护 2026-07-12 13:00 +08:00
+
+- 目标：修复 `web_fetch` 和 RSS 工具只检查 URL 字面主机、可被 DNS 解析和重定向绕过的 SSRF。
+- 最小修复：新增统一安全请求边界，每一跳都解析并拒绝私网/混合地址，Axios 自动重定向固定为 0；实际连接使用已验证地址的 pinned lookup，避免校验后再次解析到其他地址。
+- 验收：覆盖公网域名解析到 `127.0.0.1`、公网首跳 302 到 `10.0.0.8`、已验证公网 IP 固定连接三类场景；`networkSafety`、`httpClientSecurity`、`nativeSkills` 定向测试和三个目标文件语法检查全部通过。
+- 小目标已完成：两个聊天抓取入口无法再通过 DNS 或重定向访问本机、内网或元数据地址。
+
+## 运行维护 2026-07-12 13:15 +08:00
+
+- 目标：避免 NapCat 已执行发送但响应超时后，主进程盲目重试造成重复消息。
+- 最小修复：发送重试收口为独立策略，只在连接拒绝、DNS 暂时失败、网络/主机不可达等明确的送达前错误上重试；超时、连接重置等结果不确定错误仍标记离线，但 `retryable=false`。
+- 验收：新增结果不确定错误只调用一次、连接拒绝首次失败后允许第二次成功的回归；NapCat 连接状态、消息回复新鲜度和群回复队列共 4 组定向测试全部通过。
+- 小目标已完成：HTTP 响应丢失或超时不会再次发送同一条非幂等消息。
+
+## 运行维护 2026-07-12 13:30 +08:00
+
+- 目标：修复研究任务超时后底层 runner 继续运行、并发槽提前释放和迟到结果覆盖失败状态的问题。
+- 最小修复：队列为每个任务创建 AbortController，超时后向研究工具链和 web fetch 传递 signal；超时 runner 真正结束前不释放并发槽，内置研究器在每次工具调用后和写缓存前检查取消状态。
+- 验收：新增超时任务收到 abort、第二任务只能在第一 runner 结束后启动、最大真实并发保持 1，以及取消研究不写 completed brief 的回归；研究队列、研究器和网络安全测试通过。
+- 小目标已完成：研究任务超时会终止实际工作，不再造成幽灵并发或迟到完成写入。
+
+## 运行维护 2026-07-12 13:50 +08:00
+
+- 目标：修复定时任务外部发送成功后、运行结果延迟落盘前崩溃导致的重启重复执行。
+- 最小修复：执行副作用前同步写入带稳定执行键的 executing claim，执行结果也改为同步落盘；启动发现中断 claim 时，once 任务按“结果未知”失败收口，cron 跳过不确定的旧周期并推进下一次运行。
+- 取舍：在外部系统不支持幂等键的前提下采用 at-most-once 恢复策略，宁可把崩溃窗口任务标为结果未知，也不自动重发可能已经成功的消息或空间动态。
+- 验收：新增真实文件存储测试，模拟发送成功后 markRunResult 崩溃；磁盘状态保持 executing，重启恢复后 once 不再发送，cron 的 nextRunAt 推进到下一周期；相关 3 组调度测试通过。
+- 小目标已完成：进程崩溃不会自动重复同一调度周期的不可逆副作用。
+
+## 运行维护 2026-07-12 14:00 +08:00
+
+- 目标：移除 profile journal 诊断 GET 的自动清洗副作用，阻止本机免令牌模式下的跨站数据改写。
+- 最小修复：诊断 GET 无条件传入 autoClean=false，忽略客户端 auto_clean 参数；显式 clean POST 完成清洗后的诊断读取也保持只读。
+- 验收：新增路由级依赖注入测试，使用 auto_clean=true 请求仍只收到 autoClean=false；Web 鉴权与 memory ops 诊断回归共 3 组测试通过。
+- 小目标已完成：GET diagnostics 只读取状态，清洗只能通过已有鉴权 POST 入口触发。
+
+## 运行维护 2026-07-12 14:15 +08:00
+
+- 目标：降低容器被利用后的权限和默认网络暴露。
+- 最小修复：运行阶段切换为镜像内置 node 用户，允许该用户创建实例锁并写 data/logs；Compose 的 Web 与 NapCat 端口都仅绑定宿主 127.0.0.1。
+- 已验收：Docker 安全配置回归测试通过，PyYAML 成功解析两个服务和 loopback 端口配置。
+- 待验收：本机 Docker daemon 未运行且无 Compose 插件，真实镜像 UID 与命名卷写入探针已写入部署文档，待 daemon 可用后复跑。
+
+## 运行维护 2026-07-12 14:25 +08:00
+
+- 目标：避免主服务进程未就绪或失效时 post-reply worker 仍立即启动。
+- 最小修复：新增不经过管理鉴权、只返回 ok 布尔值的 /healthz；Compose 主服务增加 Node fetch 健康检查，worker 的 depends_on 改为 service_healthy。
+- 已验收：健康处理器响应结构、Web 鉴权不受影响、Docker 安全配置测试通过；PyYAML 确认 healthcheck 和依赖条件结构正确。
+- 待验收：Docker daemon 不可用，主服务故障时 worker 的真实容器门控需在 daemon 可用后复跑。
+
+## 运行维护 2026-07-12 14:40 +08:00
+
+- 目标：恢复 admin prompt 的 QQ 当前消息输出契约和提示词测试基线。
+- 最小修复：本地 Git 忽略的私有 admin.txt 删除预演占位与双响应指令，恢复“只输出当前消息、避免第三人称叙述、遵守系统边界”的明确约束；测试中的短期记忆默认值同步到 2026-06-26 已生效并有文档记录的 9200。
+- 验收：configPersonaPrompt、promptSecurity、promptStageContracts、promptGoldenSnapshots 共 4 组测试全部通过。
+- 小目标已完成：本地私有 prompt 不再要求双响应，提示词契约测试恢复绿色；私有 prompt 继续保持 Git 忽略。
+
+## 运行维护 2026-07-12 15:20 +08:00
+
+- 目标：扩大 chunk 静态检查覆盖并恢复完整测试基线。
+- 最小修复：lint 不再跳过 71 个 chunk；拼接型 chunk 通过 8 个真实入口组合加载校验，独立 CommonJS chunk 单独解析，未被任何入口覆盖且不能独立解析时直接失败。测试运行器增加默认 60 秒单文件超时，避免句柄泄漏无限阻塞全套。
+- 全量测试修复：跨线程 materialize 前先刷父进程事件缓冲；过期的图片超时与被动感知 prompt 断言同步现行配置；request trace 测试改走无外部模型的确定路径；web fetch fallback 改为模拟 403，移除公网波动。
+- 验收：npm run lint 通过，覆盖 727 个 JS 文件和全部 71 个 chunk；npm audit --omit=dev 为 0 漏洞；npm run diag:security 与 npm run check:secrets 通过；第三次完整 npm test 用时 307.5 秒并输出 [test] all tests passed。
+- Docker 验收：已成功启动 WSL Docker daemon 29.4.0，但镜像构建在基础镜像获取阶段 10 分钟无进展且未生成镜像；非 root UID、命名卷写入和真实 service_healthy 门控仍保留为待验收，不以静态检查替代。
+
+## 运行维护 2026-07-12 16:51 +08:00
+
+- 目标：把仓库审计的 32 个改进目标按真实依赖拆成可执行阶段，并纠正文档中已过时的 NapCat reverse Bearer-only/空对象探针。
+- 文档：新增 `docs/superpowers/plans/2026-07-12-repository-32-goals-roadmap.md` 和 `docs/superpowers/plans/2026-07-12-security-boundaries-data-protection.md`；总路线记录每项目标的当前证据，第一阶段给出精确文件、失败测试、实现步骤、验收命令和提交边界。
+- NapCat 说明：README 与 Docker 部署文档明确区分 HMAC 签名和原生客户端静态 token 兼容模式，签名串固定为 `timestamp.nonce.rawBody`，空对象匿名 POST 不再作为有效探针。
+- 验收：确认只修改计划、README、Docker 部署说明和维护日志；执行 `git diff --check`。本轮未提交代码，也未把共享工作区中的并行安全实现标记为完成。
+
+## 运行维护 2026-07-12 17:10 +08:00
+
+- 小目标已完成：提交 `c3ca711` 完成图片缓存和 `skill_summarize` SSRF 防护，并为 NapCat reverse 加入 HMAC、防重放、事件校验、请求限制和原生静态 token 兼容路径。
+- 安全诊断：NapCat 缺少 secret 或其他 error 状态现在返回非零退出码；兼容模式保持 warning，避免把弱模式误报为安全完成。
+- 验收：7 组定向安全测试通过；`npm run lint`、`npm run check:prompts`、`npm audit --omit=dev` 通过；全量 `npm test` 在 326.9 秒后自然退出且退出码为 0；`git diff --check` 通过。
+- 未完成：当前本机启用了 NapCat HTTP reverse 但缺少 `NAPCAT_HTTP_REVERSE_SECRET`，需由部署方配置真实 secret；目标 1 的 signed-only 收口及目标 28 的 ACL、监听地址、日志容量、容器基线诊断继续保留在路线图中。
+
+## 运行维护 2026-07-12 18:32 +08:00
+
+- 小目标已完成：提交 `39b5428` 将 Web 控制台从长期静态 token 认证迁移到短期、可撤销的服务端会话；`WEB_TOKEN` 只用于常量时间登录校验，旧 Bearer、`x-web-token`、query token 和 localStorage 凭据路径已移除。
+- 边界加固：登录失败使用有界限流；所有非安全方法执行精确同源 CSRF 校验；只有 loopback 直连受信代理且显式配置 hop 时才采信 XFF/XFP；会话 cookie 为 HttpOnly/SameSite=Strict，并按可信 HTTPS 决定 Secure。
+- 安全头：所有页面、401、健康检查和 API 均通过集中中间件设置逐响应 nonce CSP、frame-ancestors、nosniff、Referrer Policy 与 no-store；HSTS 仅在可信 HTTPS 链路启用。
+- 验收：6 组 Web 定向测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev` 和 `git diff --check` 通过；全量 `npm test` 326.7 秒自然退出且退出码为 0；应用内浏览器完成登录、主控制台渲染和注销，未发现页面控制台错误。
+- 路线图状态：目标 15、16 已完成；目标 4、20、28 等第一阶段剩余项继续执行。
+
+## 运行维护 2026-07-12 19:07 +08:00
+
+- 小目标：按当前要求取消 QQ reasoning 外发清洗，直接发送 provider 返回的原始思维链。
+- 最小修复：`maybeSendReasoningForward` 改为只读取 `replyEnvelope.reasoningText`；普通快速回复同步传递原始字段；`sendReasoningForwardMessage` 接口改用 `reasoningText`，保留原始空白和标签，仅对全空白内容跳过并按 3500 字符拆分合并转发节点。
+- 边界：正文仍先发送，reasoning 转发失败仍不影响正文；记忆、画像、recall 和 post-reply 持久化仍不读取 reasoning；现有清洗模块未删除，因删除文件需要单独确认。
+- 验收：`node scripts/run-tests.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js tests/messageHandlerCotSource.test.js tests/messageRouteFlowGroupStreaming.test.js tests/runtimeStreamingCoordinator.test.js tests/runtimeV2DirectReplyFailureTelemetry.test.js tests/modelServiceReasoning.test.js tests/parserModelResponseFormats.test.js tests/normalFastReplyRuntime.test.js`、`npm run lint`、`node -e "require('./core/messageHandler')"` 和 `git diff --check` 通过。
+- 小目标已完成：QQ 群聊和私聊在主回复后直接转发 provider 原始 reasoning，不再转发角色化清洗结果。
+- 提交后记录：功能提交 `a8f7b3e` 已完成，本轮未推送远端，也未纳入其他并行代理的工作区改动。
+
+## 运行维护 2026-07-12 19:49 +08:00
+
+- 小目标完成：提交 `d20208b` 将 request trace 从任意 payload 展开改为真实消费者驱动的显式字段契约；保留路由、流式、重试、工具、缓存和耗时元数据，丢弃正文、headers、未知嵌套，并清洗 requestId、错误、Bearer、JSON/header/query 凭据和 URL userinfo。
+- 安全诊断完成：区分 direct 与明确 Compose 部署，按实际宿主发布边界判断入口暴露；Windows ACL 使用 SID 与作用域化 Allow/Deny 风险判断；容器检查覆盖最终阶段用户、service user 覆盖、read_only、cap_drop、no-new-privileges 和长短端口语法。
+- 验收：13 组定向及消费者回归、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev`、`git diff --check` 通过；全量 `npm test` 332.3 秒自然退出且退出码为 0。
+- 路线图状态：目标 28 已完成；目标 20 的字段/凭据边界已完成，但 `userId/groupId/messageId` keyed hash 仍待单独迁移，因此保持部分完成。
+
+## 运行维护 2026-07-12 20:17 +08:00
+
+- 小目标：让主回复 provider 可见 reasoning 优先按照瑞希第一人称沉浸扮演方式思考，并与当前原始 reasoning 直发链路配合。
+- 最小修复：`prompts/runtime/roleplay-inner-protocol.txt` 和 `utils/runtimePrompts.js` fallback 在头部加入 reasoning 硬性规则：叙述者只能是瑞希的“我”，始终使用简体中文沉浸内心独白；保留关系距离、心软/别扭/情绪流、真人停顿和下一句动机；禁止助手、分析员、导演、旁白、步骤化分析及英文模型工作语。
+- 技术边界：技术、代码、工具和任务场景仍允许完成必要判断，但必须从瑞希主观视角表达；最终正文仍只输出用户可见回复，QQ 仍直接转发 provider 原始 `reasoningText`，不增加第二次模型调用或本地清洗。
+- 验收：`node scripts/run-tests.js tests/promptGoldenSnapshots.test.js tests/runtimePromptCache.test.js tests/promptSecurity.test.js tests/userFacingTextCot.test.js tests/userFacingReplyGuards.test.js tests/mainReplyPromptAssemblyDiagnostics.test.js tests/reasoningForwardPersonaPrompt.test.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js`、`npm run check:prompts`、`npm run lint` 和 `git diff --check` 通过。
+- 小目标已完成：主回复 reasoning 的高优先级提示词已收紧为瑞希第一人称沉浸思考，同时保留原始 reasoning 直接发送机制。
+- 提交后记录：功能提交 `4ea51e0` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
+
+## 运行维护 2026-07-12 21:08 +08:00
+
+- 容器加固提交 `9e5f0e8`：主/worker 使用 non-root、read_only、init、cap_drop ALL、no-new-privileges、CPU/内存/PID/30秒停止限制和受限 `/tmp`；命令直接执行 Node，主配置文件单独可写挂载，worker不挂载可写env，多余 `/app/logs` 卷已移除。
+- 运行文件：主锁和worker pid/lock迁入DATA_DIR角色目录并在首次写入前创建父目录；perf/resource默认按main/worker分流。部署文档增加`.env`权限和旧命名卷写入探针。
+- 日志治理：仅显式标记的诊断日志使用默认10份、30天、1GiB同目录容量和磁盘水位告警；状态型NDJSON无显式参数时不轮转。共享target通过跨进程原子锁覆盖检查、轮转、追加和维护，双进程100条并发测试无丢失或重复。
+- Windows daemon：新增归档维护脚本，只匹配daemon/runtime/worker时间戳归档，当前重定向文件不会匹配；文件占用或拒绝删除时保留并告警。Compose stdout/stderr使用local driver并限制10MiB×5。
+- 验收：12组定向运维测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev`、`git diff --check`通过；全量`npm test` 339.7秒自然退出且退出码0。
+- 未完成证据：WSL Docker daemon存在旧容器rw-layer snapshot缺失，build约6分钟无产物后已停止且未清理旧容器；真实UID、命名卷、只读根、资源限制、SIGTERM和health门控未验收。跨进程不同target的目录总配额也不是事务级硬上限，因此目标17、19保持部分完成。
+
+## 运行维护 2026-07-12 21:46 +08:00
+
+- Node 版本边界：新增根目录 `.nvmrc`，将根 package engines、Linux 安装/检查/bootstrap、README 和部署手册统一为 Node 20.x；`check:node` 会同时校验实际主版本和 package engines，错误主版本启动前直接失败。
+- CI 门禁：新增 Windows Node 20 全量质量任务和 Ubuntu Node 20 Linux 策略任务；使用最小 `contents: read` 权限、并发取消、禁用 checkout 凭据持久化，显式隔离 `.env`、`data` 和本地 prompt roots，不使用 `pull_request_target` 或项目 secrets。Windows 全量任务按最近 339.7 秒基线设置 15 分钟上限，失败时仅上传测试输出。
+- secrets 检查：保留本地默认 staged 模式，增加 `--all`/`check:secrets:all` 扫描全部 tracked 文件，避免 CI 在空暂存区假通过；测试中的假密钥由运行时片段拼接，提交后不会自锁扫描。
+- 本地验收：3 组定向策略测试、`npm run lint`、隔离环境下 `npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`、Bash/Node 语法检查和 `git diff --check` 通过。
+- 未完成证据：本机实际运行时为 Node 24；官方 Node 20.20.2 压缩包下载两次因网络超时未完成，已停止继续下载。GitHub Actions 尚未远端运行，因此目标 8、31 均保持部分完成，待真实 Node 20 与首次 CI 运行验收。
+
+## 运行维护 2026-07-12 21:25 +08:00
+
+- 小目标已完成：恢复本机 NapCat HTTP reverse 与 MizukiBot 主进程连接。
+- 根因：`NAPCAT_HTTP_REVERSE_SECRET` 安全必填项已上线，但本机 `.env` 没有同步 `D:\napcat\config\onebot11_3326471600.json` 中现有 HTTP Client token，主进程在 `startNapCatTransport` 阶段退出。
+- 修复：通过仓库现有 `scripts/configure-napcat-onebot.js` 同步 NapCat HTTP Server/Client token 到 `.env`，随后执行 `restart-bot.cmd restart confirm`；业务代码未改动。
+- 验收：主进程 PID 10040 持续运行；NapCat `get_status` 返回 `online=true`、`good=true`；3000/3002 端口分别由 NapCat/Bot 监听；反向入口正确 token 通过鉴权并对无效载荷返回 400；`npm run smoke:napcat-ingress` 全部通过。
+- 提交后记录：修复与验收记录提交 `73f2a86` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
+
+## 运行维护 2026-07-12 22:03 +08:00
+
+- 实现提交 `5e7e168`：新增最小权限 GitHub Actions，Windows Node 20 跑完整质量门禁，Ubuntu Node 20 跑版本、Linux脚本语法和策略测试；checkout不持久化凭据，CI数据/env/prompt roots隔离，不使用pull_request_target或项目secrets。
+- Node版本：`.nvmrc`、package/lock engines、Linux安装/check/bootstrap、README及部署文档统一为20.x；新增启动前主版本检查。tracked secrets模式扫描最终暂存树通过，不会因测试假密钥自锁。
+- 缓存治理：sessionResearchCache保留旧API和每会话8条语义，新增每进程全局容量、会话级LRU、主动/惰性TTL、size/evictions/expired指标及unref/stop定时器；10,000会话max=128后size=128、evictions=9872，过期扫描后size=0。
+- 验收：7组定向测试、`npm run lint`、隔离prompt检查、tracked secrets、`npm audit --omit=dev`和`git diff --check`通过；全量`npm test` 347.4秒自然退出且退出码0。
+- 未完成证据：本机只有Node24，官方Node20.20.2下载两次超时后停止；GitHub Actions尚未远端运行。因此目标8、31保持部分完成，目标30完成。
+
+## 运行维护 2026-07-12 22:32 +08:00
+
+- 小目标已完成：修复 NapCat HTTP Client 新消息事件上报持续返回 401。
+- 根因：本机 NapCat 版本实际发送 `X-Signature: sha1=<HMAC-SHA1(rawBody, token)>`，反向入口此前只支持自定义 HMAC-SHA256 和静态 Bearer/X-NapCat-Token，配置 token 一致仍会鉴权失败。
+- 最小修复：仅在现有原生兼容模式开启时校验 OneBot SHA1 签名；错误签名继续返回 401，不改变 signed HMAC-SHA256、防重放、限流和载荷校验路径。
+- 验收：`node scripts/run-tests.js tests/napcatHttpReverseServer.test.js tests/napcatWsIngressSmoke.test.js`、相关 `node --check`、`npm run lint` 通过；重启后使用 NapCat 同格式签名请求 3002 返回 204，主进程持续运行。
+- 提交后记录：实现提交 `18015e1` 已完成，本轮未推送远端，也未纳入并行代理的其他工作区改动。
+
+## 运行维护 2026-07-13 00:09 +08:00
+
+- 实现提交 `d44d051`：测试运行器优先通过Git tracked列表发现测试，无Git/npm包环境确定性回退文件系统；默认并发2，串行测试按barrier保持相对语义，失败/超时终止进程树并等待退出，输出按发现顺序汇总并显示慢测Top N。
+- clean CI修复：memory recall与post-reply评估样本迁入tracked tests/fixtures，不再依赖gitignored artifacts；显式CLI仍允许运行任意存在测试文件，自动发现不会执行本地未跟踪测试。
+- prompt治理：主检查器与完整config解耦，支持Git tracked、clean CI与package模式；私有required prompt由exact allowlist声明，本地存在时仍校验。39个worldbook、7个runtime模板和4组conflict tag纳入review_by门禁，unknown/stale/expired/drift均非零失败，基线0 warning。
+- 验收：runner/prompt/fixture定向测试、`npm run check:prompts`、`npm run lint`、`npm run check:secrets:all`、`npm audit --omit=dev`、`git diff --check`通过；TEST_CONCURRENCY=4全量测试146.7秒自然退出且退出码0。
+- 路线图状态：目标24完成；目标22功能完成但性能未达标，默认2约184秒、并发4约147.9秒，慢测集中在NapCat follower、QQ action、stock summarize、vision budget和prompt snapshots，保持部分完成。
+
+## 运行维护 2026-07-13 01:20 +08:00
+
+- 目标22已完成：NapCat follower 通过默认保持真实被动感知、测试可注入处理器的边界隔离模型/记忆网络链，QQ action 注入 `sleep` 验证生产拟人延迟而不真实等待；stock 与 MCP native 测试使用固定 fixture 和自建临时目录，不再访问公网或污染仓库数据。
+- 文本预算优化：`trimTextByTokenBudget` 在原 32 字符裁剪网格上由线性重复扫描改为二分查找，保持 head/tail 结果等价；新增 reference 测试覆盖短文本、非32倍边界、CJK/Latin/emoji 和多档 budget，视觉预算测试由约21.2秒降至 0.37–0.43秒。
+- prompt golden 仍执行真实 prompt block 组装、planner 选择/拒绝、Gemini native body 及全部 golden 断言，仅通过显式静态 persona material 注入避免17次重复候选收集，并保留无 planner worldbook 真实检索场景；5次定向耗时 3.27–3.83秒。
+- 验收：NapCat follower 5次 0.46–0.76秒，QQ action 5次 0.23–0.25秒，native stock/MCP 5次均低于0.39秒，continuous message 5次 5.65–7.42秒；`npm run lint`、`git diff --check` 通过，`TEST_CONCURRENCY=4` 全量连续三轮均自然退出且全部通过，耗时 100.6秒、97.6秒、103.6秒。
+
+## 运行维护 2026-07-13 01:27 +08:00
+
+- 实现提交 `be32669`：NapCat follower、QQ action、stock与ontology MCP测试通过依赖注入验证真实生产入口但不访问公网或等待生产延迟；相关测试均使用自建临时目录并在finally清理。
+- 性能：`trimTextByTokenBudget`在原32字符裁剪网格上使用二分查找，并以旧线性算法作多字符集/多budget等价验证；prompt golden保留真实block组装、planner选择与Gemini body，只注入稳定persona候选避免重复收集。
+- Source迁移：DirectAnchor、ReasoningForward、NormalFastReplyHandler三个测试不再读取源码/includes/indexOf，改为真实handler行为与模块契约，覆盖acceptedBy、formal/fast raw reasoning、发送顺序、失败回退、安全元数据、emoji与history顺序。
+- 最终验收：10项定向测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`通过；全量连续三轮100.6/97.6/103.6秒自然通过。目标22完成，目标23保持部分完成。
+
+## 运行维护 2026-07-13 01:57 +08:00
+
+- 实现提交 `6692ced`：plannerRichContext测试改为`directChatPlannerContext`模块契约与真实supplement行为，三处生产调用复用同一字段优先级；runtimeHostCot测试改为`applyRuntimeReplyOutput`输出行为，保留display/final/draft、持久化、reasoning、stream、安全与fallback语义。
+- 消息入口：`messageIngressAsyncEntrypointSource`改为仅在`MIZUKIBOT_INDEX_TEST_MODE=1`导出的测试入口和dispatcher enqueue行为，packet预处理可注入无副作用实现，生产路径无新增外部绕过。
+- NapCat配置：configure测试直接调用`patchOnebotConfig`，覆盖新增端点、已有action/reverse端点旧token更新、独立secret/fallback及无关端点保留，不再依赖函数名或源码顺序。
+- 验收：9项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`通过；并发4全量测试111.4秒自然通过。目标23继续部分完成，剩余安全/部署源码守卫按优先级迁移。
+
+## 运行维护 2026-07-13 02:33 +08:00
+
+- 实现提交 `fe80591`：引入 ESLint 9 flat config，普通生产/测试 JS 由 ESLint 执行 correctness 门禁，71 个共享作用域 chunk 继续由现有组合入口校验；CI 新增稳定边界 typecheck。
+- 类型边界：Web auth/security headers/session、network safety/request trace/security diagnostics、skill args、Runtime V2 contracts/state/route predicates 共 10 个文件启用 `@ts-check`；策略测试强制这些文件无 `any`、`@ts-ignore`、`@ts-nocheck`，并全部启用 unused-symbol 门禁。
+- 静态检查修复：补齐 router、memory CLI 的真实缺失导入，移除重复对象键和未使用导入，修正 JSON 热存储 unsafe finally，并补足 Runtime V2 状态 reducer 与安全诊断的类型契约；未做无关重构。
+- 验收：`npm run lint`、`npm run typecheck`、质量/CI策略测试、13项关联行为测试、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`、`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 108.2秒自然通过。
+- 路线图状态：目标10完成；目标9保持部分完成。实测启用 `no-promise-executor-return` 会产生75个历史错误，全仓 unused 与复杂度规则也未清零；共享作用域 chunk 仍等待目标5模块化后由 ESLint 完整接管。
+
+## 运行维护 2026-07-13 02:57 +08:00
+
+- 实现提交 `f0e472d`：`noExternalProcessSkillsSource` 不再截取源码，改为逐项执行 21 个原生技能 executor、验证参数与返回值，并封锁 `spawn/spawnSync/exec/execSync/execFile/execFileSync/fork`；QQ 依赖检查也改为真实运行结果断言。
+- Runtime 接线：`createRuntime` 增加可选 persist factory seam，测试从真实组合根捕获依赖并确认 `withSessionContextBatch` 与 `appendShortTermHistory` 接入；默认生产 factory 不变。
+- 管理员重启：消息入口增加可选 restart trigger seam，真实发送 `/restart` 与 `/restart confirm` 验证确认门槛、回复、800ms 延迟和完整来源元数据。行为测试同时发现并修复原路径引用不存在的 `inboundRequestId`，改用当前入站锁的 requestId。
+- 验收：5项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 92.2秒自然通过。
+- 路线图状态：目标23继续部分完成，三个高价值源码守卫已迁移；剩余 CI、Docker 和 PowerShell 安全/部署守卫需继续改为行为测试或结构化解析。
+
+## 运行维护 2026-07-13 03:19 +08:00
+
+- 实现提交 `269078f`：主进程早退诊断不再扫描 `index.js` 文本，改为真实启动/停止 heartbeat、调用 beforeExit/exit 处理器、读取结构化状态与退出观察文件，并验证 fatal/signal 监听器和 Node report 配置已实际注册。
+- 重启诊断：远程重启元数据整理为可测试的纯 marker builder，默认 drain 路径仍写同一 expected-shutdown 文件；进程事件处理器由匿名函数改为具名函数，注册事件、退出码和生产行为不变。
+- 热路径：主进程 embedding backfill 通过可调用边界验证关闭时不加载、开启时按原延迟参数调度；行为测试发现旧源码断言是假绿，`queryDiagnostics`、`semanticDedup` 改为需要时加载 embeddingIndex，`queryRanking` 直接依赖 LanceDB rows 叶子模块，查询入口不再加载完整 store。
+- 验收：6项定向/邻接测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 98.7秒自然通过。
+- 路线图状态：目标23继续部分完成；下一批优先将 CI/Compose 改为 YAML 结构解析，并用 PowerShell AST/安全 ValidateOnly 替代部署脚本字符串断言。
+
+## 运行维护 2026-07-13 03:32 +08:00
+
+- 实现提交 `f2cd4b8`：`ciWorkflow.test.js` 使用显式 devDependency `js-yaml` 解析工作流，按对象路径验证最小权限、隔离环境、并发取消、Windows/Ubuntu job、Node版本、完整质量命令、失败日志上传和 checkout 凭据策略，不再依赖缩进或字段顺序。
+- Compose/Dockerfile：Compose 解析后验证 loopback 端口、worker无端口、health依赖、non-root、只读根、cap drop、no-new-privileges、资源/PID/停止限制、tmpfs、卷和有界日志；Dockerfile按逻辑指令验证最终USER/CMD和运行目录权限初始化。
+- PowerShell：新增 tracked-only AST 语法门禁，通过 `Parser::ParseFile` 一次解析 `scripts` 下全部15个`.ps1/.psm1`，返回结构化错误位置且不dot-source、不执行任何脚本；非Windows缺少pwsh时明确跳过，Windows质量任务强制执行。
+- 验收：3项定向结构测试、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`和`git diff --check`全部退出0；`TEST_CONCURRENCY=4 npm test` 97.2秒自然通过。
+- 路线图状态：目标23继续部分完成。结构测试不替代真实 GitHub Actions、Docker容器UID/只读根/SIGTERM与宿主监听验收，因此目标8、17、18状态不变；`.env:/app/runtime.env:rw` 仍是容器秘密回写风险，等待配置域拆分后收口。
+
+## 运行维护 2026-07-13 04:23 +08:00
+
+- 实现提交 `c973fe2`：`scripts/lint.js --report-json` 输出稳定版本、状态、汇总、完整 chunk/入口记录和错误集合；chunk lint 测试按磁盘实际发现集验证全部 chunk 均由入口或独立解析覆盖，不再依赖控制台字符串。
+- Facade 契约：消息、HTTP、Runtime、Memory 与 Planning 测试不再要求旧/新入口函数引用恒等，改为验证公开导出、canonical 内部接线及消息路由、入站上下文、cache-control、Runtime 输出和 planner classifier 等代表性纯行为；`executablePlan` 测试改用 canonical `src/runtime-v2/planning.sanitizePlan` 的真实返回契约。
+- 验收：独立只读审查 Approve；4 项定向测试、`npm run lint`（724 个文件）、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`npm audit --omit=dev`（0 漏洞）和 `git diff --check` 全部通过；C 盘无空间时将临时目录切到 D 盘仓库外，`TEST_CONCURRENCY=1 node scripts/run-tests.js` 全量 264 秒通过。
+- 未完成项：`TEST_CONCURRENCY=4` 下既有 `runTestsRunner.test.js` 时序断言在全仓资源竞争时失败，但该测试单独运行通过；本轮未修改该无关调度测试。目标23继续部分完成，chunk lint 映射与主要 facade identity 测试已迁移，剩余危险重启/daemon 策略守卫仍待行为化。
+
+## 运行维护 2026-07-13 04:44 +08:00
+
+- 实现提交 `cc5cccb`：测试运行器默认将 `TEST_TEMP_ROOT`、`TEMP`、`TMP`、`TMPDIR` 统一指向工作树外的同盘目录 `D:\waifu-test-temp`，避免系统盘耗尽，同时保留显式 `TEST_TEMP_ROOT` 覆盖能力。
+- 契约修复：空白覆盖回退默认路径，自定义覆盖同步传播四个变量；临时夹具不再继承父 Git 工作树，tracked-only 与 Git 不可用时的文件系统 fallback 均保留原语义，runner 仍通过环境副本启动子进程。
+- 验收：独立只读审查 Approve；默认与自定义路径下两项定向测试、`npm run lint`、`npm run typecheck`、prompt/secrets/audit 门禁和 `git diff --check` 全部退出0；并发4全量首次退出1但截断日志不足以归因，立即复跑93秒全部通过，日志中的 LanceDB/lock 临时路径均位于 `D:\waifu-test-temp`。
+- 边界：本提交只阻止测试继续写入系统临时盘，不删除任何既有临时文件，也不等同于完成日志目录事务级总配额；目标19保持部分完成，目标22保持已完成。
+
+## 运行维护 2026-07-13 05:04 +08:00
+
+- 实现提交 `a2ccc94`：`restart-bot-periodic.ps1 -ValidateOnly` 输出结构化启动计划，真实 `Start-Process` 复用同一 Node 可执行文件、`index.js` 参数和工作目录；`install-periodic-restart.ps1` 新增无需管理员权限的 `-ValidateOnly`，真实注册与验证复用同一计划任务 XML。
+- 行为门禁：测试通过全局命令 trap 证明 ValidateOnly 不调用 Stop/Start/Get-CimInstance、Get/Unregister-ScheduledTask、schtasks 或 Remove-Item，并拦截 Add-Content 避免测试日志落盘；同时验证默认04:00、每日 CalendarTrigger、入口脚本、工作目录、无 Repetition 及非法24:00失败。
+- 验收：独立只读审查 Approve；周期重启行为测试、tracked-only PowerShell AST 语法门禁、lint、typecheck、prompt、secrets、production audit 和 diff check 全部通过；并发4全量94.2秒通过。
+- 路线图状态：目标23继续部分完成，周期重启源码字符串断言已清除；剩余 `restartBotScript`、`windowsDaemonScript` 与日志保留调用点等守卫待行为化。
+
+## 运行维护 2026-07-13 05:32 +08:00
+
+- 实现提交 `9e11252`：`logRetentionCallsites.test.js` 不再读取 8 个源文件文本，改为通过 CommonJS 依赖探针执行 perf/resource、入站 timing、NapCat、daily share、Memory V3、daily journal 与 self-improvement 的公开写入行为，直接验证 writer 的 `retentionManaged` 元数据。
+- 生产修复：真实 `/dailyshare status` 行为暴露 `MAX_AUTO_SENDS_PER_WINDOW` 未定义，状态命令会抛 `ReferenceError`；现改用既有 `getMaxAutoSendsPerWindow(target)`，并分别断言群组上限 `/1`、QZone 上限 `/2`。
+- 副作用控制：writer、状态存储与配置均在测试内注入并于 finally 恢复；最终复审实测 `data/request-trace.ndjson` 在测试前后长度和修改时间完全不变，无测试日志或状态文件写盘。
+- 验收：独立只读审查 Approve；7 项邻接测试、lint、typecheck、prompt、secrets、production audit、diff check 全部通过；并发4全量96.4秒通过。目标23继续部分完成，日志保留调用点守卫已行为化，restart/daemon 大型策略守卫仍待拆分。
+
+## 运行维护 2026-07-13 05:44 +08:00
+
+- 实现提交 `289035a`：`qualityToolingPolicy.test.js` 不再读取或正则匹配 `eslint.config.js`，改用 ESLint 9 API 验证实际加载的仓库 flat config、最终文件规则、chunk/data/node_modules 忽略结果及 `lintText` 真实诊断。
+- 边界验证：普通生产文件确认 correctness 规则为 error 且 no-unused 关闭；10 个 typecheck include 文件逐一确认 no-unused 为 error、保留 `@ts-check` 且不存在 ignore/nocheck/JSDoc any；实际 unused probe 必须报错。
+- 验收：两次独立只读审查 Approve；quality/chunk 定向测试、lint、typecheck、prompt、secrets、production audit 和 diff check 全部通过；并发4全量105.2秒通过。
+- 路线图状态：目标23继续部分完成，质量工具配置源码断言已迁移；剩余主要是 restart/daemon 大型脚本策略守卫，需要先结合目标14/27抽取安全生命周期边界。
+
+## 运行维护 2026-07-13 18:20 +08:00
+
+- 实现提交 `0b89296`：`getDatePartsInTz` 将部分 Node 20/ICU 组合在午夜产生的 hour=24 归一化为0，避免凌晨查询不再命中“今天同时包含前一自然日”的图片记忆策略。
+- 回归覆盖：新增固定 Asia/Shanghai 午夜时间测试，验证 00:16 的日期部件及 00:15/00:17 时间判断；`imageMemoryIndex` 与 `memoryCliImageRecall` 在 Node 20.20.2、Node 24.14.1 下均通过。
+- 验收：lint、typecheck、prompt、secrets、production audit、cached diff 全部退出0；Node 24并发4全量90.6秒通过。Node 20全量覆盖率复验仍等待获批清理c8原始数据目录，不在本提交宣称完成。
+- 路线图状态：目标31继续部分完成，但已取得真实 Node 20 运行证据并修复一个跨版本行为差异；目标21覆盖率门禁批次仍未提交。
+
+## 运行维护 2026-07-13 19:09 +08:00
+
+- 实现提交 `5160912`：新增统一 SQLite 连接层，生产写连接统一启用 5 秒 `busy_timeout`、WAL 和外键，readonly 工具连接复用相同等待策略；`profileJournalDb`、`worldbookDb`、本地 prompt recall、存储重叠诊断和两项维护脚本不再各自直接创建连接。
+- 并发根因：首次四进程同时初始化共享 `profile_journal.sqlite` 时，`journal_mode=WAL` 会在 schema 锁竞争下直接返回 `SQLITE_BUSY`；连接层现仅在未处于 WAL 时切换，并在既定等待窗口内只重试该锁错误。
+- 完整性入口：新增 `node scripts/check-sqlite-integrity.js [db...]`，对已存在数据库执行 `quick_check` 和 PASSIVE checkpoint，损坏库返回非零状态；安全优化脚本在 VACUUM/optimize 后执行 `quick_check` 与 TRUNCATE checkpoint。
+- 验收：Node 20.20.2 与 Node 24.14.1 的 6 项 SQLite/召回/迁移定向测试通过；lint、typecheck、prompt、全仓 secrets、production audit 和 diff check 全部退出0；Node 24并发4全量93.9秒通过。目标25完成，备份恢复与进程退出时统一关闭连接仍分别属于目标26、27。
+
+## 运行维护 2026-07-13 20:54 +08:00
+
+- 实现提交 `fec175e`：新增进程 readiness 状态机，主 Web 暴露 `/live`、`/ready` 和兼容 `/healthz`；只有 Web/NapCat reverse 真正监听并完成启动后进入 ready，退出/计划重启先进入 draining。
+- 关闭边界：主进程停止新入口并等待 message ingress 与内联 post-reply 作业，HTTP server 使用有界 close，完成后 flush 热存储并关闭已加载的 profile/worldbook/local prompt SQLite 单例；外置 worker 停止领取新任务、等待 active job、flush materialize 后写 stopped 状态。
+- 部署探针：Compose 主服务改用 `/ready`，worker 增加基于本地状态文件、PID、stage 和 heartbeat age 的 healthcheck；配置增加统一15秒关闭窗口及 worker 心跳/过期阈值。
+- 验收：Node 20.20.2 的9项定向测试通过；lint覆盖729文件，typecheck、prompt、全仓 secrets、production audit 和 diff check 全部退出0；Node 24并发4全量93秒通过。目标27继续部分完成，真实 Docker stop grace、OS SIGTERM 与资源关闭运行探针仍未取得；目标26实施计划已由 `af5db70` 建立，加密临时明文删除仍等待授权。
+
+## 运行维护 2026-07-17 01:27 +08:00
+
+- 实现：新增主进程生命周期协调器，正常信号退出和远程重启统一关闭HTTP/NapCat入口、停止调度运行时、排空消息入口与post-reply worker、清理MCP/create-agent/Minecraft/CycleTLS、落盘热存储、关闭SQLite并释放单实例锁。
+- 重启边界：`mizuki:restartScheduled` 通过 `waitUntil` 把完整排空Promise交给远程重启定时器；后续SIGTERM复用正在执行的排空并在完成后退出，定时器保持进程存活直到重启命令执行。
+- 验收：10项生命周期关联测试、730文件lint、typecheck、prompt、全仓secrets、production audit（0漏洞）通过；第一次并发4全量因 `example.com` 与 `api.anthropic.com` DNS失败退出1，两项单测复跑通过，第二次完整全量125.3秒自然退出0。
+- 路线图：目标14完成；目标27保持部分完成，真实Docker stop grace与OS SIGTERM运行探针未执行。本轮未修改或暂存并行代理的CI、覆盖率和安全诊断文件，未推送远端。
+- 提交后记录：目标14生命周期统一实现提交 `607fe5c` 已完成，验收结果已保留在README、维护日志和32项目标路线图；当前分支未推送。
+
+## 运行维护 2026-07-17 02:58 +08:00
+
+- 小目标：完成目标23剩余的 `restartBotScript` 与 `windowsDaemonScript` 大型源码文本守卫迁移。
+- 实现：两个生产PowerShell脚本被dot-source时只导出真实函数；重启WMI命令行构造、daemon早退恢复动作和外置worker启动原因被抽为主流程复用的纯策略。原测试改为独立PowerShell进程、临时目录、进程快照和命令trap，不执行真实默认重启。
+- 行为覆盖：确认门、主进程/worker/launcher识别、调用者PID保护、期望停机marker先于停止、重启结果落盘、marker消费/来源保留、早退计数/冷却、HTTP reverse恢复仅绕过一次、锁成功/超时/进程提前退出、日志归档和worker原因优先级。仅 `restart-bot.cmd` 保留4项最小结构契约。
+- 验收：10项关联测试、730文件lint、typecheck、prompt、全仓secrets、PowerShell AST、production audit（0漏洞）、diff check和 `TEST_CONCURRENCY=4 npm test`（142.5秒）全部退出0；目标23完成。本轮未暂存并行代理的CI、覆盖率、依赖和安全诊断改动，未推送远端。
+- 提交后记录：目标23重启/daemon行为化实现提交 `84e534b` 已完成，README、维护日志、聚焦实施计划和32项目标路线图均已更新；当前分支未推送。

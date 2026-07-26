@@ -189,9 +189,16 @@ function processMatchesMain(proc = {}, projectRoot = '') {
   return /(^|[\s/"'])index\.js(["']?)(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc, projectRoot);
 }
 
+function isNodeProcess(proc = {}) {
+  const name = path.basename(normalizeText(proc.name).toLowerCase());
+  return name === 'node' || name === 'node.exe';
+}
+
 function processMatchesPostReplyWorker(proc = {}, projectRoot = '') {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  return /(^|[\s/"'])post-reply-worker\.js(["']?)(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc, projectRoot);
+  return isNodeProcess(proc)
+    && /(^|[\s/"'])post-reply-worker\.js(["']?)(\s|$)/i.test(cmd)
+    && processMatchesProjectRoot(proc, projectRoot);
 }
 
 function compactProcess(proc = null) {

@@ -127,6 +127,12 @@ function createLineReader(onLine) {
 }
 
 function appendNapcatPacketToLog(packet = {}, options = {}) {
+  if (options.enabled === false) return;
+  const enabled = options.enabled === true
+    || config.FOLLOWER_PACKET_LOG_ENABLED === true
+    || config.FOLLOWER_LOG_MONITOR_ENABLED === true;
+  if (!enabled) return;
+
   const targetPath = String(options.logPath || config.FOLLOWER_NAPCAT_LOG_PATH || '').trim();
   if (!targetPath) return;
 
@@ -136,18 +142,20 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
   try {
     if (!packetLogWriter || packetLogWriter.getMeta?.().filePath !== targetPath) {
       packetLogWriter = createJsonLineHotWriter(targetPath, {
+        retentionManaged: true,
         debounceMs: Math.max(0, Number(config.FOLLOWER_LOG_WRITE_DEBOUNCE_MS || 150) || 150),
         maxDelayMs: Math.max(0, Number(config.FOLLOWER_LOG_WRITE_MAX_DELAY_MS || 1500) || 1500)
       });
     }
     packetLogWriter.append(normalized);
-    packetLogWriter.flushSync();
+    if (options.flushNow === true) packetLogWriter.flushSync();
   } catch (_) {}
 }
 
 function createNapcatLogFollower({
   sendWithRetry,
-  sendGroupReply
+  sendGroupReply,
+  handlePassiveInterjection = forcePassiveGroupInterjection
 } = {}) {
   const state = {
     started: false,
@@ -228,7 +236,7 @@ function createNapcatLogFollower({
       isAtBot: false,
       botQQ: effectiveBotQQ
     });
-    const result = await forcePassiveGroupInterjection({
+    const result = await handlePassiveInterjection({
       msg: packet,
       inboundContext,
       sendWithRetry,

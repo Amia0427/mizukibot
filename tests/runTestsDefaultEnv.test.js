@@ -1,6 +1,7 @@
 const assert = require('assert');
 const { spawnSync } = require('child_process');
 const path = require('path');
+const { DEFAULT_TEST_TEMP_ROOT } = require('../scripts/run-tests');
 
 const rootDir = path.resolve(__dirname, '..');
 const probe = spawnSync(
@@ -26,6 +27,11 @@ const payloadLine = String(probe.stdout || '')
 assert.ok(payloadLine, probe.stdout);
 
 const payload = JSON.parse(payloadLine);
+const expectedTempRoot = path.resolve(process.env.TEST_TEMP_ROOT || DEFAULT_TEST_TEMP_ROOT);
+assert.strictEqual(path.resolve(payload.env.TEST_TEMP_ROOT), expectedTempRoot);
+assert.strictEqual(path.resolve(payload.env.TEMP), expectedTempRoot);
+assert.strictEqual(path.resolve(payload.env.TMP), expectedTempRoot);
+assert.strictEqual(path.resolve(payload.env.TMPDIR), expectedTempRoot);
 assert.strictEqual(payload.env.MODEL_TLS_IMPERSONATION_ENABLED, 'false');
 assert.strictEqual(payload.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED, 'false');
 assert.strictEqual(payload.env.MEMORY_CLI_RERANK_ENABLED, 'false');

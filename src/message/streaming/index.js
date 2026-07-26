@@ -1,11 +1,17 @@
 const { sanitizeUserFacingText } = require('../../../utils/userFacingText');
+const defaultConfig = require('../../../config');
 const {
   findExplicitSegmentBreakIndex,
   findNaturalSplitIndex,
   getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('../../../core/streamingSegmentation');
+const {
+  buildOutboundMessageMeta,
+  recordOutboundMessageEvent
+} = require('../../../core/outboundMessageDiagnostics');
 const { getGroupReplySensitiveGuard } = require('../../../utils/groupReplySensitiveGuard');
+const { isAdminUserId } = require('../../../utils/privilegedPrivateChat');
 
 function getReplyChunkChars(config = {}) {
   const n = Number(config.AI_REPLY_CHUNK_CHARS);
@@ -42,7 +48,13 @@ function createStreamingDispatcher({
   userId,
   senderId,
   shouldSend = null,
-  telemetry = null
+  telemetry = null,
+  source = '',
+  routePolicyKey = '',
+  triggerReason = '',
+  topRouteType = '',
+  routeMeta = null,
+  requestTrace = null
 } = {}) {
   const effectiveConfig = runtimeConfig && typeof runtimeConfig === 'object'
     ? runtimeConfig
@@ -104,20 +116,25 @@ function createStreamingDispatcher({
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
       let sendText = text;
-      if (!isPrivate) {
+      const adminConfig = effectiveConfig && Object.keys(effectiveConfig).length ? effectiveConfig : defaultConfig;
+      const shouldGuard = !isPrivate || !isAdminUserId(userId, adminConfig);
+      if (shouldGuard) {
         const guard = getGroupReplySensitiveGuard();
         const check = guard.check(text);
         if (check.blocked) {
           sendText = guard.replacementText;
-          console.warn('[reply-sensitive-guard] group reply blocked', {
+          console.warn('[reply-sensitive-guard] reply blocked', {
+            channel: isPrivate ? 'private' : 'group',
             groupId: String(groupId || '').trim(),
+            userId: String(userId || '').trim(),
             senderId: String(senderId || '').trim(),
             matchedCount: check.matchedWords.length
           });
           emitStreamingTelemetry('group_reply_sensitive_blocked', {
             node: 'reply_sensitive_guard',
-            channel: 'group',
+            channel: isPrivate ? 'private' : 'group',
             groupId: String(groupId || '').trim(),
+            userId: String(userId || '').trim(),
             senderId: String(senderId || '').trim(),
             matchedCount: check.matchedWords.length,
             source: 'stream_chunk'
@@ -139,6 +156,29 @@ function createStreamingDispatcher({
           };
       const startedAt = Date.now();
       if (!state.sendStartedAt) state.sendStartedAt = startedAt;
+      const outboundMeta = buildOutboundMessageMeta({
+        source,
+        routePolicyKey,
+        triggerReason,
+        topRouteType,
+        routeMeta,
+        requestTrace,
+        telemetry
+      }, {
+        source: 'main_reply_stream',
+        triggerReason: 'stream_chunk'
+      });
+      const outboundPayload = {
+        channel: isPrivate ? 'private' : 'group',
+        action: payload.action,
+        groupId: String(groupId || '').trim(),
+        userId: String(userId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        chunkIndex,
+        chunkCount: 0,
+        messageLength: String(sendText || '').length
+      };
+      recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
       emitStreamingTelemetry('reply_stream_chunk_start', {
         node: 'reply_stream_send',
         channel: isPrivate ? 'private' : 'group',
@@ -149,6 +189,10 @@ function createStreamingDispatcher({
         chunkLength: text.length
       });
       const sent = await sendWithRetry(payload, 1, 300);
+      recordOutboundMessageEvent(sent ? 'send_success' : 'send_failure', outboundMeta, {
+        ...outboundPayload,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
 
       if (!sent) {
         state.failedChunks += 1;
