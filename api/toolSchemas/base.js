@@ -103,6 +103,20 @@ const baseToolSchemas = [
   {
     type: 'function',
     function: {
+      name: 'read_shared_link',
+      description: 'Read public content from a supported Xiaohongshu, NetEase Cloud Music, or Bilibili share link',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Supported public share URL' }
+        },
+        required: ['url']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'currency_convert',
       description: '姹囩巼鎹㈢畻',
       parameters: {

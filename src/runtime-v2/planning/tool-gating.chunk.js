@@ -59,6 +59,7 @@ const {
   needsWebDetailFetch,
   pickMinimalToolAllowlist
 } = require('./tool-selection.chunk');
+const { extractFirstSupportedSharedLink } = require('../../../api/skills_native/sharedLink/url');
 
 function getPromptNormalizer() {
   return require('./prompt-normalizer.chunk');
@@ -135,6 +136,8 @@ function isCompanionPlannerSafeReadTool(toolName = '') {
 
 function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], options = {}) {
   if (!isCompanionPlannerMode(options)) return 'not_companion_mode';
+  const topRouteType = normalizeText(route?.topRouteType || route?.meta?.topRouteType || 'direct_chat');
+  if (topRouteType !== 'direct_chat') return 'blocked_route';
   const allowed = normalizeToolNames(toolNames);
   if (allowed.length === 0) return 'no_tools_requested';
   if (
@@ -156,6 +159,7 @@ function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], optio
   if ((shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) && allowed.includes('memory_cli')) return 'allow_safe_memory_recall';
   if ((sourceScope === 'notebook' || responseIntent === 'summary') && allowed.some((toolName) => toolName === 'notebook_search' || toolName === 'notebook_list_docs' || toolName === 'memory_cli')) return 'allow_safe_notebook';
   if (allowed.includes('url_safety_check') && /https?:\/\//i.test(cleanText)) return 'allow_safe_url_check';
+  if (allowed.includes('read_shared_link') && extractFirstSupportedSharedLink(cleanText)) return 'allow_safe_shared_link';
   return 'blocked_non_companion_intent';
 }
 

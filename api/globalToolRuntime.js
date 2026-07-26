@@ -51,6 +51,16 @@ const GLOBAL_TOOL_REGISTRY = [
     readOnly: true
   },
   {
+    toolName: 'read_shared_link',
+    executorName: 'read_shared_link',
+    schemaName: 'read_shared_link',
+    maxCallsPerTurn: 1,
+    timeoutMs: 30000,
+    allowedInRoutes: ['chat', 'lookup', 'transform', 'plan', 'act', 'admin', 'direct_chat'],
+    resultFormatter: formatPlainEvidence,
+    readOnly: true
+  },
+  {
     toolName: 'get_current_time',
     executorName: 'get_current_time',
     schemaName: 'get_current_time',
@@ -235,6 +245,11 @@ function formatArgsSummary(toolName, args = {}) {
   }
   if (toolName === 'web_fetch') {
     return `url=${JSON.stringify(String(normalizedArgs.url || '').trim())}`;
+  }
+  if (toolName === 'read_shared_link') {
+    const { summarizeSharedLinkUrl } = require('./skills_native/sharedLink/url');
+    const summary = summarizeSharedLinkUrl(normalizedArgs.url);
+    return `platform=${summary.platform}, contentId=${summary.contentId}`;
   }
   if (toolName === 'get_current_time') {
     return `timezone=${JSON.stringify(String(normalizedArgs.timezone || '').trim() || config.TIMEZONE)}`;
@@ -657,6 +672,11 @@ async function executeGlobalToolBatch(toolCalls = [], context = {}) {
       toolResult.status = 'failed';
       toolResult.rawResult = `Tool error: ${error.message}`;
       toolResult.evidence = trimEvidence(toolResult.rawResult, 600);
+    }
+
+    if (toolName === 'read_shared_link') {
+      const { summarizeSharedLinkUrl } = require('./skills_native/sharedLink/url');
+      toolResult.args = summarizeSharedLinkUrl(toolResult.args.url || toolCall.args?.url);
     }
 
     toolResult.durationMs = Date.now() - startedAt;

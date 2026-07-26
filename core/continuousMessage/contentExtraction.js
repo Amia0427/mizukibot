@@ -41,7 +41,7 @@ function identifyCardPlatform(url = '') {
     const host = String(parsed.hostname || '').toLowerCase();
     const path = String(parsed.pathname || '');
     if (['www.bilibili.com', 'bilibili.com', 'm.bilibili.com', 'b23.tv', 'bili2233.cn'].includes(host)) return 'bilibili';
-    if (['www.xiaohongshu.com', 'xiaohongshu.com', 'xhschlink.com'].includes(host)) return 'xhs';
+    if (['www.xiaohongshu.com', 'xiaohongshu.com', 'm.xiaohongshu.com', 'xhslink.com', 'xhschlink.com'].includes(host)) return 'xhs';
     if (['api.xiaoheihe.cn', 'www.xiaoheihe.cn', 'xiaoheihe.cn'].includes(host)) return 'xiaoheihe';
     if (['tieba.baidu.com', 'www.tieba.baidu.com'].includes(host) && /^\/p\/\d+/i.test(path)) return 'tieba';
     if (['ngabbs.com', 'nga.178.com', 'bbs.nga.cn'].includes(host)) return 'nga';
@@ -83,13 +83,12 @@ function canonicalizeKnownShareUrl(url = '') {
       }
     }
 
-    if (['www.xiaohongshu.com', 'xiaohongshu.com'].includes(host)) {
+    if (['www.xiaohongshu.com', 'xiaohongshu.com', 'm.xiaohongshu.com'].includes(host)) {
       const matched = path.match(/^\/(?:discovery\/item|explore)\/([0-9A-Za-z]+)/i);
       if (matched?.[1]) {
-        const queryText = parsed.searchParams.toString();
-        return queryText
-          ? `https://www.xiaohongshu.com/discovery/item/${matched[1]}?${queryText}`
-          : `https://www.xiaohongshu.com/discovery/item/${matched[1]}`;
+        const xsecToken = normalizeText(query.get('xsec_token'));
+        const canonical = `https://www.xiaohongshu.com/discovery/item/${matched[1]}`;
+        return xsecToken ? `${canonical}?xsec_token=${encodeURIComponent(xsecToken)}` : canonical;
       }
     }
 
@@ -98,9 +97,19 @@ function canonicalizeKnownShareUrl(url = '') {
       if (/^\d+$/.test(tid)) return `https://ngabbs.com/read.php?tid=${tid}`;
     }
 
-    if (host === 'y.music.163.com' && path === '/m/song') {
-      const songId = normalizeText(query.get('id'));
-      if (/^\d+$/.test(songId)) return `https://music.163.com/#/song?id=${songId}`;
+    if (['music.163.com', 'y.music.163.com'].includes(host)) {
+      let resourcePath = path;
+      let resourceQuery = query;
+      if (parsed.hash.startsWith('#/')) {
+        const hashUrl = new URL(parsed.hash.slice(1), 'https://music.163.com');
+        resourcePath = hashUrl.pathname;
+        resourceQuery = hashUrl.searchParams;
+      }
+      const matched = resourcePath.match(/^\/(?:m\/)?(song|playlist|album)\/?$/i);
+      const resourceId = normalizeText(resourceQuery.get('id'));
+      if (matched && /^\d+$/.test(resourceId)) {
+        return `https://music.163.com/#/${matched[1].toLowerCase()}?id=${resourceId}`;
+      }
     }
 
     if (host === 'zhuanlan.zhihu.com') {

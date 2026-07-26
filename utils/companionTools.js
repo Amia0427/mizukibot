@@ -5,6 +5,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'get_current_time',
   'get_context_stats',
   'url_safety_check',
+  'read_shared_link',
   'getWeather',
   'skill_weather',
   'notebook_search',
@@ -24,7 +25,8 @@ const COMPANION_PLANNER_SAFE_READ_TOOLS = Object.freeze([
   'memory_cli',
   'notebook_search',
   'notebook_list_docs',
-  'url_safety_check'
+  'url_safety_check',
+  'read_shared_link'
 ]);
 
 function parseToolList(value = '') {

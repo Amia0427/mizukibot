@@ -11,6 +11,7 @@ const {
 const {
   buildCanonicalRouteContract
 } = require('./routeSchema');
+const { extractFirstSupportedSharedLink } = require('../api/skills_native/sharedLink/url');
 
 function hasOwnValue(source = {}, key = '') {
   return Boolean(source && Object.prototype.hasOwnProperty.call(source, key));
@@ -143,8 +144,52 @@ function buildChatOnlyPlannerDecision(route = {}, available = {}, options = {}) 
   );
 }
 
+function buildSharedLinkPlannerDecision(route = {}, available = {}, options = {}) {
+  const contract = buildCanonicalRouteContract(route);
+  if (contract.topRouteType !== 'direct_chat') return null;
+  if (!available.allowedToolNames.includes('read_shared_link')) return null;
+  const url = extractFirstSupportedSharedLink(route?.question || route?.cleanText || '');
+  if (!url) return null;
+  const policyKey = resolvePolicyKey(route);
+  const decision = planning.normalizePlannerDecisionV2({
+    mode: 'tool_plan',
+    taskShape: 'tool_augmented_reply',
+    allowedToolNames: ['read_shared_link'],
+    steps: [{
+      id: 'read_shared_link_1',
+      tool: 'read_shared_link',
+      args: { url },
+      purpose: '读取用户本轮分享链接的公开内容，供主回复结合当前对话回应',
+      successCriteria: '返回公开内容或明确的不可用说明'
+    }],
+    plannerMeta: {
+      decisionVersion: planning.PLANNER_DECISION_VERSION,
+      plannerVersion: planning.DIRECT_CHAT_PLANNER_VERSION,
+      reason: 'supported shared link detected after reply routing',
+      plannerModel: planning.getPlannerModelName(),
+      decisionSource: 'rule_preflight_shared_link',
+      fallbackUsed: false,
+      semanticConfidence: 1,
+      needsSemanticRefinement: false
+    }
+  }, route, {
+    ...options,
+    toolCatalog: available.toolCatalog,
+    fallbackUsed: false
+  });
+  const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {
+    toolCatalog: available.toolCatalog
+  });
+  return attachExecutablePlanToPlannerDecision(
+    directChatDecision,
+    buildExecutablePlanFromPlannerDecision(directChatDecision, policyKey, route)
+  );
+}
+
 async function planDirectChat(route = {}, options = {}) {
   const available = planning.collectAvailableToolSummary(route, options);
+  const sharedLinkDecision = buildSharedLinkPlannerDecision(route, available, options);
+  if (sharedLinkDecision) return sharedLinkDecision;
   if (shouldBypassImageSummaryPlanner(route, available, options)) {
     return buildChatOnlyPlannerDecision(route, available, {
       ...options,

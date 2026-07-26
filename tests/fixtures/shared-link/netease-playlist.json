@@ -1,0 +1,15 @@
+{
+  "code": 200,
+  "playlist": {
+    "id": 3778678,
+    "name": "华语速写",
+    "description": "适合安静夜晚的华语歌单",
+    "creator": { "nickname": "云村编辑" },
+    "coverImgUrl": "https://p1.music.126.net/playlist.jpg",
+    "tracks": [
+      { "id": 1, "name": "第一首", "ar": [{ "name": "歌手甲" }], "al": { "name": "专辑甲" }, "dt": 180000 },
+      { "id": 2, "name": "第二首", "ar": [{ "name": "歌手乙" }], "al": { "name": "专辑乙" }, "dt": 200000 }
+    ],
+    "trackCount": 2
+  }
+}

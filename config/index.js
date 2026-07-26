@@ -415,6 +415,7 @@ module.exports = {
   VISION_CAPTION_WORKER_TIMEOUT_MS: pickNum('VISION_CAPTION_WORKER_TIMEOUT_MS', 12000),
   VISION_CAPTION_WORKER_MAX_IMAGES: Math.max(1, Math.min(8, pickNum('VISION_CAPTION_WORKER_MAX_IMAGES', 8))),
   VISION_CAPTION_WORKER_MAX_TOKENS: pickNum('VISION_CAPTION_WORKER_MAX_TOKENS', 2200),
+  SHARED_LINK_XHS_COOKIE: pick('SHARED_LINK_XHS_COOKIE', ''),
   // Optional dedicated endpoints for memory extraction/compression and image understanding.
   // Empty means "follow API_BASE_URL".
   MEMORY_API_BASE_URL: pick('MEMORY_API_BASE_URL', pick('MEMORY_API_BASEURI', '')),

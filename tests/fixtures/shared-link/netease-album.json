@@ -1,0 +1,13 @@
+{
+  "code": 200,
+  "album": {
+    "id": 34720827,
+    "name": "示例专辑",
+    "description": "一张用于测试的专辑",
+    "artist": { "name": "示例歌手" },
+    "picUrl": "https://p1.music.126.net/album.jpg"
+  },
+  "songs": [
+    { "id": 11, "name": "专辑第一首", "ar": [{ "name": "示例歌手" }], "al": { "name": "示例专辑" }, "dt": 210000 }
+  ]
+}

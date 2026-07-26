@@ -69,6 +69,7 @@ function buildGlobalToolDescriptors() {
     sideEffect: item.readOnly === false,
     parallelSafe: item.readOnly !== false,
     maxCallsPerTurn: item.maxCallsPerTurn,
+    timeoutMs: item.timeoutMs,
     allowedRoutes: item.allowedInRoutes,
     resultFormatter: item.resultFormatter,
     supportsPreflight: true,

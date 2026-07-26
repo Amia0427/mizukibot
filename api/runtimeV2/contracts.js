@@ -451,6 +451,9 @@ function createCapabilityDescriptor(raw = {}) {
     maxCallsPerTurn: Number.isFinite(Number(descriptor.maxCallsPerTurn))
       ? Math.max(1, Math.floor(Number(descriptor.maxCallsPerTurn)))
       : 1,
+    timeoutMs: Number.isFinite(Number(descriptor.timeoutMs))
+      ? Math.max(0, Math.floor(Number(descriptor.timeoutMs)))
+      : undefined,
     allowedRoutes: normalizeArray(descriptor.allowedRoutes).map((item) => normalizeText(item)).filter(Boolean),
     resultFormatter: typeof descriptor.resultFormatter === 'function' ? descriptor.resultFormatter : null,
     supportsPreflight: Boolean(descriptor.supportsPreflight),

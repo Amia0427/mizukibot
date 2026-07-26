@@ -264,6 +264,12 @@ function stableHash(value) {
   return JSON.stringify(value || {});
 }
 
+function sanitizeExecutionArgs(toolName = '', args = {}) {
+  if (normalizeText(toolName) !== 'read_shared_link') return args;
+  const { summarizeSharedLinkUrl } = require('../../skills_native/sharedLink/url');
+  return summarizeSharedLinkUrl(args.url);
+}
+
 function isToolFailureText(resultText = '') {
   const text = String(resultText || '').trim();
   if (!text) return true;
@@ -290,10 +296,13 @@ function isUnresolvedMemoryOpenCommand(commandText = '') {
 
 function computeToolEnvelope(step = {}, rawResult = '', descriptor = null, helpers = {}) {
   const resultText = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult ?? '');
-  const args = normalizeObject(step.inputs, {});
-  const argsHash = typeof helpers.stableHash === 'function'
-    ? String(helpers.stableHash(args) || '').trim()
-    : stableHash(args);
+  const rawArgs = normalizeObject(step.inputs, {});
+  const args = sanitizeExecutionArgs(step.tool, rawArgs);
+  const argsHash = normalizeText(step.tool) === 'read_shared_link'
+    ? `shared-link:${args.contentId}`
+    : (typeof helpers.stableHash === 'function'
+      ? String(helpers.stableHash(args) || '').trim()
+      : stableHash(args));
   const status = isToolFailureText(resultText) ? 'failed' : 'completed';
   return normalizeExecutionEnvelope({
     tool_call_id: `${normalizeText(step.id)}_${argsHash}_${Date.now()}`,
@@ -765,13 +774,14 @@ async function executeBatch(steps = [], state = {}, context = {}) {
     context.maxConcurrency ?? config.AGENT_BATCH_MAX_CONCURRENCY,
     4
   );
-  const timeoutMs = normalizeNonNegativeInt(
+  const batchTimeoutMs = normalizeNonNegativeInt(
     context.timeoutMs ?? config.AGENT_BATCH_TOOL_TIMEOUT_MS ?? config.TOOL_TIMEOUT_MS,
     0
   );
 
   const executeItem = async (item) => {
     const descriptor = resolveCapability(descriptorRegistry, item.tool);
+    const timeoutMs = normalizeNonNegativeInt(descriptor?.timeoutMs ?? batchTimeoutMs, batchTimeoutMs);
     const cacheKey = isCacheableCapability(descriptor, item) ? buildToolCacheKey(item, descriptor) : '';
     const cached = getCachedEnvelope(cache, cacheKey);
     if (cached) return cached;

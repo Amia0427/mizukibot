@@ -35,6 +35,7 @@ const TOOL_POLICIES = {
   self_improvement_guides: { risk: 'low', capability: 'memory_read' },
   web_search: { risk: 'medium', capability: 'network' },
   web_fetch: { risk: 'medium', capability: 'network' },
+  read_shared_link: { risk: 'medium', capability: 'network' },
   get_current_time: { risk: 'low', capability: 'general' },
   skill_weather: { risk: 'medium', capability: 'network' },
   notebook_append_journal: { risk: 'medium', capability: 'fs_write' },
@@ -174,6 +175,13 @@ function normalizeWebFetchArgs(args = {}) {
   if (!/^https?:\/\//i.test(url)) throw new Error('web_fetch requires http/https url');
   next.url = url;
   return next;
+}
+
+function normalizeSharedLinkArgs(args = {}) {
+  const { parseSharedLinkUrl } = require('../../api/skills_native/sharedLink/url');
+  const parsed = parseSharedLinkUrl(args.url);
+  if (!parsed) throw new Error('read_shared_link requires a supported public URL');
+  return { url: parsed.canonicalUrl || parsed.url };
 }
 
 function normalizeTimeArgs(args = {}) {
@@ -357,6 +365,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
     toolName === 'skill_tavily_extract'
   ) {
     return normalizeWebFetchArgs(args);
+  }
+
+  if (toolName === 'read_shared_link') {
+    return normalizeSharedLinkArgs(args);
   }
 
   if (toolName === 'get_current_time') {

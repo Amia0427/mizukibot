@@ -65,6 +65,7 @@ const nativeOntology = createLazyModuleProxy('nativeOntology', () => require('..
 const nativeYoutube = createLazyModuleProxy('nativeYoutube', () => require('../skills_native/youtube'));
 const nativePpt = createLazyModuleProxy('nativePpt', () => require('../skills_native/ppt'));
 const nativeImageGenerate = createLazyModuleProxy('nativeImageGenerate', () => require('../skills_native/imageGenerate'));
+const nativeSharedLink = createLazyModuleProxy('nativeSharedLink', () => require('../skills_native/sharedLink'));
 
 let cachedMemoryCliRunner = undefined;
 
@@ -762,6 +763,15 @@ const TOOL_EXECUTORS = {
 
   web_fetch: async (args = {}) => {
     return runFreeUrlExtract(args);
+  },
+
+  read_shared_link: async (args = {}) => {
+    const result = await nativeSharedLink.readSharedLink({
+      url: args.url,
+      signal: args.signal,
+      userText: args.__context?.question || ''
+    });
+    return nativeSharedLink.formatSharedLinkEvidence(result);
   },
 
   skill_brave_extract: async (args = {}) => {
