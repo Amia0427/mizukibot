@@ -186,13 +186,16 @@ function createDailyJournalSummaryRunner(deps = {}) {
             beforeDay: targetDay
           });
           count += Number(tailResult?.processed || 0) || 0;
+          if (tailResult?.ok === false) hadFailure = true;
         } else if (await writeDailyJournalSummary(userId, targetDay, options)) {
           count += 1;
         }
 
-        const rollupResult = await maintainDailyJournalRollups(userId, options);
-        fourDayCreated += Number(rollupResult?.fourDayCreated || 0);
-        monthlyCreated += Number(rollupResult?.monthlyCreated || 0);
+        if (!config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED) {
+          const rollupResult = await maintainDailyJournalRollups(userId, options);
+          fourDayCreated += Number(rollupResult?.fourDayCreated || 0);
+          monthlyCreated += Number(rollupResult?.monthlyCreated || 0);
+        }
       } catch (error) {
         hadFailure = true;
         console.error('[daily_journal] failed to summarize day:', {

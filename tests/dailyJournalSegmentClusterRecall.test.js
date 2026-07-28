@@ -12,6 +12,7 @@ process.env.DAILY_JOURNAL_SEGMENT_MAX_ENTRIES = '10';
 process.env.DAILY_JOURNAL_SEGMENT_MAX_CLUSTERS_PER_RUN = '3';
 process.env.DAILY_JOURNAL_SEGMENT_MIN_CLUSTER_ENTRIES = '2';
 process.env.DAILY_JOURNAL_ENABLED = 'true';
+process.env.DAILY_JOURNAL_TURN_COMPACTION_ENABLED = 'false';
 process.env.MEMORY_V3_ENABLED = 'true';
 process.env.MEMORY_JOURNAL_EMBEDDING_BACKFILL_ENABLED = 'false';
 process.env.MEMORY_V3_DIR = path.join(tempRoot, 'memory-v3');

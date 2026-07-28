@@ -1,15 +1,16 @@
 # Env Configuration
 
-更新时间：2026-07-28 10:29 +08:00
+更新时间：2026-07-28 23:41 +08:00
 
 ## Daily Journal 轮数压缩
 
-- `DAILY_JOURNAL_TURN_COMPACTION_ENABLED=true`：启用按用户全局对话轮数压缩；关闭后保留旧的按日/分段逻辑。
+- `DAILY_JOURNAL_TURN_COMPACTION_ENABLED=true`：启用按用户全局对话轮数压缩；新记录只写 Profile Journal SQLite，不再写每日 Markdown、sidecar、daily/4day/monthly 汇总。关闭后恢复旧的按日文件和分段逻辑。
 - `DAILY_JOURNAL_TURN_COMPACTION_THRESHOLD=50`：每 50 个安全的用户+助手完整对话轮生成一个 `segment` 摘要，可跨会话、跨日期。
 - `DAILY_JOURNAL_TURN_COMPACTION_MAX_INPUT_CHARS=40000`：单批次送入摘要模型的最大字符数。
 - `DAILY_JOURNAL_TURN_COMPACTION_RECALL_LIMIT=8`：Profile Journal SQLite 召回的最近轮数摘要数量。
 - 摘要统一使用 `MEMORY_API_BASE_URL`、`MEMORY_MODEL`、`MEMORY_API_KEY` 对应的独立记忆模型链路，不降级到主回复模型；模型失败时批次保留为 failed，后续重试。
 - SQLite 迁移会为 `journal_entries` 增加用户序号、批次字段和 `journal_compaction_batches` 表；旧原文不物理删除，成功压缩后仅标记为 `archived`，最近活动窗口仍可召回。
+- 历史 Daily Journal 文件继续支持读取和回滚，不自动删除；每日 scheduler 在轮数模式下只压缩截至昨日的尾部，失败时不更新完成状态，以便下次重试。
 
 ## 维护约定
 

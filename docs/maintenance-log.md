@@ -1714,3 +1714,9 @@
 - 验收：`dailyJournalTurnCompaction.test.js`、Daily Journal/SQLite/worker 相关回归测试、定向 ESLint 通过；工作区原有 `embeddingIndex.js` 重复 `const config` 语法错误已删除重复声明，保留其余并行改动。
 - 完整验收：`npm run lint`、`npm run typecheck`、`git diff --check` 通过；`npm test` 中 Daily Journal 相关用例均通过，但现有工作区的 `memoryV3EmbeddingBackfillConcurrency.test.js`（0 !== 4）和 `memoryV3RagExplainDiagnostic.test.js`（false !== true）仍失败，单独复跑结果一致，未在本任务中修改其所属 Memory V3 文件。
 - 提交后记录：Daily Journal 轮数压缩补充实现与验收提交 `e9b8a7d` 已完成；当前分支未推送。
+
+## 运行维护 2026-07-28 23:41 +08:00
+
+- 关闭轮数模式下的旧 Daily Journal 写入机制：新对话仅写 Profile Journal SQLite，不再新增每日 Markdown、sidecar、daily/4day/monthly 汇总；历史文件读取和关闭轮数模式后的回滚兼容保留。
+- 调度修正：截至昨日的尾部压缩失败时不推进完成日期，后续调度继续重试。
+- 验收：Daily Journal 轮数压缩、旧分段、sidecar、聚类召回和污染防护测试通过；`npm run lint`、`npm run typecheck` 通过。`npm test` 仍仅有既有的两个 Memory V3 用例失败，单独复跑结果一致，未修改其所属模块。

@@ -28,6 +28,7 @@ module.exports = (async () => {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.DATA_DIR = dataDir;
     process.env.DAILY_JOURNAL_ENABLED = 'true';
+    process.env.DAILY_JOURNAL_TURN_COMPACTION_ENABLED = 'false';
     process.env.MEMORY_V3_ENABLED = 'true';
     process.env.MEMORY_V3_DIR = path.join(dataDir, 'memory-v3');
     process.env.MEMORY_V3_EVENTS_DIR = path.join(process.env.MEMORY_V3_DIR, 'events');

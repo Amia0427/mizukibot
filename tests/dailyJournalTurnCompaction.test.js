@@ -34,6 +34,7 @@ module.exports = (async () => {
 
     const dailyJournal = require('../utils/dailyJournal');
     const profileJournalDb = require('../utils/profileJournalDb');
+    const { getEntrySidecarFilePath, getJournalFilePath } = require('../utils/dailyJournal/storage');
     const addEntries = (userId, count, dayForIndex = () => '2026-07-01', startIndex = 0) => {
       for (let index = 0; index < count; index += 1) {
         const sequence = startIndex + index;
@@ -48,6 +49,29 @@ module.exports = (async () => {
         });
       }
     };
+
+    const appended = await dailyJournal.appendDailyJournalEntry(
+      'u_append',
+      'new question',
+      'new answer',
+      {},
+      { date: new Date('2026-07-01T10:00:00.000Z'), turnId: 'append-turn-1', throwOnError: true }
+    );
+    assert.strictEqual(appended, true);
+    assert.strictEqual(profileJournalDb.listJournalEntries({ userId: 'u_append', status: 'active' }).entries.length, 1);
+    assert.strictEqual(fs.existsSync(getJournalFilePath('u_append', '2026-07-01')), false);
+    assert.strictEqual(fs.existsSync(getEntrySidecarFilePath('u_append', '2026-07-01')), false);
+
+    const unsafeAppended = await dailyJournal.appendDailyJournalEntry(
+      'u_append',
+      '宝你知道我是谁吗',
+      '你是谁来着',
+      {},
+      { date: new Date('2026-07-01T11:00:00.000Z'), turnId: 'append-turn-unsafe', throwOnError: true }
+    );
+    assert.strictEqual(unsafeAppended, false);
+    assert.strictEqual(profileJournalDb.listJournalEntries({ userId: 'u_append', status: 'unsafe' }).entries.length, 1);
+    assert.strictEqual(fs.existsSync(getEntrySidecarFilePath('u_append', '2026-07-01')), false);
 
     addEntries('u_threshold', 49);
     const belowThreshold = await dailyJournal.maybeCompactJournalByTurnThreshold('u_threshold', {
@@ -163,6 +187,31 @@ module.exports = (async () => {
     assert.strictEqual(requestCalls[0][0], 'https://memory.example/v1/chat/completions');
     assert.strictEqual(requestCalls[0][1].model, 'memory-model');
     assert.strictEqual(requestCalls[0][3], 'memory-key');
+
+    const { createDailyJournalSummaryRunner } = require('../utils/dailyJournal/summaryRunner');
+    const summaryState = { users: {} };
+    let savedState = false;
+    let legacyRollupCalls = 0;
+    const scheduler = createDailyJournalSummaryRunner({
+      appendPerfEvent: () => {},
+      compactPendingJournalTail: async () => ({ ok: false, processed: 0, failed: 1 }),
+      config: {
+        DAILY_JOURNAL_ENABLED: true,
+        DAILY_JOURNAL_TURN_COMPACTION_ENABLED: true,
+        TIMEZONE: 'Asia/Shanghai'
+      },
+      favorites: { u_scheduler: {} },
+      formatDateInTz: () => '2026-07-02',
+      getBackgroundPressureDelayMs: () => 0,
+      loadSummaryState: () => summaryState,
+      maintainDailyJournalRollups: async () => { legacyRollupCalls += 1; },
+      saveSummaryState: () => { savedState = true; },
+      shiftDate: () => '2026-07-01'
+    });
+    const schedulerResult = await scheduler.runDailyJournalSummaries({ force: true });
+    assert.strictEqual(schedulerResult.hadFailure, true);
+    assert.strictEqual(savedState, false);
+    assert.strictEqual(legacyRollupCalls, 0);
 
     console.log('dailyJournalTurnCompaction.test.js passed');
   } finally {
