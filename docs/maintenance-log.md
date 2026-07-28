@@ -1720,3 +1720,4 @@
 - 关闭轮数模式下的旧 Daily Journal 写入机制：新对话仅写 Profile Journal SQLite，不再新增每日 Markdown、sidecar、daily/4day/monthly 汇总；历史文件读取和关闭轮数模式后的回滚兼容保留。
 - 调度修正：截至昨日的尾部压缩失败时不推进完成日期，后续调度继续重试。
 - 验收：Daily Journal 轮数压缩、旧分段、sidecar、聚类召回和污染防护测试通过；`npm run lint`、`npm run typecheck` 通过。`npm test` 仍仅有既有的两个 Memory V3 用例失败，单独复跑结果一致，未修改其所属模块。
+- 提交后记录：关闭旧 Daily Journal 自动写入机制提交 `25adb6b` 已完成；当前分支未推送。
