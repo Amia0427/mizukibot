@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-07-28 10:20 +08:00
+
+- Memory V3 RAG 检索优化已接入：向量化资格统一拒绝原始 turn、模型回复、污染文本、低置信度和 superseded/suspect 节点；LanceDB 行补齐 `scope/user/group/session/category/semanticSlot/lifecycle/versionRoot/sourceTs/confidence/textHash/modelVersion` 元数据。
+- `queryMemory()` 现在使用按 facet 的 Recall Plan：连续性/日期走 lexical-first，profile/preference/relationship、task、group/style 使用来源白名单与 source/semantic-slot 配额；远程 rerank 仅在高价值或高歧义候选上启用，并保留 embedding/LanceDB/rerank 降级路径。评估支持 `forbiddenIds`、`allowEmpty` 和 p95 延迟门禁。
+- 验收：`memoryV3RecallPlan`、Memory V3 查询/embedding/LanceDB/门禁定向测试通过；`diagnose --skip-probe` 通过。当前数据仍有约 962 条孤立 LanceDB 行、10 条待同步和投影过期，`lancedb-gate --auto-gold --limit 20` 按门禁失败并建议先 full reconcile；本轮未执行 reconcile、删除或远端推送。
+
 > 面向 QQ 的角色 Agent —— 在真实群聊/私聊里稳定运转，而不只是个问答 bot。
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。

@@ -44,17 +44,19 @@ function shouldVectorizeMemoryNode(node = {}) {
   const status = normalizeText(node.status).toLowerCase();
   const lifecycle = lifecycleStatusOf(node);
   if (status === 'archived' || status === 'superseded' || status === 'suspect' || lifecycle === 'archived' || lifecycle === 'superseded' || lifecycle === 'suspect') return false;
+  const evidenceTier = normalizeText(node.evidenceTier).toLowerCase();
+  if (['candidate', 'pending', 'proposed'].includes(status) && !['strict', 'confirmed'].includes(evidenceTier)) return false;
   const type = normalizeText(node.type || node.memoryKind).toLowerCase();
   const source = normalizeText(node.source || node.sourceKind).toLowerCase();
   if (RAW_TYPES.has(type) || /(?:^|_)(?:raw|turn|reply|prompt)(?:$|_)/i.test(type)) return false;
   if (/(?:model[_ -]?reply|assistant[_ -]?reply|system[_ -]?prompt|user[_ -]?turn)/i.test(source)) return false;
+  const confidence = Number(node.confidence);
+  if (Number.isFinite(confidence) && confidence < 0.65) return false;
   if (isSummaryNode(node)) return true;
   if (ALLOWED_TYPES.has(type)) return true;
   if (['explicit', 'extractor', 'image', 'post_reply_worker', 'passive_group_reply'].includes(source)) {
-    const confidence = Number(node.confidence);
     return !Number.isFinite(confidence) || confidence >= 0.65;
   }
-  const evidenceTier = normalizeText(node.evidenceTier).toLowerCase();
   return evidenceTier === 'strict' || evidenceTier === 'confirmed' || status === 'active';
 }
 

@@ -149,6 +149,16 @@ async function queryMemory(input = {}) {
   const facet = FACETS.includes(String(input.facet || '').trim().toLowerCase())
     ? String(input.facet || '').trim().toLowerCase()
     : classifyFacet(query, input);
+  const recallPlan = buildRecallPlan({
+    ...input,
+    userId,
+    query,
+    facet,
+    scope: input.scope || {
+      groupId: input.groupId,
+      sessionKey: input.sessionKey || input.sessionId
+    }
+  });
   const rewrites = rewriteQuery(query, facet);
   const bm25Enabled = input.bm25Enabled !== false && config.MEMORY_BM25_ENABLED !== false;
   const rrfEnabled = input.rrfEnabled !== false && config.MEMORY_RRF_ENABLED !== false;
@@ -169,14 +179,19 @@ async function queryMemory(input = {}) {
     ...input,
     rewrites,
     userId,
+    allowRemoteEmbedding: recallPlan.allowRemoteEmbedding,
+    allowedSources: recallPlan.allowedSources,
+    modelVersion: config.MEMORY_EMBEDDING_MODEL_VERSION || config.MEMORY_EMBEDDING_MODEL,
     timingDiagnostics: timing
   });
   timing.queryEmbeddingMs = getNowMs() - stageStartedAt;
   stageStartedAt = getNowMs();
-  const candidates = filterCandidatesBySource(collectCandidates(userId, {
+  const candidates = filterCandidatesByAllowedSources(filterCandidatesBySource(collectCandidates(userId, {
     ...input,
-    facet
-  }), input.source);
+    facet,
+    allowedSources: recallPlan.allowedSources,
+    nodeScanLimit: input.nodeScanLimit || recallPlan.candidateBudget.local
+  }), input.source), recallPlan.allowedSources);
   const categoryManifest = compactMemoryCategoryManifest(buildMemoryCategoryManifestFromDocs(candidates), input.categoryManifestLimit || 12);
   timing.collectCandidatesMs = getNowMs() - stageStartedAt;
   const vectorStoreMode = normalizeVectorStoreModeLight(config.MEMORY_VECTOR_STORE);
@@ -212,11 +227,12 @@ async function queryMemory(input = {}) {
     const vectorSearchOptions = {
       ...input,
       userId,
-      allowedGroupIds
+      allowedGroupIds,
+      allowedSources: recallPlan.allowedSources
     };
     const vectorOptions = {
       ...input,
-      limit: input.lancedbLimit || input.limit || config.MEMORY_LANCEDB_CANDIDATE_LIMIT,
+      limit: input.lancedbLimit || input.limit || recallPlan.candidateBudget.vector || config.MEMORY_LANCEDB_CANDIDATE_LIMIT,
       timeoutMs: input.lancedbTimeoutMs || input.timeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS
     };
     const vectorResult = shouldUseLanceDbHelper()
@@ -228,6 +244,7 @@ async function queryMemory(input = {}) {
       ...input,
       userId,
       allowedGroupIds,
+      allowedSources: recallPlan.allowedSources,
       filter: vectorResult.filter
     }).filter((item) => matchesFacetCandidate(facet, item));
     const noVisibleReason = vectorCandidates.length > 0
@@ -236,6 +253,7 @@ async function queryMemory(input = {}) {
         ...input,
         userId,
         allowedGroupIds,
+        allowedSources: recallPlan.allowedSources,
         filter: vectorResult.filter
       }, facet);
     lancedbDiagnostics = {
@@ -309,17 +327,19 @@ async function queryMemory(input = {}) {
     2,
     Math.min(
       100,
-      Math.floor(Number(input.rerankCandidateLimit || config.MEMORY_RERANK_CANDIDATE_LIMIT || config.MEMORY_RERANK_MAX_CANDIDATES || 32) || 32)
+      Math.floor(Number(input.rerankCandidateLimit || recallPlan.candidateBudget.rerank || config.MEMORY_RERANK_CANDIDATE_LIMIT || config.MEMORY_RERANK_MAX_CANDIDATES || 32) || 32)
     )
   );
   const sortedForRerank = stableSortByScore(conflictResolved);
   const rerankPool = sortedForRerank.slice(0, rerankCandidateLimit);
   const rerankTail = sortedForRerank.slice(rerankCandidateLimit);
+  const rerankDecision = shouldRunRecallRerank(rerankPool, recallPlan, input);
   const rerankBeforeRuntime = getMemoryRerankRuntimeState();
   stageStartedAt = getNowMs();
   const rerankedHead = await rerankMemoryCandidates(query, rerankPool, {
     ...input,
     userId,
+    disableRerank: input.disableRerank === true || rerankDecision.enabled !== true,
     phase: 'memory_v3',
     maxCandidates: Math.min(
       rerankCandidateLimit,
@@ -343,7 +363,8 @@ async function queryMemory(input = {}) {
   stageStartedAt = getNowMs();
   const selected = diversify(ensureTargetJournalCandidates(semanticDedup.items, candidates, journalTargetDays), topK, {
     ...input,
-    facet
+    facet,
+    recallPlan
   });
   timing.diversifyMs = getNowMs() - stageStartedAt;
   timing.totalMs = getNowMs() - startedAt;
@@ -375,7 +396,8 @@ async function queryMemory(input = {}) {
     projectionStaleReason: projectionFreshness.projectionStaleReason || ''
   };
   const rerankDiagnostics = {
-    enabled: config.MEMORY_RERANK_ENABLED !== false && input.disableRerank !== true,
+    enabled: config.MEMORY_RERANK_ENABLED !== false && input.disableRerank !== true && recallPlan.allowRemoteRerank !== false,
+    decision: rerankDecision,
     applied: rerankedHead.some((item) => Number(item.rerankScore || 0) > 0),
     candidates: rerankPool.length,
     limit: rerankCandidateLimit,
@@ -397,7 +419,8 @@ async function queryMemory(input = {}) {
     rerankEnabled: rerankDiagnostics.enabled,
     hydeEnabled,
     multiQueryEnabled,
-    skippedRewriteReasons
+    skippedRewriteReasons,
+    recallPlan
   };
   const rankFusion = buildRankFusionSnapshot({
     vector: vectorCandidates,
@@ -440,6 +463,7 @@ async function queryMemory(input = {}) {
       },
       coverageAtQuery,
       retrievalPlan,
+      recallPlan,
       rerank: rerankDiagnostics,
       journalIntent,
       sourcePlan,
@@ -451,6 +475,7 @@ async function queryMemory(input = {}) {
       projectionFreshness,
       coverageAtQuery,
       retrievalPlan,
+      recallPlan,
       journalIntent,
       sourcePlan,
       recentRecallIntent,
@@ -481,6 +506,7 @@ module.exports = {
   queryMemory,
   classifyFacet,
   rewriteQuery,
+  buildRecallPlan,
   collectCandidates,
   diversify,
   applyConflictResolution,

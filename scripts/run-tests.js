@@ -38,6 +38,7 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'memory.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryProjection.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3Query.test.js'),
+  path.join(__dirname, '..', 'tests', 'memoryV3RecallPlan.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3SessionRestore.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3PersonaCore.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3WeakEvidence.test.js'),

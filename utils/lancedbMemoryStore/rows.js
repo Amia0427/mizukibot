@@ -383,7 +383,13 @@ function chunkList(values = [], size = 100) {
 }
 
 function resolveVectorCandidates(rows = [], localCandidates = [], context = {}) {
-  const filter = context.filter || buildMemoryFilter(context);
+  const filter = {
+    ...buildMemoryFilter(context),
+    ...(context.filter || {}),
+    allowedSources: Array.isArray(context.allowedSources)
+      ? context.allowedSources
+      : (context.filter?.allowedSources || [])
+  };
   const localById = new Map((Array.isArray(localCandidates) ? localCandidates : [])
     .map((item) => [normalizeText(item.id || item.nodeId), item])
     .filter(([key]) => key));
