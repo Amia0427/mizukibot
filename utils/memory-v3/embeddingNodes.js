@@ -5,6 +5,7 @@ const {
 } = require('./helpers');
 const { isMemoryNotRecallable } = require('./recallFilter');
 const { shouldVectorizeMemoryNode } = require('./embeddingPolicy');
+const { shouldIndexJournalEpisode } = require('./journalEpisodePolicy');
 
 function createEmbeddingNodes(deps = {}) {
   const { buildEmbeddingIdentity } = deps;
@@ -24,7 +25,7 @@ function createEmbeddingNodes(deps = {}) {
         const eventId = normalizeText(episode.id);
         if (!text || !eventId) continue;
         const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
-        if (rollupLevel === 'segment') continue;
+        if (!shouldIndexJournalEpisode(episode)) continue;
         const episodeNode = {
           id: `episode:${eventId}`,
           source: 'journal',

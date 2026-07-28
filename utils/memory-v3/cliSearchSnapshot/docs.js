@@ -10,6 +10,7 @@ const {
   normalizeTags
 } = require('../categoryMetadata');
 const { buildDailyJournalDocsForAllUsers } = require('../journalDocs');
+const { shouldIndexJournalEpisode } = require('../journalEpisodePolicy');
 const { isMemoryNotRecallable } = require('../recallFilter');
 
 function toSafeNumber(value, fallback = 0) {
@@ -372,7 +373,7 @@ function buildEpisodeDocs(snapshot = {}) {
     for (const episode of normalizeArray(entry?.items)) {
       if (isMemoryNotRecallable(episode)) continue;
       const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
-      if (rollupLevel === 'segment') continue;
+      if (!shouldIndexJournalEpisode(episode)) continue;
       const title = normalizeText(episode.episodeDay || episode.yearMonth || rollupLevel || 'episode');
       const doc = makeDocBase({
         id: `episode:${String(episode.id || '').trim()}`,

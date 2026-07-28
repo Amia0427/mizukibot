@@ -18,6 +18,7 @@ const {
   matchesMemoryMetadataFilters
 } = require('./categoryMetadata');
 const { isMemoryNotRecallable } = require('./recallFilter');
+const { shouldIndexJournalEpisode } = require('./journalEpisodePolicy');
 const { isPollutedMemoryText } = require('../recallPollutionGuard');
 const { filterResolvedMemoryConflicts } = require('./memoryConflictResolver');
 const {
@@ -179,7 +180,7 @@ function collectCandidates(userId, options = {}) {
     for (const episode of Array.isArray(episodes) ? episodes : []) {
       if (isMemoryNotRecallable(episode)) continue;
       const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
-      if (rollupLevel === 'segment') continue;
+      if (!shouldIndexJournalEpisode(episode)) continue;
       const episodeDay = normalizeText(episode.episodeDay || episode.endDay || episode.startDay);
       const candidate = {
         id: `episode:${episode.id}`,

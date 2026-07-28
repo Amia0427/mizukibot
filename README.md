@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-07-28 23:49 +08:00
+
+- 修复 Daily Journal 轮数摘要的独立向量化链路：`journal_turn_summary` / `turn_batch` segment 现在统一进入 embedding cache、本地查询候选、CLI 快照和后续 LanceDB 同步；旧 `.segments.jsonl` 切片仍由 `journal-segment:*` 文档负责，不从 episode 投影重复索引。
+- 验收：新增 turn-compaction 端到端回归覆盖 embedding cache、查询候选、CLI 快照和 LanceDB 行构建；相关 Daily Journal/embedding/语义召回 5 项测试、`npm run lint`、`npm run typecheck` 和 `npm run diag:memory -- diagnose --skip-probe --json` 均退出 0；真实数据当前没有 `journal_turn_summary` 事件，无需历史回填。
+- 只读诊断：投影未过期、`readyButNotSynced=0`，仍有 1 条既存 LanceDB stale row 和 1 条待 embedding，建议后续单独执行 full reconcile；本轮未修改运行数据、未删除文件、未推送远端。
+
 ## 运行维护 2026-07-28 10:20 +08:00
 
 - Memory V3 RAG 检索优化已接入：向量化资格统一拒绝原始 turn、模型回复、污染文本、低置信度和 superseded/suspect 节点；LanceDB 行补齐 `scope/user/group/session/category/semanticSlot/lifecycle/versionRoot/sourceTs/confidence/textHash/modelVersion` 元数据。
@@ -166,7 +172,7 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - **QQ 接入**：通过 NapCat / OneBot 收发私聊、群聊、图片、引用、转发、戳一戳等事件。
 - **路由分流**：按 `ignore` / `refuse` / `admin` / `direct_chat` 等路线分发，不是每条消息都砸给大模型。
 - **角色一致性**：prompt manifest、persona worldbook、运行时协议和回复清洗共同维持瑞希的语气和边界。
-- **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。Daily Journal 默认只写 Profile Journal SQLite，按用户累计 50 轮安全对话调用独立记忆模型生成 segment 摘要；每日任务只兜底压缩未满 50 轮的历史尾部，不再新增按日文件或多日汇总。
+- **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。Daily Journal 默认只写 Profile Journal SQLite，按用户累计 50 轮安全对话调用独立记忆模型生成 segment 摘要并独立向量化；每日任务只兜底压缩未满 50 轮的历史尾部，不再新增按日文件或多日汇总。
 - **工具调用**：本地命令、诊断、知识检索、图片处理、日程、自定义 skill。
 - **瑞希瑞幸**：独立 `瑞希瑞幸` 命令接入瑞幸官方 MCP/skill，群聊做菜单、推荐、预览，私聊处理个人 Token、订单和支付二维码。
 - **后台学习**：post-reply worker 在回复后异步抽取记忆、维护画像、写日记，不卡主回复。

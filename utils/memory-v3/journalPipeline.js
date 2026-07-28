@@ -1,5 +1,6 @@
 const path = require('path');
 const config = require('../../config');
+const { shouldIndexJournalEpisode } = require('./journalEpisodePolicy');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -121,7 +122,7 @@ function buildJournalEpisodeDocsForUser(userId = '') {
     const eventId = normalizeText(episode.id);
     if (!text || !eventId) return null;
     const rollupLevel = normalizeRollupLevel(episode.rollupLevel || episode.type || 'daily');
-    if (rollupLevel === 'segment') return null;
+    if (!shouldIndexJournalEpisode(episode)) return null;
     return {
       id: `episode:${eventId}`,
       source: 'journal',

@@ -1721,3 +1721,9 @@
 - 调度修正：截至昨日的尾部压缩失败时不推进完成日期，后续调度继续重试。
 - 验收：Daily Journal 轮数压缩、旧分段、sidecar、聚类召回和污染防护测试通过；`npm run lint`、`npm run typecheck` 通过。`npm test` 仍仅有既有的两个 Memory V3 用例失败，单独复跑结果一致，未修改其所属模块。
 - 提交后记录：关闭旧 Daily Journal 自动写入机制提交 `25adb6b` 已完成；当前分支未推送。
+
+## 运行维护 2026-07-28 23:49 +08:00
+
+- 根因：新轮数压缩生成的 `episode_rollup_generated` 使用 `rollupLevel=segment`，但 embedding 全量收集、即时 journal 入队、本地查询候选和 CLI 快照沿用旧去重规则，统一跳过所有 episode segment，导致 `journal_turn_summary` 只能通过 SQLite 词法召回，无法形成独立向量。
+- 修复：新增共享 journal episode 索引策略，只放行 `journal_turn_summary`、`turn_batch` 或 `daily_journal_turn_compaction` segment；旧 `journal_segment` 继续由 `.segments.jsonl` 的 `journal-segment:*` 文档向量化，避免重复索引和重复召回。
+- 验收：`dailyJournalTurnCompactionEmbedding.test.js` 覆盖 embedding cache、查询候选、CLI 快照和 LanceDB 行构建，连同 `dailyJournalTurnCompaction.test.js`、`dailyJournalSegments.test.js`、`memoryV3EmbeddingIndex.test.js`、`dailyJournalSegmentSemanticRecall.test.js` 全部通过；`npm run lint`、`npm run typecheck`、`npm run diag:memory -- diagnose --skip-probe --json` 均退出 0。扩展查询回归 8 项中 7 项通过，既有 `memoryV3RagExplainDiagnostic.test.js` 仍在 rerank enabled 断言失败，与本次 segment 准入无关；真实投影中当前 `journal_turn_summary=0`，无需历史回填，只读诊断保留 1 条既存 stale LanceDB row 和 1 条待 embedding，本轮未处理运行数据。
