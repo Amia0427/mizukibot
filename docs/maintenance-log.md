@@ -1713,3 +1713,4 @@
 - 召回行为：Profile Journal DB 增加 `segment` 层和轮数摘要搜索；每日 scheduler 只压缩昨日及更早未满 50 轮的历史尾部，当前日未完成尾部不提前处理；关闭 `DAILY_JOURNAL_TURN_COMPACTION_ENABLED` 可回到旧逻辑。
 - 验收：`dailyJournalTurnCompaction.test.js`、Daily Journal/SQLite/worker 相关回归测试、定向 ESLint 通过；工作区原有 `embeddingIndex.js` 重复 `const config` 语法错误已删除重复声明，保留其余并行改动。
 - 完整验收：`npm run lint`、`npm run typecheck`、`git diff --check` 通过；`npm test` 中 Daily Journal 相关用例均通过，但现有工作区的 `memoryV3EmbeddingBackfillConcurrency.test.js`（0 !== 4）和 `memoryV3RagExplainDiagnostic.test.js`（false !== true）仍失败，单独复跑结果一致，未在本任务中修改其所属 Memory V3 文件。
+- 提交后记录：Daily Journal 轮数压缩补充实现与验收提交 `e9b8a7d` 已完成；当前分支未推送。
