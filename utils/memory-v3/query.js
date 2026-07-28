@@ -33,8 +33,10 @@ const {
 } = require('./categoryManifest');
 const { chooseSourcePlan } = require('./cliSearchPlan');
 const {
+  buildRecallPlan,
   classifyFacet,
-  rewriteQuery
+  rewriteQuery,
+  shouldRunRecallRerank
 } = require('./queryPolicy');
 const {
   applyConflictResolution,
@@ -45,6 +47,7 @@ const {
 } = require('./queryRanking');
 const {
   collectCandidates,
+  filterCandidatesByAllowedSources,
   filterCandidatesBySource,
   mergeCandidateLists
 } = require('./queryCandidates');
@@ -102,11 +105,12 @@ async function resolveQueryEmbedding(query = '', facet = 'default', options = {}
     if (diagnostics) diagnostics.queryEmbeddingCacheHit = true;
     return options.queryEmbedding;
   }
-  if (!shouldUseRemoteEmbedding()) return null;
+  if (options.allowRemoteEmbedding === false || !shouldUseRemoteEmbedding()) return null;
   const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
   const cacheKey = buildQueryEmbeddingCacheKey(query, facet, {
     ...options,
-    rewrites
+    rewrites,
+    modelVersion: options.modelVersion || config.MEMORY_EMBEDDING_MODEL_VERSION || config.MEMORY_EMBEDDING_MODEL
   });
   const cached = getCachedQueryEmbedding(cacheKey);
   if (cached) {

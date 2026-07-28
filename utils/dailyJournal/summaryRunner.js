@@ -18,6 +18,7 @@ function createDailyJournalSummaryRunner(deps = {}) {
     getYearMonthFromDay,
     loadSummaryState,
     maintainDailyJournalRollups,
+    compactPendingJournalTail = async () => ({ processed: 0 }),
     parseJournalEntries,
     filterInjectableJournalEntries,
     postWithRetry,
@@ -179,7 +180,15 @@ function createDailyJournalSummaryRunner(deps = {}) {
     let monthlyCreated = 0;
     for (const userId of Object.keys(favorites || {})) {
       try {
-        if (await writeDailyJournalSummary(userId, targetDay, options)) count += 1;
+        if (config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED) {
+          const tailResult = await compactPendingJournalTail(userId, {
+            ...options,
+            beforeDay: targetDay
+          });
+          count += Number(tailResult?.processed || 0) || 0;
+        } else if (await writeDailyJournalSummary(userId, targetDay, options)) {
+          count += 1;
+        }
 
         const rollupResult = await maintainDailyJournalRollups(userId, options);
         fourDayCreated += Number(rollupResult?.fourDayCreated || 0);

@@ -9,7 +9,7 @@ const {
   canonicalizeText
 } = require('./helpers');
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const DEFAULT_DOC_MAX_CHARS = 1800;
 const BACKFILL_SOURCE_SET = new Set(['all', 'memory', 'journal']);
 const FAILURE_REASONS = ['embedding_request_failed', 'empty_embedding', 'rate_limit', 'auth_failed', 'timeout'];
@@ -22,6 +22,10 @@ function sha1(value) {
 
 function getEmbeddingModel() {
   return normalizeText(config.MEMORY_EMBEDDING_MODEL);
+}
+
+function getEmbeddingModelVersion() {
+  return normalizeText(config.MEMORY_EMBEDDING_MODEL_VERSION || getEmbeddingModel() || 'default');
 }
 
 function isEmbeddingIndexEnabled() {
@@ -68,6 +72,7 @@ function buildEmbeddingIdentity(node = {}) {
     canonicalKey: normalizeText(node.canonicalKey || canonicalizeText(node.text)).toLowerCase(),
     source: normalizeText(node.source),
     model,
+    modelVersion: getEmbeddingModelVersion(),
     textHash,
     updatedAt: Number(node.updatedAt || node.createdAt || 0) || 0
   };
@@ -136,6 +141,7 @@ function normalizeCacheRow(row = {}) {
     nodeId,
     canonicalKey,
     model,
+    modelVersion: normalizeText(row.modelVersion || model || getEmbeddingModelVersion()),
     source: normalizeText(row.source),
     textHash: normalizeText(row.textHash),
     embedding: Array.isArray(row.embedding) ? row.embedding : [],
@@ -219,6 +225,7 @@ function loadEmbeddingIndex() {
 function rowMatchesIdentity(row, identity) {
   if (!row || !identity) return false;
   return row.model === identity.model
+    && row.modelVersion === identity.modelVersion
     && row.textHash === identity.textHash
     && row.updatedAt === identity.updatedAt;
 }
@@ -240,6 +247,7 @@ function makePendingRow(identity) {
     nodeId: identity.nodeId,
     canonicalKey: identity.canonicalKey,
     model: identity.model,
+    modelVersion: identity.modelVersion,
     source: identity.source,
     textHash: identity.textHash,
     embedding: [],
@@ -261,6 +269,7 @@ module.exports = {
   filterEmbeddingBackfillNodes,
   findReusableRow,
   getEmbeddingModel,
+  getEmbeddingModelVersion,
   isEmbeddingIndexEnabled,
   isJournalEmbeddingDoc,
   loadEmbeddingIndex,

@@ -42,14 +42,18 @@ function resolveAllowedGroupIds(userId = '', options = {}) {
 function collectCandidates(userId, options = {}) {
   const facet = normalizeText(options.facet || 'default').toLowerCase();
   const requestedSource = normalizeText(options.source || 'all').toLowerCase();
-  const includeRecent = shouldCollectSourceForQuery('recent', facet, requestedSource);
-  const includePersonal = shouldCollectSourceForQuery('personal', facet, requestedSource);
-  const includeProfile = shouldCollectSourceForQuery('profile', facet, requestedSource);
-  const includeTask = shouldCollectSourceForQuery('task', facet, requestedSource);
-  const includeGroup = shouldCollectSourceForQuery('group', facet, requestedSource);
-  const includeJargon = shouldCollectSourceForQuery('jargon', facet, requestedSource);
-  const includeJournal = shouldCollectSourceForQuery('journal', facet, requestedSource);
-  const includeStyle = shouldCollectSourceForQuery('style', facet, requestedSource);
+  const allowedSources = new Set((Array.isArray(options.allowedSources) ? options.allowedSources : [])
+    .map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
+  const allow = (source) => (allowedSources.size === 0 || allowedSources.has(source))
+    && shouldCollectSourceForQuery(source, facet, requestedSource);
+  const includeRecent = allow('recent');
+  const includePersonal = allow('personal');
+  const includeProfile = allow('profile');
+  const includeTask = allow('task');
+  const includeGroup = allow('group');
+  const includeJargon = allow('jargon');
+  const includeJournal = allow('journal');
+  const includeStyle = allow('style');
   const sessionProjection = includeRecent ? loadSessionProjectionForUser(userId, options) : { sessions: {} };
   const profileProjection = includeProfile ? loadProfileProjectionForUser(userId) : { users: {} };
   const episodeProjection = includeJournal ? loadEpisodeProjectionForUser(userId) : { users: {} };
@@ -113,7 +117,7 @@ function collectCandidates(userId, options = {}) {
       const source = scopeType === 'task'
         ? 'task'
         : (scopeType === 'group' ? (node.memoryKind === 'jargon' ? 'jargon' : 'group') : (node.memoryKind === 'style' ? 'style' : 'personal'));
-      if (!shouldCollectSourceForQuery(source, facet, requestedSource)) continue;
+      if (!allow(source)) continue;
       if (scopeType === 'group') {
         if (!allowedGroupIds.includes(groupId)) continue;
       } else if (nodeUserId !== String(userId || '').trim()) {
@@ -247,6 +251,13 @@ function filterCandidatesBySource(candidates = [], source = 'all') {
   });
 }
 
+function filterCandidatesByAllowedSources(candidates = [], allowedSources = []) {
+  const allowed = new Set((Array.isArray(allowedSources) ? allowedSources : [])
+    .map((item) => normalizeText(item).toLowerCase()).filter(Boolean));
+  if (allowed.size === 0) return Array.isArray(candidates) ? candidates : [];
+  return (Array.isArray(candidates) ? candidates : []).filter((item) => allowed.has(normalizeText(item.source).toLowerCase()));
+}
+
 function candidateKey(item = {}) {
   return normalizeText(item.id || item.nodeId)
     || normalizeText(`${item.scopeType || ''}|${item.userId || ''}|${item.groupId || ''}|${item.canonicalKey || canonicalizeText(item.text)}`);
@@ -270,6 +281,7 @@ function mergeCandidateLists(...groups) {
 module.exports = {
   candidateKey,
   collectCandidates,
+  filterCandidatesByAllowedSources,
   filterCandidatesBySource,
   mergeCandidateLists,
   resolveAllowedGroupIds

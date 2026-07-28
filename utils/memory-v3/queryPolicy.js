@@ -98,11 +98,98 @@ function shouldCollectSourceForQuery(source = '', facet = 'default', requestedSo
   return allowed ? allowed.has(normalizedSource) : true;
 }
 
+function buildRecallPlan(input = {}) {
+  const query = normalizeText(input.query);
+  const facet = normalizeText(input.facet || classifyFacet(query, input)).toLowerCase() || 'default';
+  const requestedSource = normalizeText(input.source || 'all').toLowerCase() || 'all';
+  const scope = input.scope && typeof input.scope === 'object' ? input.scope : {};
+  const base = {
+    facet,
+    route: 'default',
+    reason: 'mixed_recall',
+    allowedSources: ['recent', 'profile', 'personal', 'task', 'group', 'jargon', 'style', 'journal'],
+    sourceQuotas: {},
+    semanticSlotQuotas: {},
+    candidateBudget: { local: 96, vector: 64, bm25: 48, rerank: 0 },
+    allowRemoteEmbedding: true,
+    allowRemoteRerank: true,
+    lexicalFirst: false,
+    strictEvidenceThreshold: 0.58,
+    weakEvidenceThreshold: 0.2,
+    scope: {
+      userId: normalizeText(input.userId),
+      groupId: normalizeText(scope.groupId || input.groupId),
+      sessionKey: normalizeText(scope.sessionKey || input.sessionKey || input.sessionId)
+    }
+  };
+  if (requestedSource !== 'all') {
+    base.allowedSources = requestedSource === 'personal' ? ['personal', 'profile'] : [requestedSource];
+    base.route = `source/${requestedSource}`;
+    base.reason = 'explicit_source';
+  } else if (facet === 'continuity' || facet === 'journal') {
+    base.route = 'continuity/date';
+    base.reason = 'date_or_continuity';
+    base.allowedSources = ['recent', 'journal', 'task'];
+    base.sourceQuotas = { recent: 3, journal: 4, task: 3 };
+    base.semanticSlotQuotas = { continuity: 3, episode: 4 };
+    base.candidateBudget = { local: 72, vector: 40, bm25: 56, rerank: 0 };
+    base.allowRemoteRerank = false;
+    base.lexicalFirst = true;
+  } else if (['preference', 'identity', 'relationship'].includes(facet)) {
+    base.route = 'profile/preference/relationship';
+    base.reason = 'stable_profile_or_relationship';
+    base.allowedSources = facet === 'relationship'
+      ? ['profile', 'personal', 'style', 'recent']
+      : ['profile', 'personal', 'recent'];
+    base.sourceQuotas = { profile: 3, personal: 3, style: 2, recent: 1 };
+    base.semanticSlotQuotas = { preference_like: 2, preference_dislike: 2, relationship: 2, identity: 2 };
+    base.candidateBudget = { local: 64, vector: 48, bm25: 40, rerank: 24 };
+  } else if (facet === 'task') {
+    base.route = 'task';
+    base.reason = 'task_only';
+    base.allowedSources = ['task', 'recent'];
+    base.sourceQuotas = { task: 4, recent: 2 };
+    base.semanticSlotQuotas = { task: 4, continuity: 2 };
+    base.candidateBudget = { local: 64, vector: 40, bm25: 48, rerank: 24 };
+  } else if (facet === 'group' || facet === 'style') {
+    base.route = facet === 'group' ? 'group/style' : 'style';
+    base.reason = facet === 'group' ? 'group_scope_only' : 'style_scope_only';
+    base.allowedSources = facet === 'group' ? ['group', 'jargon'] : ['style', 'jargon', 'profile', 'personal'];
+    base.sourceQuotas = facet === 'group'
+      ? { group: 4, jargon: 2 }
+      : { style: 3, jargon: 2, profile: 2, personal: 2 };
+    base.semanticSlotQuotas = { group_jargon: 3, style_pattern: 3, relationship: 2 };
+    base.candidateBudget = { local: 64, vector: 40, bm25: 48, rerank: 20 };
+  } else {
+    base.candidateBudget.rerank = 20;
+  }
+  return base;
+}
+
+function shouldRunRecallRerank(candidates = [], plan = {}, options = {}) {
+  if (options.disableRerank === true || config.MEMORY_RERANK_ENABLED === false) return { enabled: false, reason: 'disabled' };
+  if (plan.allowRemoteRerank === false) return { enabled: false, reason: 'plan_disallowed' };
+  const list = Array.isArray(candidates) ? candidates : [];
+  if (list.length < 2) return { enabled: false, reason: 'insufficient_candidates' };
+  const sorted = list.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+  const top = sorted[0];
+  const second = sorted[1];
+  const margin = Math.max(0, Number(top?.score || 0) - Number(second?.score || 0));
+  const lexical = Math.max(...list.map((item) => Number(item.lexical || item.bm25 || 0) || 0));
+  const highValue = ['preference', 'identity', 'relationship', 'task', 'group', 'style'].includes(normalizeText(plan.facet).toLowerCase());
+  const ambiguous = margin <= Math.max(0.04, Number(options.rerankMarginThreshold || 0.08) || 0.08);
+  const lexicalWeak = lexical < Math.max(0.08, Number(options.rerankLexicalThreshold || 0.12) || 0.12);
+  if (plan.lexicalFirst && !ambiguous && !lexicalWeak) return { enabled: false, reason: 'lexical_confident', margin, lexical };
+  return { enabled: highValue || ambiguous || lexicalWeak, reason: highValue ? 'high_value' : (ambiguous ? 'small_score_margin' : 'lexical_weak'), margin, lexical };
+}
+
 module.exports = {
   calcMemoryStrength,
   classifyFacet,
   looksLikePollutedSessionSummary,
   rewriteQuery,
+  buildRecallPlan,
+  shouldRunRecallRerank,
   shouldCollectSourceForQuery,
   sourceHalfLifeDays
 };

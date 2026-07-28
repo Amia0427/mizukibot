@@ -336,7 +336,10 @@ function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {
 
 async function runEnrichPhase(job = {}, meta = {}) {
   const { extractPostReplyEnrichment } = getMemoryExtractionModule();
-  const { maybeSegmentJournalByThreshold } = getDailyJournalModule();
+  const {
+    maybeCompactJournalByTurnThreshold,
+    maybeSegmentJournalByThreshold
+  } = getDailyJournalModule();
   const { storeExtractedSelfImprovementItems } = getSelfImprovementModule();
   const { applyAffinityProposal } = getMemoryModule();
   const { addTaskMemory, addTaskMemoryWithVectorBackfill } = getTaskMemoryModule();
@@ -593,7 +596,11 @@ async function runEnrichPhase(job = {}, meta = {}) {
     ? String(latestTurnCreatedAt).slice(0, 10)
     : '';
   if (targetDay) {
-    await maybeSegmentJournalByThreshold(job.userId, targetDay, {
+    const compactJournal = config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED !== false
+      && typeof maybeCompactJournalByTurnThreshold === 'function'
+      ? maybeCompactJournalByTurnThreshold
+      : maybeSegmentJournalByThreshold;
+    const journalOptions = {
       sessionKey: meta.sessionKey,
       routePolicyKey: meta.routePolicyKey,
       topRouteType: meta.topRouteType,
@@ -603,7 +610,12 @@ async function runEnrichPhase(job = {}, meta = {}) {
       groupId: meta.groupId,
       channelId: meta.channelId,
       taskType: meta.taskType
-    });
+    };
+    if (compactJournal === maybeCompactJournalByTurnThreshold) {
+      await compactJournal(job.userId, journalOptions);
+    } else {
+      await compactJournal(job.userId, targetDay, journalOptions);
+    }
   }
   const gateStats = gate.getStats();
   const result = {

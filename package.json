@@ -44,6 +44,8 @@
     "lint": "eslint . --max-warnings=0 && node scripts/lint.js",
     "typecheck": "tsc -p tsconfig.check.json",
     "test": "node scripts/run-tests.js",
+    "coverage": "node scripts/run-coverage.js",
+    "coverage:check": "node scripts/check-coverage.js",
     "smoke:napcat-ingress": "node scripts/run-tests.js tests/napcatWsIngressSmoke.test.js tests/napcatHttpReverseServer.test.js tests/messageIngressDispatcher.test.js tests/messageIngressAsyncEntrypointSource.test.js",
     "smoke:runtime-hotfixes": "node scripts/run-tests.js tests/passiveAwarenessVisualCueProbeFallback.test.js tests/napcatPacketLogConfig.test.js tests/memoryV3EventsDailyFiles.test.js tests/postReplyTaskRunner.test.js tests/postReplyWorkerRuntime.test.js tests/draftReplyToolEvidence.test.js tests/memoryWritePipeline.test.js tests/memoryV3RecallVerificationFilter.test.js tests/postReplyVectorWatchdog.test.js",
     "smoke:pre-release": "node scripts/pre-release-smoke.js",
@@ -127,6 +129,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
+    "c8": "11.0.0",
     "cross-env": "^7.0.3",
     "eslint": "^9.39.5",
     "globals": "^16.5.0",

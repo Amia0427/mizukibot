@@ -48,6 +48,7 @@ module.exports = (async () => {
   assert.strictEqual(await eslint.isPathIgnored(chunkFile), true);
   assert.strictEqual(await eslint.calculateConfigForFile(chunkFile), undefined);
   assert.strictEqual(await eslint.isPathIgnored(path.join(root, 'data', 'probe.js')), true);
+  assert.strictEqual(await eslint.isPathIgnored(path.join(root, 'artifacts', 'coverage', 'probe.js')), true);
   assert.strictEqual(await eslint.isPathIgnored(path.join(root, 'node_modules', 'probe.js')), true);
   assert.strictEqual(await eslint.isPathIgnored(representativeFile), false);
   const eslintConfig = await eslint.calculateConfigForFile(path.join(root, 'eslint.config.js'));

@@ -61,6 +61,7 @@ const { createDailyJournalRollupMaintenance } = require('./rollupMaintenance');
 const { createDailyJournalSegments } = require('./segments');
 const { createDailyJournalMemorySync } = require('./memorySync');
 const { createDailyJournalSummaryRunner } = require('./summaryRunner');
+const { createDailyJournalTurnCompaction } = require('./turnCompaction');
 const { createDailyJournalViews } = require('./views');
 const {
   classifyJournalEntrySafety,
@@ -404,6 +405,25 @@ function buildUserSnapshot(userId) {
 }
 
 const {
+  compactPendingJournal,
+  compactPendingJournalTail,
+  maybeCompactJournalByTurnThreshold,
+  summarizeTurnBatch
+} = createDailyJournalTurnCompaction({
+  appendPerfEvent,
+  buildUserSnapshot,
+  config,
+  extractMessageContent,
+  getMemoryApiKey,
+  getMemoryChatCompletionsUrl,
+  getMemoryModelName,
+  postWithRetry,
+  scheduleDailyJournalEmbeddingBackfill,
+  strictClampText,
+  syncEpisodeMemory
+});
+
+const {
   runDailyJournalSummaries,
   shouldRunDailySummaryNow,
   summarizeJournalForDay,
@@ -413,6 +433,7 @@ const {
   atomicWriteText,
   buildUserSnapshot,
   config,
+  compactPendingJournalTail,
   extractMessageContent,
   favorites,
   formatDateInTz,
@@ -449,6 +470,9 @@ module.exports = {
   getDailyJournalRetrievalBundle,
   classifyJournalEntrySafety,
   maintainDailyJournalRollups,
+  compactPendingJournal,
+  compactPendingJournalTail,
+  maybeCompactJournalByTurnThreshold,
   runDailyJournalSummaries,
   shouldRunDailySummaryNow,
   writeDailyJournalSummary,
@@ -462,6 +486,8 @@ module.exports = {
   collectRecentEntrySidecars,
   maybeSegmentJournalByThreshold,
   _test: {
+    compactPendingJournal,
+    summarizeTurnBatch,
     syncEpisodeMemory,
     scheduleDailyJournalEmbeddingBackfill,
     getSummaryFilePath,

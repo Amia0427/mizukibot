@@ -48,15 +48,22 @@ for (const command of [
   assert.ok(findStep(quality, (step) => step.run === command), `missing quality command: ${command}`);
 }
 
-const testStep = findStep(quality, (step) => step.name === 'Run tests');
-assert.strictEqual(testStep.shell, 'pwsh');
-assert.ok(testStep.run.split(/\r?\n/).includes('npm test 2>&1 | Tee-Object -FilePath test-output.log'));
-assert.ok(testStep.run.split(/\r?\n/).includes('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'));
+const coverageStep = findStep(quality, (step) => step.name === 'Run coverage gate');
+assert.strictEqual(coverageStep.shell, 'pwsh');
+assert.ok(coverageStep.run.split(/\r?\n/).includes('npm run coverage 2>&1 | Tee-Object -FilePath coverage-output.log'));
+assert.ok(coverageStep.run.split(/\r?\n/).includes('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'));
 
-const artifactStep = findStep(quality, (step) => step.uses === 'actions/upload-artifact@v4');
-assert.strictEqual(artifactStep.if, 'failure()');
-assert.strictEqual(artifactStep.with.path, 'test-output.log');
-assert.strictEqual(artifactStep.with['retention-days'], 7);
+const failureArtifact = findStep(quality, (step) => step.name === 'Upload failed coverage log');
+assert.strictEqual(failureArtifact.if, 'failure()');
+assert.strictEqual(failureArtifact.with.path, 'coverage-output.log');
+assert.strictEqual(failureArtifact.with['retention-days'], 7);
+
+const coverageArtifact = findStep(quality, (step) => step.name === 'Upload coverage report');
+assert.strictEqual(coverageArtifact.if, 'always()');
+assert.ok(coverageArtifact.with.path.split(/\r?\n/).includes('artifacts/coverage/coverage-summary.json'));
+assert.ok(coverageArtifact.with.path.split(/\r?\n/).includes('artifacts/coverage/baseline-check.json'));
+assert.ok(coverageArtifact.with.path.split(/\r?\n/).includes('artifacts/coverage/lcov.info'));
+assert.strictEqual(coverageArtifact.with['retention-days'], 7);
 
 const linuxCheck = findStep(linuxPolicy, (step) => step.name === 'Check Node.js version and Linux scripts');
 assert.ok(linuxCheck.run.split(/\r?\n/).includes(

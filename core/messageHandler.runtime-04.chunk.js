@@ -154,7 +154,13 @@
       && replyToBotRecentWindowMs > 0
       && (Date.now() - lastBotReplyAt) <= replyToBotRecentWindowMs
     );
-    const directBotAnchor = Boolean(isPrivateChatType(chatType) || mentioned);
+    const hasCurrentCardContext = Array.isArray(continuousMeta?.cardContexts)
+      && continuousMeta.cardContexts.length > 0;
+    const directBotAnchor = Boolean(
+      isPrivateChatType(chatType)
+      || mentioned
+      || (hasCurrentCardContext && replyToBotIsRecent)
+    );
     const effectiveIntentText = String(
       directedContext?.quotePriority?.quoteAnchoredText
       || effectiveCleanText

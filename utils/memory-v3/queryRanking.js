@@ -23,7 +23,9 @@ function sourceLimit(source) {
   return 3;
 }
 
-function sourceLimitForFacet(source, facet = 'default') {
+function sourceLimitForFacet(source, facet = 'default', options = {}) {
+  const planQuota = options.sourceQuotas?.[source] ?? options.recallPlan?.sourceQuotas?.[source];
+  if (planQuota !== undefined) return Math.max(1, Number(planQuota) || 1);
   const base = sourceLimit(source);
   const normalizedFacet = normalizeText(facet).toLowerCase();
   if (normalizedFacet === 'preference' || normalizedFacet === 'identity' || normalizedFacet === 'relationship') {
@@ -45,6 +47,12 @@ function sourceLimitForFacet(source, facet = 'default') {
     if (source === 'profile') return 1;
   }
   return base;
+}
+
+function semanticSlotLimit(slot = '', options = {}) {
+  const normalized = normalizeText(slot).toLowerCase();
+  const quota = options.semanticSlotQuotas?.[normalized] ?? options.recallPlan?.semanticSlotQuotas?.[normalized];
+  return quota === undefined ? Number.POSITIVE_INFINITY : Math.max(1, Number(quota) || 1);
 }
 
 function matchesFacetCandidate(facet, candidate = {}) {
@@ -169,6 +177,7 @@ function diversify(items = [], topK = 8, options = {}) {
   const selected = [];
   const perSource = new Map();
   const seenCanonical = new Set();
+  const perSlot = new Map();
   const selectedJournalDays = new Set();
   const facet = normalizeText(options.facet || items.find((item) => item?.facet)?.facet || 'default').toLowerCase();
   const ranked = boostJournalDaySummaryCompanions(
@@ -180,7 +189,9 @@ function diversify(items = [], topK = 8, options = {}) {
     const canonical = String(item.canonicalKey || canonicalizeText(item.text));
     if (!canonical || seenCanonical.has(canonical)) continue;
     const source = String(item.source || 'personal');
-    if ((perSource.get(source) || 0) >= sourceLimitForFacet(source, facet)) continue;
+    if ((perSource.get(source) || 0) >= sourceLimitForFacet(source, facet, options)) continue;
+    const slot = semanticSlotForCandidate(item);
+    if ((perSlot.get(slot) || 0) >= semanticSlotLimit(slot, options)) continue;
     if (source === 'journal') {
       const day = getJournalDocDay(item);
       const isSegment = String(item.type || '').includes('segment') || String(item.rollupLevel || '') === 'segment';
@@ -197,6 +208,7 @@ function diversify(items = [], topK = 8, options = {}) {
     }
     seenCanonical.add(canonical);
     perSource.set(source, (perSource.get(source) || 0) + 1);
+    perSlot.set(slot, (perSlot.get(slot) || 0) + 1);
     const selectionReason = appendSelectionReason(item.selectionReason, `facet_${facet || 'default'}_selected`);
     selected.push({
       ...item,
@@ -212,7 +224,13 @@ function diversify(items = [], topK = 8, options = {}) {
     if (selected.length >= topK) break;
     const canonical = String(item.canonicalKey || canonicalizeText(item.text));
     if (seenCanonical.has(canonical)) continue;
+    const source = String(item.source || 'personal');
+    const slot = semanticSlotForCandidate(item);
+    if ((perSource.get(source) || 0) >= sourceLimitForFacet(source, facet, options)) continue;
+    if ((perSlot.get(slot) || 0) >= semanticSlotLimit(slot, options)) continue;
     seenCanonical.add(canonical);
+    perSource.set(source, (perSource.get(source) || 0) + 1);
+    perSlot.set(slot, (perSlot.get(slot) || 0) + 1);
     const selectionReason = appendSelectionReason(item.selectionReason, 'backfill_selected');
     selected.push({
       ...item,
@@ -278,6 +296,7 @@ module.exports = {
   diversify,
   matchesFacetCandidate,
   protectStrongSemanticCandidates,
+  semanticSlotLimit,
   sourceLimitForFacet,
   splitStrictWeak
 };
