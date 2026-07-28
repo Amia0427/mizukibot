@@ -24,6 +24,7 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.POST_REPLY_MEMORY_MODE = 'core';
+    process.env.DAILY_JOURNAL_TURN_COMPACTION_ENABLED = 'false';
     process.env.POST_REPLY_DAILY_JOURNAL_SEGMENT_NOW = 'false';
     process.env.POST_REPLY_ENRICH_ENABLED = 'true';
     process.env.POST_REPLY_ENRICH_DELAY_MS = '300000';

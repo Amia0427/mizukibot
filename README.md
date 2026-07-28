@@ -166,7 +166,7 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - **QQ 接入**：通过 NapCat / OneBot 收发私聊、群聊、图片、引用、转发、戳一戳等事件。
 - **路由分流**：按 `ignore` / `refuse` / `admin` / `direct_chat` 等路线分发，不是每条消息都砸给大模型。
 - **角色一致性**：prompt manifest、persona worldbook、运行时协议和回复清洗共同维持瑞希的语气和边界。
-- **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。
+- **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。Daily Journal 默认按用户累计 50 轮安全对话调用独立记忆模型生成 segment 摘要并写入 Profile Journal SQLite；每日任务只兜底压缩未满 50 轮的历史尾部，主回复模型不参与摘要生成。
 - **工具调用**：本地命令、诊断、知识检索、图片处理、日程、自定义 skill。
 - **瑞希瑞幸**：独立 `瑞希瑞幸` 命令接入瑞幸官方 MCP/skill，群聊做菜单、推荐、预览，私聊处理个人 Token、订单和支付二维码。
 - **后台学习**：post-reply worker 在回复后异步抽取记忆、维护画像、写日记，不卡主回复。

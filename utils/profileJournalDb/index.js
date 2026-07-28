@@ -939,7 +939,9 @@ function normalizeJournalEntryInput(input = {}, options = {}) {
   const turnId = normalizeText(input.turnId || input.turn_id || options.turnId);
   const sessionKey = normalizeText(input.sessionKey || input.session_key || options.sessionKey);
   return {
-    id: normalizeText(input.id) || stableId('je', [userId, day, ts, sessionKey, turnId, userText, assistantText]),
+    id: normalizeText(input.id) || stableId('je', turnId
+      ? [userId, 'turn', turnId]
+      : [userId, day, ts, sessionKey, userText, assistantText]),
     userId,
     day,
     ts,
@@ -1377,13 +1379,13 @@ function searchJournalEntries(userId, query = '', options = {}) {
   const rows = day
     ? db.prepare(`
       SELECT * FROM journal_entries
-      WHERE user_id = ? AND day = ? AND status = 'active'
+      WHERE user_id = ? AND day = ? AND status IN ('active', 'archived')
       ORDER BY ts DESC
       LIMIT 200
     `).all(uid, day)
     : db.prepare(`
       SELECT * FROM journal_entries
-      WHERE user_id = ? AND status = 'active'
+      WHERE user_id = ? AND status IN ('active', 'archived')
       ORDER BY ts DESC
       LIMIT 300
     `).all(uid);

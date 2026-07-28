@@ -355,7 +355,7 @@ async function appendDailyJournalEntry(userId, question, reply, userInfo = {}, o
   });
 
   const state = loadSummaryState();
-  if (options.segmentNow !== false) {
+  if (!config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED && options.segmentNow !== false) {
     try {
       await maybeSegmentJournal(uid, day, state, options);
     } catch (error) {

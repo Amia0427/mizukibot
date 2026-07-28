@@ -1705,3 +1705,11 @@
 - 行为覆盖：确认门、主进程/worker/launcher识别、调用者PID保护、期望停机marker先于停止、重启结果落盘、marker消费/来源保留、早退计数/冷却、HTTP reverse恢复仅绕过一次、锁成功/超时/进程提前退出、日志归档和worker原因优先级。仅 `restart-bot.cmd` 保留4项最小结构契约。
 - 验收：10项关联测试、730文件lint、typecheck、prompt、全仓secrets、PowerShell AST、production audit（0漏洞）、diff check和 `TEST_CONCURRENCY=4 npm test`（142.5秒）全部退出0；目标23完成。本轮未暂存并行代理的CI、覆盖率、依赖和安全诊断改动，未推送远端。
 - 提交后记录：目标23重启/daemon行为化实现提交 `84e534b` 已完成，README、维护日志、聚焦实施计划和32项目标路线图均已更新；当前分支未推送。
+
+## 运行维护 2026-07-28 10:29 +08:00
+
+- 实现 Daily Journal 按用户全局对话轮数压缩：默认每 50 个安全用户+助手轮次生成一个 SQLite `journal_rollups.level=segment` 摘要；摘要统一调用独立记忆模型，不调用主回复模型。
+- 数据一致性：`journal_entries` 增加用户序号和批次标记，新增 `journal_compaction_batches` 记录租约、失败重试和摘要 ID；多进程 worker 通过 SQLite 事务领取批次，成功后保留最近 8 条活动原文，其余只标记 `archived`。
+- 召回行为：Profile Journal DB 增加 `segment` 层和轮数摘要搜索；每日 scheduler 只压缩昨日及更早未满 50 轮的历史尾部，当前日未完成尾部不提前处理；关闭 `DAILY_JOURNAL_TURN_COMPACTION_ENABLED` 可回到旧逻辑。
+- 验收：`dailyJournalTurnCompaction.test.js`、Daily Journal/SQLite/worker 相关回归测试、定向 ESLint 通过；工作区原有 `embeddingIndex.js` 重复 `const config` 语法错误已删除重复声明，保留其余并行改动。
+- 完整验收：`npm run lint`、`npm run typecheck`、`git diff --check` 通过；`npm test` 中 Daily Journal 相关用例均通过，但现有工作区的 `memoryV3EmbeddingBackfillConcurrency.test.js`（0 !== 4）和 `memoryV3RagExplainDiagnostic.test.js`（false !== true）仍失败，单独复跑结果一致，未在本任务中修改其所属 Memory V3 文件。
