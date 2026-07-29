@@ -4,6 +4,7 @@
 - 最小实现：只修改群聊风格守卫共享常量；运行时截断与动态提示词自动复用新值，模型 token 上限、私聊和其他路由保持不变。
 - 验收：`tests/groupDirectReplyStyleGuard.test.js` 覆盖 8001 字输入精确截为 8000 字及动态提示词上限同步，`tests/messageRouteFlowGroupStreaming.test.js` 使用共享上限验证群聊工具回退链路。
 - 小目标已完成：QQ群直接问答不再按 220 字硬截断。
+- 提交后记录：QQ群 `direct_chat` 8000 字硬上限实现提交 `6d68b5d` 已完成，当前分支未推送。
 
 ## 运行维护 2026-07-25 13:52 +08:00
 
