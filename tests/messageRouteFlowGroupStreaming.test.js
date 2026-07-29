@@ -14,6 +14,9 @@ const {
   setGroupMainModelStreamEnabled,
   setGroupPublic
 } = require('../utils/groupMainModelStreamPolicy');
+const {
+  GROUP_DIRECT_REPLY_CHAR_LIMIT
+} = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
 
 function createBaseDeps(overrides = {}) {
   const replyOptionsSeen = [];
@@ -335,7 +338,10 @@ module.exports = (async () => {
       allowedTools: ['memory_cli']
     }
   });
-  assert.ok(guardedToolEnvelope.replyText.length <= 220, 'group direct tool fallback should be guarded before final send');
+  assert.ok(
+    guardedToolEnvelope.replyText.length <= GROUP_DIRECT_REPLY_CHAR_LIMIT,
+    'group direct tool fallback should be guarded before final send'
+  );
 
   console.log('messageRouteFlowGroupStreaming.test.js passed');
 })().catch((error) => {

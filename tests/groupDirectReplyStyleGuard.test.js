@@ -4,6 +4,9 @@ const {
   applyGroupDirectStyleGuard,
   createDirectReplyNode
 } = require('../api/runtimeV2/nodes/directReply');
+const {
+  GROUP_DIRECT_REPLY_CHAR_LIMIT
+} = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
 const { buildDynamicPrompt } = require('../api/runtimeV2/context/service');
 const { createFinalValidateNode } = require('../api/runtimeV2/nodes/finalValidate');
 const { createStreamingCoordinatorHelpers } = require('../api/runtimeV2/runtime/streamingCoordinator');
@@ -15,9 +18,15 @@ module.exports = (async () => {
     routeMeta: { groupId: '1092700300', chatType: 'group' }
   });
   assert.strictEqual(guard.applied, true);
-  assert.ok(guard.reasons.includes('too_long'));
   assert.ok(guard.reasons.includes('teaching_structure'));
-  assert.ok(guard.text.length <= 220);
+  assert.ok(guard.text.length <= GROUP_DIRECT_REPLY_CHAR_LIMIT);
+
+  const oversizedGuard = applyGroupDirectStyleGuard('长'.repeat(GROUP_DIRECT_REPLY_CHAR_LIMIT + 1), {
+    topRouteType: 'direct_chat',
+    routeMeta: { groupId: '1092700300', chatType: 'group' }
+  });
+  assert.ok(oversizedGuard.reasons.includes('too_long'));
+  assert.strictEqual(oversizedGuard.text.length, GROUP_DIRECT_REPLY_CHAR_LIMIT);
 
   const questionyGuard = applyGroupDirectStyleGuard(
     '你是不是还没理解役？你是不是想先背番种？你要不要先别碰副露？其实先记立直、断幺、役牌就够了。',
@@ -101,7 +110,7 @@ module.exports = (async () => {
   });
 
   assert.strictEqual(requestReplyCalls, 1, 'style guard must not add model calls');
-  assert.ok(result.output.finalReply.length <= 220);
+  assert.ok(result.output.finalReply.length <= GROUP_DIRECT_REPLY_CHAR_LIMIT);
   assert.ok(result.events.some((event) => event.type === 'group_direct_style_guard' && event.groupDirectStyleGuardApplied === true));
 
   const reusedAssistantDeltas = [];
@@ -165,7 +174,7 @@ module.exports = (async () => {
     output: { stream: {} },
     plan: {}
   });
-  assert.ok(streamingReuseResult.output.finalReply.length <= 220);
+  assert.ok(streamingReuseResult.output.finalReply.length <= GROUP_DIRECT_REPLY_CHAR_LIMIT);
   assert.strictEqual(reusedAssistantDeltas.length, 1);
   assert.strictEqual(reusedAssistantDeltas[0], streamingReuseResult.output.displayReply);
 
@@ -219,7 +228,7 @@ module.exports = (async () => {
     memory: {},
     output: {}
   });
-  assert.ok(streamed.finalReply.length <= 220);
+  assert.ok(streamed.finalReply.length <= GROUP_DIRECT_REPLY_CHAR_LIMIT);
   assert.strictEqual(streamDeltas.length, 1, 'group stream should emit only the guarded final text');
   assert.strictEqual(streamDeltas[0], streamed.finalReply);
 
@@ -242,7 +251,7 @@ module.exports = (async () => {
     memory: {},
     execution: {}
   });
-  assert.ok(finalValidated.output.finalReply.length <= 220);
+  assert.ok(finalValidated.output.finalReply.length <= GROUP_DIRECT_REPLY_CHAR_LIMIT);
   assert.ok(finalValidated.events.some((event) => event.type === 'group_direct_style_guard' && event.node === 'final_validate'));
 
   const toolFallbackReply = [
@@ -263,7 +272,7 @@ module.exports = (async () => {
     memory: {},
     execution: {}
   });
-  assert.ok(finalValidatedToolFallback.output.finalReply.length <= 220);
+  assert.ok(finalValidatedToolFallback.output.finalReply.length <= GROUP_DIRECT_REPLY_CHAR_LIMIT);
   assert.ok(finalValidatedToolFallback.events.some((event) => (
     event.type === 'group_direct_style_guard'
       && event.node === 'final_validate'
@@ -285,6 +294,7 @@ module.exports = (async () => {
     }
   );
   assert.ok(prompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'group_direct_chat_style_guard'));
+  assert.ok(prompt.dynamicPrompt.includes(`硬上限${GROUP_DIRECT_REPLY_CHAR_LIMIT}字`));
   assert.ok(prompt.promptSnapshot.assembledBlocks.some((item) => item.meta?.moduleId === 'scene_group_insert'));
 
   console.log('groupDirectReplyStyleGuard.test.js passed');
