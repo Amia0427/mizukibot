@@ -54,6 +54,8 @@ function createPrivateProactiveModelClient(runtimeConfig = {}, options = {}) {
       throw new Error('private proactive model requires API_BASE_URL, API_KEY and AI_MODEL');
     }
 
+    const provider = String(runtimeConfig.API_PROVIDER || '').trim();
+
     const response = await post(
       ensureModelRequestUrl(apiBaseUrl),
       {
@@ -61,6 +63,8 @@ function createPrivateProactiveModelClient(runtimeConfig = {}, options = {}) {
         temperature: input.kind === 'notice' ? 0.7 : 0.9,
         max_tokens: 500,
         stream: false,
+        __preferredProtocol: 'chat_completions',
+        ...(provider ? { __provider: provider } : {}),
         messages: [
           {
             role: 'system',
