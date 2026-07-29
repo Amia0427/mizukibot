@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-07-29 08:42 +08:00
+
+- 新增独立 QQ 私聊主动触达引擎：仅登记上线后成功完成正常私聊回复的用户，按每日两个稳定随机窗口、全局沉默、最小间隔、用户日上限和独立模型预算决定是否发送；群聊主动发送链路保持不变。
+- 主动决策严格使用 `API_BASE_URL`、`API_KEY`、`AI_MODEL`，支持 `/主动私聊 关闭|开启|状态` 本地控制、首次角色化告知、活动版本取消、未回应自动暂停、NapCat 离线跳过和重启防重。
+- 功能提交 `a1584aa`。定向测试、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0；完整 `npm test` 中主动私聊用例通过，但当前并行工作区仍有 5 个非本任务用例失败，详见维护日志；未推送远端。
+
 ## 运行维护 2026-07-28 23:49 +08:00
 
 - 修复 Daily Journal 轮数摘要的独立向量化链路：`journal_turn_summary` / `turn_batch` segment 现在统一进入 embedding cache、本地查询候选、CLI 快照和后续 LanceDB 同步；旧 `.segments.jsonl` 切片仍由 `journal-segment:*` 文档负责，不从 episode 投影重复索引。

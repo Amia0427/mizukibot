@@ -1,6 +1,20 @@
 # Env Configuration
 
-更新时间：2026-07-28 23:41 +08:00
+更新时间：2026-07-29 08:42 +08:00
+
+## QQ 私聊主动触达
+
+- `PRIVATE_PROACTIVE_ENABLED=true`：总开关。关闭时不登记新用户、不发送首次告知，也不启动扫描。
+- `PRIVATE_PROACTIVE_IDLE_MINUTES=180`：用户在机器人可见群聊或私聊中的全局沉默门槛，单位为分钟。
+- `PRIVATE_PROACTIVE_MIN_GAP_MINUTES=360`：两批主动私聊的最小间隔，单位为分钟。
+- `PRIVATE_PROACTIVE_MAX_PER_DAY=2`：单个用户每日最多成功发送的主动私聊批次数。
+- `PRIVATE_PROACTIVE_SCAN_INTERVAL_MINUTES=10`：机会扫描间隔，单位为分钟。
+- `PRIVATE_PROACTIVE_WINDOWS=09:00-15:00,17:00-23:00`：每日机会窗口；每位用户在每个窗口拥有一个按用户和日期稳定计算的随机机会。
+- `PRIVATE_PROACTIVE_GLOBAL_MODEL_DAILY_LIMIT=50`：主动私聊独立的每日全局模型调用预算，首次告知生成也计入；首次告知预算不足时发送固定文案。
+- `PRIVATE_PROACTIVE_MAX_UNANSWERED_BATCHES=2`：连续主动发送后未收到私聊回复的批次数上限；达到上限自动暂停，新的私聊入站自动解除。
+- `PRIVATE_PROACTIVE_STATE_FILE`：独立热状态文件，默认 `DATA_DIR/private-proactive-state.json`。
+- 主动决策只读取 `API_BASE_URL`、`API_KEY`、`AI_MODEL`，不使用 `ADMIN_*` 或 `INITIATIVE_DECISION_*` 模型配置。
+- 用户可在私聊发送 `/主动私聊 关闭`、`/主动私聊 开启`、`/主动私聊 状态`；命令在本地处理，不进入模型。
 
 ## Daily Journal 轮数压缩
 

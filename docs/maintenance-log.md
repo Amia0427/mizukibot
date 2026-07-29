@@ -1728,3 +1728,15 @@
 - 修复：新增共享 journal episode 索引策略，只放行 `journal_turn_summary`、`turn_batch` 或 `daily_journal_turn_compaction` segment；旧 `journal_segment` 继续由 `.segments.jsonl` 的 `journal-segment:*` 文档向量化，避免重复索引和重复召回。
 - 验收：`dailyJournalTurnCompactionEmbedding.test.js` 覆盖 embedding cache、查询候选、CLI 快照和 LanceDB 行构建，连同 `dailyJournalTurnCompaction.test.js`、`dailyJournalSegments.test.js`、`memoryV3EmbeddingIndex.test.js`、`dailyJournalSegmentSemanticRecall.test.js` 全部通过；`npm run lint`、`npm run typecheck`、`npm run diag:memory -- diagnose --skip-probe --json` 均退出 0。扩展查询回归 8 项中 7 项通过，既有 `memoryV3RagExplainDiagnostic.test.js` 仍在 rerank enabled 断言失败，与本次 segment 准入无关；真实投影中当前 `journal_turn_summary=0`，无需历史回填，只读诊断保留 1 条既存 stale LanceDB row 和 1 条待 embedding，本轮未处理运行数据。
 - 提交后记录：轮数摘要独立向量化修复提交 `4c0d1db` 已完成；当前分支未推送。
+
+## 运行维护 2026-07-29 08:42 +08:00
+
+- 小目标：完成独立 QQ 私聊主动触达功能，不修改现有群聊主动发送链路；功能提交为 `a1584aa`。
+- 接入边界：只在上线后成功完成正常私聊回复时登记用户并发送一次控制告知；群聊和私聊入站均更新全局活动版本，只有私聊回复解除未回应暂停。`/主动私聊 关闭|开启|状态` 在私聊准入后本地拦截，不进入意图、planner 或主模型。
+- 调度与防重：每日 `09:00-15:00`、`17:00-23:00` 各生成一个稳定随机机会；同时执行 3 小时沉默、6 小时间隔、每日 2 批、全局每日 50 次模型预算和 NapCat 在线检查。机会、预算、发送中状态和内容签名在模型或发送前同步落盘，发送失败、结果未知和进程中断不在当前窗口续发。
+- 模型与上下文：非流式决策严格使用 `API_BASE_URL/API_KEY/AI_MODEL` 和共享 HTTP 层，不切换 `ADMIN_*` 或 `INITIATIVE_DECISION_*`；上下文只包含近期私聊、关系、长期记忆、日记、48 小时内最多两份用户相关群摘要和有限主动叙事，不读取群聊原文，不把主动虚构写成用户事实。
+- 输出与发送：只接受严格 `{"send":boolean,"reason":string,"messages":string[]}`；每批 1-3 条、每条不超过 50 字，过滤内部信息、媒体标签、空内容和 48 小时重复内容。气泡间隔 1.5-4 秒，每条发送前复检活动版本；连续两批无私聊回应后自动暂停。
+- 定向验收：`node scripts/run-tests.js tests/privateProactiveEngine.test.js tests/privateProactiveModelConfig.test.js tests/privateProactiveIntegrationSource.test.js tests/privateProactiveMessageHandler.test.js tests/runtimeStatusDiagnostics.test.js tests/messageHandlerPrivateFreshness.test.js`，2026-07-29 00:22:13-00:22:15 +08:00，退出码 0。
+- 静态验收：`npm run lint`，00:22:30-00:22:37，退出码 0；`npm run typecheck`，00:22:46-00:22:47，退出码 0；`git diff --check`，08:41:56，退出码 0。
+- 完整验收：`npm test` 在 2026-07-29 08:38:59-08:41:27 +08:00 稳定退出 1。主动私聊相关测试全部通过；失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`lintChunkEntrypoints.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，分别落在未修改的管理员提示词/测试临时目录、并行 `scripts/lint.js` 入口清单和既有 Memory V3 范围，本任务未越界修复。
+- 小目标已完成：功能、配置、测试、主进程生命周期和运行态诊断均已提交；文档单独提交，当前分支未推送远端。
