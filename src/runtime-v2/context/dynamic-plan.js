@@ -1,6 +1,7 @@
-const context = require('./index');
+const { buildBaseDynamicPrompt } = require('./base');
+const { buildDynamicPrompt } = require('./dynamic');
 
 module.exports = {
-  buildDynamicPrompt: context.buildDynamicPrompt,
-  buildBaseDynamicPrompt: context.buildBaseDynamicPrompt
+  buildBaseDynamicPrompt,
+  buildDynamicPrompt
 };

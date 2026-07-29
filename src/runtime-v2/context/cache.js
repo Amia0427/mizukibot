@@ -1,5 +1,5 @@
-const context = require('./index');
+'use strict';
 
-module.exports = {
-  promptLayerCache: context.promptLayerCache
-};
+const { promptLayerCache } = require('./cache-runtime');
+
+module.exports = { promptLayerCache };

@@ -1,4 +1,4 @@
-const config = require('../../../config');
+const runtimeConfig = require('../../../config');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterAllowedToolsForMemoryCliTurn } = require('../../../utils/memoryCliTurnPolicy');
@@ -21,7 +21,7 @@ function isDirectChatLikeRoute(options = {}) {
 }
 
 function shouldExposeMemoryCli(options = {}) {
-  if (!config.MEMORY_CLI_ENABLED || !config.MEMORY_CLI_CHAT_ENABLED) return false;
+  if (!runtimeConfig.MEMORY_CLI_ENABLED || !runtimeConfig.MEMORY_CLI_CHAT_ENABLED) return false;
   if (options?.disableTools) return false;
   if (String(options?.customPrompt || '').trim()) return false;
   const { reviewMode, routePolicyKey, topRouteType } = normalizeRouteInputs(options);
@@ -42,7 +42,7 @@ function shouldExposeContextStats(options = {}) {
 
 function mergeAllowedToolsWithMemoryCli(allowedTools, options = {}) {
   const base = Array.isArray(allowedTools) ? normalizeToolNames(allowedTools) : [];
-  const chatMemoryCliEnabled = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED;
+  const chatMemoryCliEnabled = runtimeConfig.MEMORY_CLI_ENABLED && runtimeConfig.MEMORY_CLI_CHAT_ENABLED;
   const filteredBase = chatMemoryCliEnabled
     ? base
     : base.filter((toolName) => toolName !== 'memory_cli');
@@ -54,7 +54,7 @@ function mergeAllowedToolsWithMemoryCli(allowedTools, options = {}) {
     : [...withContextStats, 'memory_cli'];
   return filterCompanionAllowedTools(
     filterAllowedToolsForMemoryCliTurn(withMemoryCli, options?.memoryCliTurn),
-    config
+    runtimeConfig
   );
 }
 
