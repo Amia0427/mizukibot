@@ -1,3 +1,10 @@
+## 运行维护 2026-07-29 09:57 +08:00
+
+- 小目标：完成目标5第五个生产入口迁移，提交 `0144d51` 将 `runtime-v2/context` 的10个共享词法作用域 chunk 拆为15个显式 CommonJS 模块；生产入口不再加载或执行旧 chunk，旧文件保持未修改。
+- 契约：13项主 API、6组子门面、`promptLayerCache` 唯一 owner、memory-inputs 热路径惰性和0本地循环依赖通过；lint 以旧入口顺序合并10个 chunk，仅做 `new Function` 语法校验并标记 `execution=not-run`。
+- 验收：Node 24.14.1 下10项 context 聚焦测试、785文件 `npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 通过。Node 20 不在当前环境，未宣称双版本；并发4全量仍有只读 `prompts/admin.txt` 测试和4项既有基线断言失败，未归因于本批。
+- `prompts/admin.txt` 未修改，仍为310字节、ReadOnly，SHA-256 为 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；`npm audit --omit=dev` 退出1，仅报告 HEAD 既有 `sharp` 高危、`body-parser` 低危。
+
 ## 运行维护 2026-07-29 09:48 +08:00
 
 - 小目标：将 QQ 群 `direct_chat` 最终回复硬截断上限从 220 字调整为 8000 字。

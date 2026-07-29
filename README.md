@@ -5,6 +5,13 @@
 - QQ 群 `direct_chat` 最终回复硬截断上限由 220 字调整为 8000 字；普通用户、管理员和快速回复的模型 token 上限保持不变。
 - 验收：群聊风格守卫回归覆盖 8001 字输入精确截为 8000 字，并确认动态提示词同步使用新上限。
 
+## 运行维护 2026-07-29 09:57 +08:00
+
+- 目标5第五批完成：提交 `0144d51` 将 `runtime-v2/context` 的10个共享词法作用域 chunk 迁为15个显式 CommonJS 模块，生产入口不再执行 `runCommonJsChunks`；旧 chunk 保持只读兼容并由 lint 合并语法校验。
+- 13项主 API、6组子门面、`promptLayerCache` 单例、记忆输入惰性加载和0循环依赖边界通过；`lintChunkEntrypoints` 已同步合并记录协议。
+- Node 24.14.1 下10项 context 聚焦回归、785文件 lint、typecheck、prompt、全仓 secrets 和 diff check 通过。当前环境无 Node 20，未宣称双版本；`TEST_CONCURRENCY=4 npm test` 仍受只读 `prompts/admin.txt` 测试及4项既有基线断言失败影响。
+- `prompts/admin.txt` 保持310字节、ReadOnly、SHA-256 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；`npm audit --omit=dev` 仍报告 HEAD 既有 `sharp` 高危和 `body-parser` 低危问题，本批未改依赖。
+
 ## 运行维护 2026-07-29 08:42 +08:00
 
 - 新增独立 QQ 私聊主动触达引擎：仅登记上线后成功完成正常私聊回复的用户，按每日两个稳定随机窗口、全局沉默、最小间隔、用户日上限和独立模型预算决定是否发送；群聊主动发送链路保持不变。
