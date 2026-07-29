@@ -18,6 +18,7 @@
     if (shouldSkipSelfMessage(msg, config)) {
       return;
     }
+    recordPrivateProactiveActivity(senderId, chatType);
 
     const rawInboundFreshnessSessionKey = resolveShortTermSessionKey(
       senderId,
@@ -234,6 +235,40 @@
         waitMs: 300
       });
       return;
+    }
+
+    if (
+      isPrivateChatType(chatType)
+      && privateProactiveEngine
+      && typeof privateProactiveEngine.handleControlCommand === 'function'
+    ) {
+      const controlResult = privateProactiveEngine.handleControlCommand(rawMessageText, {
+        userId: senderId,
+        at: Date.now()
+      });
+      if (controlResult?.handled) {
+        const controlSent = await sendGroupReply({
+          chatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: controlResult.replyText,
+          atSender: false,
+          retries: 1,
+          waitMs: 300,
+          source: 'private_proactive_control',
+          routePolicyKey: 'private/proactive-control',
+          triggerReason: `private_proactive_control.${controlResult.command || 'unknown'}`,
+          topRouteType: 'admin'
+        });
+        appendRequestCompleteTrace({
+          routePolicyKey: 'private/proactive-control',
+          topRouteType: 'admin',
+          replyPath: 'private_proactive_control',
+          sent: Boolean(controlSent)
+        });
+        return;
+      }
     }
 
     const uploadConsume = await consumePendingUploadFromMessage(msg);

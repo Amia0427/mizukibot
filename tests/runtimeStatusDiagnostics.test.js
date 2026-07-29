@@ -134,7 +134,7 @@ module.exports = (() => {
       { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/other-worker.js' }
     ];
     const alive = new Set([111, 221, 222, 333]);
-    const { buildRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
+    const { buildRuntimeStatusDiagnostic, buildRuntimeStatusText } = require('../utils/runtimeStatusDiagnostics');
     const report = buildRuntimeStatusDiagnostic({
       projectRoot: tempDir,
       now: () => now,
@@ -167,6 +167,10 @@ module.exports = (() => {
     assert.strictEqual(report.summary.proactiveGroupOutbound.envKey, 'PROACTIVE_GROUP_OUTBOUND_ENABLED');
     assert.ok(report.summary.proactiveGroupOutbound.affectedSources.includes('daily_share'));
     assert.strictEqual(report.components.proactiveGroupOutbound.disabledReason, 'proactive-group-outbound-disabled');
+    assert.strictEqual(report.summary.privateProactive.enabled, true);
+    assert.strictEqual(report.summary.privateProactive.registered, 0);
+    assert.strictEqual(report.summary.privateProactive.budget.limit, 50);
+    assert.ok(buildRuntimeStatusText(report).includes('private-proactive: enabled registered=0'));
 
     assert.strictEqual(report.components.mainProcess.lockFile.pid, 111);
     assert.strictEqual(report.components.postReplyWorker.pidFile.pid, 222);

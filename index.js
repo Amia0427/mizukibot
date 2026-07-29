@@ -17,6 +17,7 @@ const { startServer } = require('./web/server');
 const { startTickEngine } = require('./core/tickEngine');
 const { startDailyJournalSummaryScheduler } = require('./core/dailyJournalSummaryScheduler');
 const { createMessageHandler } = require('./core/messageHandler');
+const { createPrivateProactiveEngine } = require('./core/privateProactiveEngine');
 const { initializeMemeManager } = require('./core/memeManager');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
@@ -420,6 +421,10 @@ let dailyJournalSummaryStarted = false;
 let dailyJournalSummaryRuntime = null;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
+const privateProactiveEngine = createPrivateProactiveEngine({
+  config,
+  actionClient: napcatActionClient
+});
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
 function askAIByGraph(...args) {
@@ -438,7 +443,8 @@ async function sendWithRetry(payload, retries = 1, waitMs = 500) {
 const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry,
-  actionClient: napcatActionClient
+  actionClient: napcatActionClient,
+  privateProactiveEngine
 });
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
   ? createMessageIngressDispatcher({
@@ -514,6 +520,7 @@ function prepareNapCatEventPacket(msg) {
 }
 
 function startConnectedRuntimes() {
+  privateProactiveEngine.start();
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {
     tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
     tickStarted = true;
@@ -703,6 +710,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     if (disconnectError) throw disconnectError;
   },
   stopRuntimes: [
+    { name: 'private_proactive', run: () => privateProactiveEngine.stop() },
     { name: 'scheduler', run: () => schedulerRuntime.stop() },
     { name: 'tick', run: () => tickRuntime?.stop?.() },
     { name: 'daily_journal_summary', run: () => dailyJournalSummaryRuntime?.stop?.() },
@@ -870,6 +878,7 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       recordMainRuntimeState,
       runtimeStateFile: RUNTIME_STATE_FILE,
       runtimeReadiness,
+      privateProactiveEngine,
       scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {
         messageIngressDispatcher = dispatcher;

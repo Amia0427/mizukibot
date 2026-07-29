@@ -30,6 +30,9 @@ const {
 const {
   buildProactiveGroupOutboundStatus
 } = require('../../core/proactiveGroupOutboundControl');
+const {
+  buildPrivateProactiveStatus
+} = require('../../core/privateProactiveEngine');
 
 const SCHEMA_VERSION = 'runtime_status_diagnostic_v1';
 const DEFAULT_BACKGROUND_TASK_STALE_MS = 30 * 60 * 1000;
@@ -128,6 +131,7 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     safeStat
   });
   const proactiveGroupOutbound = buildProactiveGroupOutboundStatus(config);
+  const privateProactive = buildPrivateProactiveStatus(config, { now: () => now });
   const journalHealth = (() => {
     try {
       const { buildJournalHealthSummary } = require('../memory-v3/journalDiagnostics');
@@ -264,6 +268,16 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         enabled: proactiveGroupOutbound.enabled,
         envKey: proactiveGroupOutbound.envKey,
         affectedSources: proactiveGroupOutbound.affectedSources
+      },
+      privateProactive: {
+        enabled: privateProactive.enabled,
+        registered: privateProactive.registeredCount,
+        active: privateProactive.enabledCount,
+        paused: privateProactive.pausedCount,
+        disabled: privateProactive.disabledCount,
+        budget: privateProactive.budget,
+        nextScanAt: privateProactive.nextScanAt,
+        lastResult: privateProactive.lastResult
       }
     },
     components: {
@@ -290,7 +304,8 @@ function buildRuntimeStatusDiagnostic(options = {}) {
       backgroundTasks,
       langGraphV2Store,
       journalHealth,
-      proactiveGroupOutbound
+      proactiveGroupOutbound,
+      privateProactive
     },
     signals
   };
@@ -302,13 +317,15 @@ function buildRuntimeStatusText(report = {}) {
   const failedByErrorClass = summary.postReplyWorker?.failedByErrorClass || {};
   const langGraphV2 = summary.langGraphV2 || {};
   const proactiveGroupOutbound = summary.proactiveGroupOutbound || {};
+  const privateProactive = summary.privateProactive || {};
   const lines = [
     `runtime: ${summary.overallStatus || 'unknown'} (${summary.signalCount || 0} signals)`,
     `main: ${summary.mainProcess?.status || 'unknown'} pid=${summary.mainProcess?.lockPid || 0} processes=${summary.mainProcess?.processCount || 0}`,
     `post-reply: ${summary.postReplyWorker?.status || 'unknown'} pid=${summary.postReplyWorker?.pid || 0} processes=${summary.postReplyWorker?.processCount || 0} queue=queued:${postQueue.queued || 0} processing:${postQueue.processing || 0} failed:${postQueue.failed || 0} oldestQueuedMs=${summary.postReplyWorker?.oldestQueuedAgeMs || 0}`,
     `background-tasks: active=${summary.activeBackgroundTasks || 0} stale=${summary.staleBackgroundTasks || 0}`,
     `langgraph-v2: checkpoints=${langGraphV2.checkpoints || 0} active=${langGraphV2.activeCheckpoints || 0} stale=${langGraphV2.staleRunningCheckpoints || 0} events=${langGraphV2.events || 0}`,
-    `proactive-group-outbound: ${proactiveGroupOutbound.enabled === false ? 'disabled' : 'enabled'} env=${proactiveGroupOutbound.envKey || 'PROACTIVE_GROUP_OUTBOUND_ENABLED'}`
+    `proactive-group-outbound: ${proactiveGroupOutbound.enabled === false ? 'disabled' : 'enabled'} env=${proactiveGroupOutbound.envKey || 'PROACTIVE_GROUP_OUTBOUND_ENABLED'}`,
+    `private-proactive: ${privateProactive.enabled === false ? 'disabled' : 'enabled'} registered=${privateProactive.registered || 0} active=${privateProactive.active || 0} paused=${privateProactive.paused || 0} budget=${privateProactive.budget?.used || 0}/${privateProactive.budget?.limit || 0} nextScanAt=${privateProactive.nextScanAt || 0}`
   ];
   const journal = summary.journalHealth || {};
   if (Object.keys(journal).length > 0) {

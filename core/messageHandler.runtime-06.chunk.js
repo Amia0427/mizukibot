@@ -52,6 +52,9 @@
           source: 'main_reply',
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan)
         });
+        if (isPrivateChatType(chatType)) {
+          registerPrivateProactiveUserAfterReply(senderId);
+        }
         await maybeSendReasoningForward(replyEnvelope, {
           chatType,
           groupId: isPrivateChatType(chatType) ? '' : groupId,
@@ -137,6 +140,12 @@
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       maybeRunDeferredPersist(replyEnvelope);
+      if (
+        isPrivateChatType(chatType)
+        && Number(replyOptions?.streamSendStats?.sentSegments || 0) > 0
+      ) {
+        registerPrivateProactiveUserAfterReply(senderId);
+      }
       await maybeSendReasoningForward(replyEnvelope, {
         chatType,
         groupId: isPrivateChatType(chatType) ? '' : groupId,

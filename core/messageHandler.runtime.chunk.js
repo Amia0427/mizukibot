@@ -2,6 +2,7 @@ function createMessageHandler({
   config,
   sendWithRetry,
   actionClient = null,
+  privateProactiveEngine = null,
   detectIntentHybridOverride = null,
   generateSessionContextSummaryOverride = null,
   inboundConcurrencyControllerOverride = null,
@@ -20,6 +21,26 @@ function createMessageHandler({
   const remoteRestartTrigger = triggerRemoteRestartOverride || triggerRemoteRestart;
   const privateTypingPokeCooldownByUser = new Map();
   const sessionFreshnessVersionByKey = new Map();
+  function recordPrivateProactiveActivity(userId, chatType) {
+    if (!privateProactiveEngine || typeof privateProactiveEngine.recordObservedActivity !== 'function') return;
+    privateProactiveEngine.recordObservedActivity(userId, {
+      chatType,
+      source: `${String(chatType || 'group').trim() || 'group'}_inbound`,
+      at: Date.now()
+    });
+  }
+  function registerPrivateProactiveUserAfterReply(userId) {
+    if (!privateProactiveEngine || typeof privateProactiveEngine.registerPrivateUser !== 'function') return;
+    void Promise.resolve(privateProactiveEngine.registerPrivateUser(userId, {
+      at: Date.now(),
+      notify: true
+    })).catch((error) => {
+      console.warn('[private-proactive] registration failed', {
+        userId: String(userId || '').trim(),
+        error: error?.message || String(error || '')
+      });
+    });
+  }
   function nextSessionFreshnessVersion(sessionKey = '') {
     const normalized = String(sessionKey || '').trim();
     if (!normalized) return 0;

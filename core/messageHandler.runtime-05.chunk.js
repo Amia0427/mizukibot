@@ -268,6 +268,9 @@
               source: 'normal_fast_reply',
               routePolicyKey: 'chat/default'
             });
+            if (isPrivateChatType(chatType)) {
+              registerPrivateProactiveUserAfterReply(senderId);
+            }
             if (!isPrivateChatType(chatType)) {
               await sideEffects.runDirectReplyFollowup({
                 groupId,
