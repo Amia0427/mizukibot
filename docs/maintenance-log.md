@@ -1755,3 +1755,12 @@
 - 静态验收：`npm run lint`，00:22:30-00:22:37，退出码 0；`npm run typecheck`，00:22:46-00:22:47，退出码 0；`git diff --check`，08:41:56，退出码 0。
 - 完整验收：`npm test` 在 2026-07-29 08:38:59-08:41:27 +08:00 稳定退出 1。主动私聊相关测试全部通过；失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`lintChunkEntrypoints.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，分别落在未修改的管理员提示词/测试临时目录、并行 `scripts/lint.js` 入口清单和既有 Memory V3 范围，本任务未越界修复。
 - 小目标已完成：功能、配置、测试、主进程生命周期和运行态诊断均已提交；文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-07-29 18:42 +08:00
+
+- 故障根因：主动私聊请求未透传已配置的 `API_PROVIDER=openai_compatible`，共享 HTTP 层按 `AI_MODEL=gemini-3-flash-preview-search` 自动选择 Gemini 原生协议，将请求改写到 `:generateContent`，连续返回 HTTP 404。
+- 第一轮修复提交 `46d659a`：主动请求透传 `API_PROVIDER`，固定 `chat_completions` 协议；预处理验收确认 URL 保持 `https://gcli.ggchan.dev/v1/chat/completions`，不再切换原生地址。
+- 真实恢复首次尝试：2026-07-29 18:35 +08:00 对唯一漏发用户 `1960901788` 发起恢复，模型请求已 HTTP 200，但 `max_tokens=500` 返回 `finish_reason=length`，结构化响应为 `invalid_structure`，未发送，消耗 1 次主动模型预算。
+- 第二轮修复提交 `d4dd729`：主动决策上限调整为 `max_tokens=1200` 并设置 `reasoning_effort=low`；定向 `privateProactiveEngine.test.js`、`privateProactiveModelConfig.test.js`、lint、typecheck 和 diff check 均通过。
+- 真实发送验收：2026-07-29 18:40 +08:00 对 `1960901788` 重新恢复，模型调用 HTTP 200、`finish_reason=stop`，NapCat 三次 `send_private_msg` 全部成功，发送 3 个独立气泡；状态文件记录 `daily.batchesSent=1`、`unansweredBatches=1`、`inFlight=null`，另一名用户仍为 0 批。
+- 主进程已在 18:41 +08:00 重启并健康运行；当前分支未推送远端。小目标已完成。

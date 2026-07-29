@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-07-29 18:42 +08:00
+
+- 主动私聊故障修复：`API_PROVIDER=openai_compatible` 未透传时，Gemini 模型名被共享 HTTP 层误判为原生协议，主动请求落到 `:generateContent` 并返回 404；同时将主动决策输出上限提高到 1200 token，并固定低推理开销，避免结构化 JSON 被截断。
+- 真实恢复验收：用户 `1960901788` 的漏发机会先复现为 HTTP 200 但 `finish_reason=length`、`invalid_structure`（未发送），修复后于 2026-07-29 18:40 +08:00 真实发送 3 个独立私聊气泡，NapCat 三次 `send_private_msg` 均成功；状态已记为今日 1/2 批，另一名用户未被触发。
+- 提交：`46d659a`、`d4dd729`；定向主动私聊测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过；未推送远端。
+
 ## 运行维护 2026-07-29 09:48 +08:00
 
 - QQ 群 `direct_chat` 最终回复硬截断上限由 220 字调整为 8000 字；普通用户、管理员和快速回复的模型 token 上限保持不变。
