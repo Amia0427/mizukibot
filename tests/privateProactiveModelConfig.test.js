@@ -41,6 +41,8 @@ module.exports = (async () => {
   assert.strictEqual(captured.key, 'main-key');
   assert.strictEqual(captured.body.model, 'main-model');
   assert.strictEqual(captured.body.stream, false);
+  assert.strictEqual(captured.body.max_tokens, 1200);
+  assert.strictEqual(captured.body.reasoning_effort, 'low');
   assert.strictEqual(captured.body.__preferredProtocol, 'chat_completions');
   assert.strictEqual(captured.body.__provider, 'openai_compatible');
   assert.strictEqual(captured.retries, 0);

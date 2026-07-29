@@ -61,7 +61,8 @@ function createPrivateProactiveModelClient(runtimeConfig = {}, options = {}) {
       {
         model,
         temperature: input.kind === 'notice' ? 0.7 : 0.9,
-        max_tokens: 500,
+        max_tokens: 1200,
+        reasoning_effort: 'low',
         stream: false,
         __preferredProtocol: 'chat_completions',
         ...(provider ? { __provider: provider } : {}),
