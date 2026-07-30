@@ -46,6 +46,12 @@ module.exports = (async () => {
     const { chatHistory, getUserMemories, shortTermMemory } = require('../utils/memory');
     const { saveSessionContextSummary } = require('../utils/sessionContextSummaryStore');
 
+    const defaultPrivateConfig = resolvePrivateProactiveConfig({}, {
+      stateFile: path.join(tempDir, 'default-state.json')
+    });
+    assert.strictEqual(defaultPrivateConfig.idleMs, 120 * 60 * 1000);
+    assert.strictEqual(defaultPrivateConfig.minGapMs, 240 * 60 * 1000);
+
     const windows = parseWindows('09:00-10:00,10:00-11:00');
     const runtimeConfig = {
       DATA_DIR: tempDir,

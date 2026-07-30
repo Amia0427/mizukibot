@@ -53,11 +53,11 @@ function resolvePrivateProactiveConfig(runtimeConfig = {}, overrides = {}) {
     timezone: String(overrides.timezone || runtimeConfig.TIMEZONE || 'Asia/Shanghai').trim() || 'Asia/Shanghai',
     idleMs: normalizePositiveNumber(
       overrides.idleMinutes ?? runtimeConfig.PRIVATE_PROACTIVE_IDLE_MINUTES,
-      180
+      120
     ) * 60 * 1000,
     minGapMs: normalizePositiveNumber(
       overrides.minGapMinutes ?? runtimeConfig.PRIVATE_PROACTIVE_MIN_GAP_MINUTES,
-      360
+      240
     ) * 60 * 1000,
     maxPerDay: Math.max(1, Math.floor(normalizePositiveNumber(
       overrides.maxPerDay ?? runtimeConfig.PRIVATE_PROACTIVE_MAX_PER_DAY,
