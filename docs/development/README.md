@@ -2,7 +2,7 @@
 
 这组文档面向第一次接触 MizukiBot、准备阅读源码或提交改动的开发者。它回答三个问题：进程如何运行，一条消息如何穿过 Agent 系统，以及修改某类能力时应从哪里开始、如何证明没有破坏其他链路。
 
-最后核验：2026-07-31 00:07 +08:00。
+最后核验：2026-07-31 02:15 +08:00。
 
 ## 先选阅读路线
 
@@ -74,3 +74,20 @@ git diff --check
 ```
 
 完整项目入口仍见 [`../../README.md`](../../README.md)，部署细节见 [`../../deploy/README.md`](../../deploy/README.md)，脚本索引见 [`../../scripts/README.md`](../../scripts/README.md)。
+
+## 本次验收记录
+
+完成时间：2026-07-31 02:15 +08:00；主提交：`1674530`。
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `node tests/developerDocumentation.test.js` | 通过；检查 8 篇文档、96 个本地链接、342 个仓库路径、69 个 npm 脚本 |
+| `node scripts/run-tests.js tests/runTestsRunner.test.js` | 通过 |
+| `npm run lint` | 通过；检查 795 个生产 JavaScript 文件 |
+| `npm run typecheck` | 通过 |
+| `npm run check:agent:static` | 通过 |
+| `npm run check:prompts` | 通过；检查 107 个受治理 prompt 资产 |
+| `npm run check:secrets:all` | 通过 |
+| `git diff --check` | 通过；无 whitespace 错误 |
+
+以上命令均使用 Node.js 20.20.2 实际执行。多文档开发者源码指南及其防漂移回归已落库，小目标已完成；未修改业务代码，未推送远端。

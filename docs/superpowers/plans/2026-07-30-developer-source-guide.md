@@ -130,7 +130,7 @@ Expected: PASS with the number of checked documents, local links, and repository
 - Modify: `README.md`
 - Modify: `docs/development/README.md`
 
-- [ ] **Step 1: Prepare the post-commit README entry**
+- [x] **Step 1: Prepare the post-commit README entry**
 
 After the primary documentation commit exists, add one stable developer-guide link under the existing documentation entry and a concise acceptance record using the real completion time and commit id.
 
@@ -176,17 +176,17 @@ Run: `git diff --cached -- docs/development tests/developerDocumentation.test.js
 
 Expected: the complete staged content contains only this documentation set, its integrity test, and the plan; every unrelated file remains unstaged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/development tests/developerDocumentation.test.js docs/superpowers/plans/2026-07-30-developer-source-guide.md
 git commit -m "docs: add developer source guide"
 ```
 
-- [ ] **Step 6: Record completion after the primary commit**
+- [x] **Step 6: Record completion after the primary commit**
 
 Append the real completion timestamp, primary commit id, executed commands, results, and `小目标已完成` to `docs/development/README.md`; add the developer-guide link and the same concise acceptance summary to `README.md`.
 
-- [ ] **Step 7: Commit the completion record**
+- [x] **Step 7: Commit the completion record**
 
 Stage the exact README and developer-hub hunks only, inspect their complete cached diff, and commit them with `docs: record developer guide acceptance`.
