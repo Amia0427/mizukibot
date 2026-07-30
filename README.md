@@ -1,5 +1,10 @@
 # MizukiBot
 
+## 运行维护 2026-07-30 21:17 +08:00
+
+- 新增面向 QQ 用户的[绘图功能使用指南](docs/qq-visual-rendering-user-guide-2026-07-30.md)，说明私聊与群聊触发方式、适用场景、提问模板、连续修改、安全限制和失败处理。
+- 文档内容已按当前 `render_qq_visual` 路由、渲染及审查实现逐项核对；未将尚未实现的陪伴玩法写成现有能力，小目标已完成，未推送远端。
+
 ## 运行维护 2026-07-30 21:02 +08:00
 
 - 提交 `055ad9f` 新增 `render_qq_visual`：SVG 使用 `sharp`，HTML 使用固定版本 `napcat-plugin-puppeteer v1.5.0`，统一在敏感词门禁通过后以 OneBot Base64 PNG 发送到当前群聊或私聊。
