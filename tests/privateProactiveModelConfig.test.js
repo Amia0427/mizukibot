@@ -41,8 +41,9 @@ module.exports = (async () => {
   assert.strictEqual(captured.key, 'main-key');
   assert.strictEqual(captured.body.model, 'main-model');
   assert.strictEqual(captured.body.stream, false);
-  assert.strictEqual(captured.body.max_tokens, 1200);
-  assert.strictEqual(captured.body.reasoning_effort, 'low');
+  assert.strictEqual(captured.body.max_tokens, 4096);
+  assert.strictEqual(captured.body.reasoning_effort, 'minimal');
+  assert.deepStrictEqual(captured.body.response_format, { type: 'json_object' });
   assert.strictEqual(captured.body.__preferredProtocol, 'chat_completions');
   assert.strictEqual(captured.body.__provider, 'openai_compatible');
   assert.strictEqual(captured.retries, 0);
@@ -54,6 +55,29 @@ module.exports = (async () => {
   assert.ok(!captured.url.includes('admin'));
   assert.notStrictEqual(captured.body.model, 'admin-model');
   assert.notStrictEqual(captured.body.model, 'initiative-model');
+
+  const prompt = captured.body.messages[0].content;
+  assert.ok(prompt.includes('通常应主动联系'));
+  assert.ok(prompt.includes('用户明确拒绝主动联系'));
+
+  const truncatedClient = createPrivateProactiveModelClient({
+    API_BASE_URL: 'https://main.example/v1/chat/completions',
+    API_KEY: 'main-key',
+    AI_MODEL: 'main-model'
+  }, {
+    postWithRetry: async () => ({
+      data: JSON.stringify({
+        choices: [{
+          finish_reason: 'length',
+          message: { content: '{"send":true' }
+        }]
+      })
+    })
+  });
+  await assert.rejects(
+    truncatedClient({ kind: 'proactive', userId: 'u1', context: {} }),
+    /private proactive model output truncated: length/
+  );
 
   console.log('privateProactiveModelConfig.test.js passed');
 })();

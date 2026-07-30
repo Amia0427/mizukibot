@@ -1,5 +1,12 @@
 const { postWithRetry } = require('../../api/httpClient');
-const { extractJsonSafely, extractMessageContent } = require('../../api/parser');
+const {
+  extractFinishReason,
+  extractJsonSafely,
+  extractMessageContent,
+  parseJsonWithSafety
+} = require('../../api/parser');
+
+const TRUNCATED_FINISH_REASON_PATTERN = /(?:length|max[_\s-]*tokens?|incomplete)/i;
 
 function ensureModelRequestUrl(value = '') {
   const url = String(value || '').trim().replace(/\/+$/, '');
@@ -35,16 +42,26 @@ function buildDedicatedInstructions(kind = 'proactive') {
     ]).join('\n');
   }
   return common.concat([
-    '先判断此刻主动联系是否自然；不自然时 send=false 且 messages=[]。',
+    '运行时已经确认用户沉默时长、发送间隔、每日次数和在线状态均满足；通常应主动联系。',
+    '除非用户明确拒绝主动联系，或上下文明确表明此刻联系会造成不适，否则 send 必须为 true。',
+    '不要仅因没有新鲜话题、关系尚不亲密、担心打扰或缺少确定的现实信息而拒绝；可以自然关心近况、延续共同话题、轻松闲聊或分享角色自己的日常。',
+    '拒绝时 send=false 且 messages=[]，并在 reason 中说明上下文里的明确依据。',
     'send=true 时 messages 必须有 1-3 条纯文字，每条最多 50 个字符，适合拆成独立聊天气泡。',
     '不要生成图片、语音、文件、CQ 码、媒体标签或内部说明。'
   ]).join('\n');
+}
+
+function getResponsePayload(response) {
+  if (response?.data && typeof response.data === 'object') return response.data;
+  const parsed = parseJsonWithSafety(response?.data);
+  return parsed.ok ? parsed.value : null;
 }
 
 function createPrivateProactiveModelClient(runtimeConfig = {}, options = {}) {
   const post = options.postWithRetry || postWithRetry;
   const extractMessage = options.extractMessageContent || extractMessageContent;
   const parseJson = options.extractJsonSafely || extractJsonSafely;
+  const getFinishReason = options.extractFinishReason || extractFinishReason;
 
   return async function requestPrivateProactiveDecision(input = {}) {
     const apiBaseUrl = String(runtimeConfig.API_BASE_URL || '').trim();
@@ -61,8 +78,9 @@ function createPrivateProactiveModelClient(runtimeConfig = {}, options = {}) {
       {
         model,
         temperature: input.kind === 'notice' ? 0.7 : 0.9,
-        max_tokens: 1200,
-        reasoning_effort: 'low',
+        max_tokens: 4096,
+        reasoning_effort: 'minimal',
+        response_format: { type: 'json_object' },
         stream: false,
         __preferredProtocol: 'chat_completions',
         ...(provider ? { __provider: provider } : {}),
@@ -94,6 +112,10 @@ function createPrivateProactiveModelClient(runtimeConfig = {}, options = {}) {
       0,
       apiKey
     );
+    const finishReason = getFinishReason(getResponsePayload(response));
+    if (TRUNCATED_FINISH_REASON_PATTERN.test(finishReason)) {
+      throw new Error(`private proactive model output truncated: ${finishReason}`);
+    }
     const message = extractMessage(response);
     const parsed = parseJson(normalizeContent(message?.content));
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
