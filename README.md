@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 运行维护 2026-07-30 11:18 +08:00
+
+- 主动私聊判断修复：模型请求改用 `max_tokens=4096`、`reasoning_effort=minimal` 和 `response_format={type:json_object}`；运行时硬条件已满足时，提示词默认要求发送，仅在用户明确拒绝或上下文明显不适合时允许拒绝；`finish_reason=length/MAX_TOKENS` 现在记录为模型输出截断，不再伪装成判断器过滤。
+- 真实网关验收：`API_BASE_URL/API_KEY/AI_MODEL` 请求 HTTP 200、`finish_reason=stop`；2026-07-30 11:17:50-11:18:15 +08:00 手动触发一次 `privateProactiveEngine.scan()`，对 `1052258894` 发送 3 个独立私聊气泡，NapCat 三次均成功。状态文件记录上午窗口已消费、今日 `1/2` 批、预算 `2/50`、`inFlight=null`，主进程 `/ready` 返回 200，未重复发送。
+- 定向主动私聊测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 退出 0；`npm test` 退出 1，失败仍为两个管理员提示词、`mainReplyUnifiedDiagnostics` 和两个既有 Memory V3 用例，主动私聊相关测试全部通过。
+- 功能提交 `cd8645d`；本次仅追加文档，未推送远端。
+
 ## 运行维护 2026-07-29 18:42 +08:00
 
 - 主动私聊故障修复：`API_PROVIDER=openai_compatible` 未透传时，Gemini 模型名被共享 HTTP 层误判为原生协议，主动请求落到 `:generateContent` 并返回 404；同时将主动决策输出上限提高到 1200 token，并固定低推理开销，避免结构化 JSON 被截断。

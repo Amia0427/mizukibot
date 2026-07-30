@@ -1764,3 +1764,13 @@
 - 第二轮修复提交 `d4dd729`：主动决策上限调整为 `max_tokens=1200` 并设置 `reasoning_effort=low`；定向 `privateProactiveEngine.test.js`、`privateProactiveModelConfig.test.js`、lint、typecheck 和 diff check 均通过。
 - 真实发送验收：2026-07-29 18:40 +08:00 对 `1960901788` 重新恢复，模型调用 HTTP 200、`finish_reason=stop`，NapCat 三次 `send_private_msg` 全部成功，发送 3 个独立气泡；状态文件记录 `daily.batchesSent=1`、`unansweredBatches=1`、`inFlight=null`，另一名用户仍为 0 批。
 - 主进程已在 18:41 +08:00 重启并健康运行；当前分支未推送远端。小目标已完成。
+
+## 运行维护 2026-07-30 11:18 +08:00
+
+- 故障复盘：2026-07-30 10:10 的主动模型请求虽然 HTTP 200，但 `max_tokens=1200` 下 `finish_reason=length`，可见 JSON 只有 46 个 token，随后被归类为 `invalid_structure`，因此窗口被消费但没有发送；另外两名用户尚未到稳定机会时间。
+- 修复提交 `cd8645d`：主动模型请求改用 `max_tokens=4096`、`reasoning_effort=minimal`、OpenAI-compatible `response_format={type:json_object}`；提示词在运行时硬条件通过后默认要求 `send=true`，只保留明确拒绝或明显不适合两类拒绝依据；截断终止原因抛出明确错误，避免误诊为模型拒绝。
+- 真实探针：请求使用 `API_BASE_URL/API_KEY/AI_MODEL`，HTTP 200、`finish_reason=stop`；探针生成完成后因共享 HTTP 传输句柄未自动退出，记录为本地诊断脚本问题，不影响模型结果。
+- 真实发送验收：2026-07-30 11:17:50-11:18:15 +08:00 手动调用一次 `privateProactiveEngine.scan()`，符合条件的 `1052258894` 发送 3 个独立气泡，NapCat 三次 `send_private_msg` 均成功；发送理由为模型返回的角色化主动联系决定。状态文件记录上午窗口已消费、`daily.batchesSent=1`、`unansweredBatches=1`、`inFlight=null`，预算使用 `2/50`；主进程 PID 25208 存活且 `/ready` 返回 200。
+- 定向验收：`node scripts/run-tests.js tests/privateProactiveEngine.test.js tests/privateProactiveModelConfig.test.js tests/privateProactiveIntegrationSource.test.js tests/privateProactiveMessageHandler.test.js tests/runtimeStatusDiagnostics.test.js tests/messageHandlerPrivateFreshness.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0。
+- 完整验收：`npm test` 于本轮退出 1；主动私聊用例全部通过，失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`mainReplyUnifiedDiagnostics.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，均属于未修改的并行/既有范围，本轮未越界修复。
+- 小目标已完成：主动模型稳定性和判断阈值修复、真实主动发送及重启恢复均已验收；文档追加提交，当前分支未推送远端。
