@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-07-30 21:02 +08:00
+
+- 提交 `055ad9f` 新增 `render_qq_visual`：SVG 使用 `sharp`，HTML 使用固定版本 `napcat-plugin-puppeteer v1.5.0`，统一在敏感词门禁通过后以 OneBot Base64 PNG 发送到当前群聊或私聊。
+- NapCat 4.18.6 已限制在 `127.0.0.1`，插件 `browser.maxPages=2`，Chrome for Testing 131.0.6778.204 已连接；目标群 SVG 消息 `781501773` 与管理员私聊 HTML 消息 `1185586370` 经 `get_msg` 确认为单一 PNG 图片段。
+- 五项聚焦测试、lint、typecheck、secrets 检查通过；真实词库的 prompt/markup 拦截均使渲染和 QQ 发送调用保持 0。完整配置、安全边界与验收记录见 `docs/qq-visual-rendering-2026-07-30.md`，小目标已完成，未推送远端。
+
 ## 运行维护 2026-07-30 19:50 +08:00
 
 - 目标5第六批完成：`message/handler` 的11个共享词法作用域 chunk 已迁为单一静态 CommonJS 运行时，生产入口不再调用 `runCommonJsChunks`；旧 chunk 保持只读兼容并由 lint 合并语法校验。
