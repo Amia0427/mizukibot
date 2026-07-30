@@ -1794,3 +1794,4 @@
 - 持久化与输出：短期/会话结构化摘要任一嵌套字段命中污染即整份拒绝且不消费历史；会话摘要存储与图片索引在写入点复检，视觉 OCR 仅供当前轮；真实 `SYSTEM.txt` 及运行时已装配 `system_root` 建立有限指纹，普通回复、快速回复、最终发送和跨 delta 流式发送统一拦截泄露。
 - 验收：14 项安全/相邻专项全部通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0。`npm test` 退出 1：五项为本分支既有 `adminStableSystemPrompt`、`configPersonaPrompt`、`mainReplyUnifiedDiagnostics`、`memoryV3EmbeddingBackfillConcurrency`、`memoryV3RagExplainDiagnostic`，另一项为暂存区外并行小剧场实现尚未同步 `messageHandlerModuleBoundary`；排除该并行用例后的 552 项中 547 项通过，失败仍为上述五项。本次安全文件未涉及这些失败范围。
 - 受保护的 `prompts/admin.txt` 与未跟踪 `AGENT.md` 未修改、未暂存；并行开发文档和小剧场改动保持原样，未纳入本次提交，不推送远端。
+- 提交后记录（2026-07-31 02:18 +08:00）：实现提交 `2b7c1a2` 已完成；以 `mizuki\administrator` 对 `.env` 与 `data` 共 38,830 项应用仓库 ACL 脚本，恢复快照为 `artifacts/security/acl-snapshots/acl-20260731-021604-28732.json`。`npm run diag:security` 为 7 OK、1 WARN、0 ERROR，敏感路径 ACL 通过；仅保留既有 `NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER` 兼容告警，本目标已完成。

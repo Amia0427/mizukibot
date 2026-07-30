@@ -13,6 +13,7 @@
 - 权限边界、低权限上下文装配、持久化污染拒绝、视觉/OCR 写入边界和真实根提示词输出保护已实现，专项测试、lint、typecheck 与 prompt 校验通过。
 - `npm test` 的本次安全用例全部通过；全量仍有五项既有基线失败及一项并行小剧场边界测试未同步，未越界修改。
 - README 与维护日志已记录验收；实现提交、ACL 预览/应用、`diag:security` 和提交后记录待后续步骤填写。
+- 完成记录（2026-07-31 02:18 +08:00）：实现提交 `2b7c1a2`；ACL 快照 `artifacts/security/acl-snapshots/acl-20260731-021604-28732.json`；`diag:security` 为 7 OK、1 个既有 NapCat legacy auth 兼容告警、0 ERROR。提示词注入加固小目标已完成，未推送远端。
 
 ---
 

@@ -4,6 +4,7 @@
 
 - 提示词注入防护已统一收口：仅显式可信 authority 可生成 `system`，记忆、连续性、工具证据、视觉/OCR 与会话摘要均作为低权限数据处理；持久化写入和所有回复出口增加污染/真实根提示词泄露拦截。
 - 安全专项、`lint`、`typecheck`、prompt 清单与相邻回归通过；完整边界及验收记录见 [维护日志](docs/maintenance-log.md) 和 [实施计划](docs/superpowers/plans/2026-07-30-prompt-injection-hardening.md)。
+- 实现提交 `2b7c1a2`；本地 `.env`/`data` ACL 已应用并通过诊断（7 OK / 1 既有兼容告警 / 0 ERROR），快照保存在 `artifacts/security/acl-snapshots/acl-20260731-021604-28732.json`，未推送远端。
 
 ## 运行维护 2026-07-30 21:30 +08:00
 
