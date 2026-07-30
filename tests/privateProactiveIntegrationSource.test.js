@@ -4,10 +4,10 @@ const path = require('path');
 
 module.exports = (() => {
   const root = path.resolve(__dirname, '..');
-  const runtime = fs.readFileSync(path.join(root, 'core', 'messageHandler.runtime.chunk.js'), 'utf8');
-  const ingress = fs.readFileSync(path.join(root, 'core', 'messageHandler.runtime-03.chunk.js'), 'utf8');
-  const fastReply = fs.readFileSync(path.join(root, 'core', 'messageHandler.runtime-05.chunk.js'), 'utf8');
-  const finalReply = fs.readFileSync(path.join(root, 'core', 'messageHandler.runtime-06.chunk.js'), 'utf8');
+  const runtime = fs.readFileSync(path.join(root, 'core', 'messageHandler.runtime.js'), 'utf8');
+  const ingress = runtime;
+  const fastReply = runtime;
+  const finalReply = runtime;
   const main = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 
   assert.ok(runtime.includes('privateProactiveEngine = null'));

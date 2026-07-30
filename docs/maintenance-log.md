@@ -1,3 +1,9 @@
+## 运行维护 2026-07-30 19:50 +08:00
+
+- 小目标：完成目标5第六个生产入口迁移，将 `message/handler` 的11个共享词法作用域 chunk 收敛为单一静态 CommonJS 运行时；生产入口不再加载或执行旧 chunk，旧文件保持未修改。
+- 契约：46个顶层函数、160个顶层变量及18项公开 API 完成映射，`core/messageHandler`、`src/message/handler` 与 `src/message` 的导出引用保持一致；lint 按旧入口顺序合并11个 chunk，仅做语法校验并标记 `execution=not-run`。
+- 验收：`node tests/messageHandlerModuleBoundary.test.js`、`node tests/lintChunkEntrypoints.test.js`、`node tests/messageHandlerCardContextSource.test.js`、`node tests/privateProactiveIntegrationSource.test.js`、`node tests/runtimeContextModuleBoundary.test.js`、`node -e "require('./core/messageHandler')"`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 均退出0；小目标已完成，未推送远端。
+
 ## 运行维护 2026-07-29 09:57 +08:00
 
 - 小目标：完成目标5第五个生产入口迁移，提交 `0144d51` 将 `runtime-v2/context` 的10个共享词法作用域 chunk 拆为15个显式 CommonJS 模块；生产入口不再加载或执行旧 chunk，旧文件保持未修改。

@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'core', 'messageHandler.runtime-04.chunk.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', 'core', 'messageHandler.runtime.js'), 'utf8');
 assert.match(
   source,
   /hasCurrentCardContext\s*&&\s*replyToBotIsRecent/,

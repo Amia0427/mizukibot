@@ -11,11 +11,29 @@ const CHUNK_GROUPS = [
   { entrypoint: 'src/features/meme', chunkDir: 'core' },
   { entrypoint: 'src/features/passive-awareness', chunkDir: 'core' },
   { entrypoint: 'src/memory/vector', chunkDir: 'src/memory/vector' },
-  { entrypoint: 'src/message/handler', chunkDir: 'core' },
   { entrypoint: 'src/model/http', chunkDir: 'src/model/http' },
+  {
+    entrypoint: 'src/message/handler',
+    chunkDir: 'core',
+    legacyRetainedLabel: 'message handler chunks',
+    legacyRetainedChunks: [
+      'messageHandler.imports.chunk.js',
+      'messageHandler.prompts.chunk.js',
+      'messageHandler.direct-session.chunk.js',
+      'messageHandler.route-capture.chunk.js',
+      'messageHandler.runtime.chunk.js',
+      'messageHandler.runtime-02.chunk.js',
+      'messageHandler.runtime-03.chunk.js',
+      'messageHandler.runtime-04.chunk.js',
+      'messageHandler.runtime-05.chunk.js',
+      'messageHandler.runtime-06.chunk.js',
+      'messageHandler.exports.chunk.js'
+    ]
+  },
   {
     entrypoint: 'src/runtime-v2/context',
     chunkDir: 'api/runtimeV2/context',
+    legacyRetainedLabel: 'context chunks',
     legacyRetainedChunks: [
       'service-core.chunk.js',
       'dynamic-plan.chunk.js',
@@ -65,6 +83,7 @@ const log = (...args) => {
 
 for (const group of CHUNK_GROUPS) {
   if (!group.legacyRetainedChunks) continue;
+  const legacyRetainedLabel = group.legacyRetainedLabel || 'chunks';
   const chunkPaths = group.legacyRetainedChunks.map((chunk) => (
     path.resolve(ROOT, group.chunkDir, chunk)
   ));
@@ -77,7 +96,7 @@ for (const group of CHUNK_GROUPS) {
     }
     new Function(chunkPaths.map((chunkFile) => fs.readFileSync(chunkFile, 'utf8')).join('\n'));
     chunkRecords.push({
-      file: `${group.chunkDir} (legacy retained context chunks)`,
+      file: `${group.chunkDir} (legacy retained ${legacyRetainedLabel})`,
       coverage: 'legacy-retained-combined',
       execution: 'not-run',
       entrypoint: null,
@@ -85,12 +104,12 @@ for (const group of CHUNK_GROUPS) {
       validation: 'passed',
       error: null
     });
-    log(`[lint] ok   ${group.chunkDir} (legacy retained combined syntax)`);
+    log(`[lint] ok   ${group.chunkDir} (legacy retained combined ${legacyRetainedLabel})`);
   } catch (e) {
     hasError = true;
     const message = e && e.message ? e.message : String(e);
     chunkRecords.push({
-      file: `${group.chunkDir} (legacy retained context chunks)`,
+      file: `${group.chunkDir} (legacy retained ${legacyRetainedLabel})`,
       coverage: 'legacy-retained-combined',
       execution: 'not-run',
       entrypoint: null,
@@ -99,7 +118,7 @@ for (const group of CHUNK_GROUPS) {
       error: { message }
     });
     errors.push({ scope: 'legacy-retained-chunks', file: group.chunkDir, message });
-    console.error(`[lint] fail ${group.chunkDir} (legacy retained combined syntax)`);
+    console.error(`[lint] fail ${group.chunkDir} (legacy retained combined ${legacyRetainedLabel})`);
     console.error('       ' + message);
   }
 }

@@ -365,8 +365,11 @@ function assertColdFacadeContracts() {
 function assertLintProtocol() {
   const output = childProcess.execFileSync(process.execPath, ['scripts/lint.js', '--report-json'], { cwd: ROOT_DIR, encoding: 'utf8' });
   const report = JSON.parse(output);
-  const records = report.chunks.filter((record) => record.coverage === 'legacy-retained-combined');
-  assert.strictEqual(records.length, 1, 'one legacy retained combined record');
+  const records = report.chunks.filter((record) => (
+    record.coverage === 'legacy-retained-combined'
+    && record.file === 'api/runtimeV2/context (legacy retained context chunks)'
+  ));
+  assert.strictEqual(records.length, 1, 'one context legacy retained combined record');
   assert.strictEqual(records[0].execution, 'not-run', 'legacy chunks must not execute');
   assert.strictEqual(records[0].validation, 'passed', 'legacy retained combined syntax validation');
   assert.deepStrictEqual(records[0].chunks, LEGACY_CHUNKS.map((file) => `api/runtimeV2/context/${file}`), 'legacy retained chunk order');

@@ -40,9 +40,25 @@ const legacyContextChunks = [
   'api/runtimeV2/context/dynamic-prompt-02.chunk.js',
   'api/runtimeV2/context/vision.chunk.js'
 ];
+const legacyMessageHandlerChunks = [
+  'core/messageHandler.imports.chunk.js',
+  'core/messageHandler.prompts.chunk.js',
+  'core/messageHandler.direct-session.chunk.js',
+  'core/messageHandler.route-capture.chunk.js',
+  'core/messageHandler.runtime.chunk.js',
+  'core/messageHandler.runtime-02.chunk.js',
+  'core/messageHandler.runtime-03.chunk.js',
+  'core/messageHandler.runtime-04.chunk.js',
+  'core/messageHandler.runtime-05.chunk.js',
+  'core/messageHandler.runtime-06.chunk.js',
+  'core/messageHandler.exports.chunk.js'
+];
 const expectedChunkRecords = [
   'api/runtimeV2/context (legacy retained context chunks)',
-  ...discoveredChunks.filter((file) => !legacyContextChunks.includes(file))
+  'core (legacy retained message handler chunks)',
+  ...discoveredChunks.filter((file) => (
+    !legacyContextChunks.includes(file) && !legacyMessageHandlerChunks.includes(file)
+  ))
 ].sort();
 assert.strictEqual(report.version, 1);
 assert.strictEqual(report.status, 'pass');
@@ -52,11 +68,19 @@ assert.ok(report.chunks.every((item) => (
   && ['entrypoint', 'standalone', 'legacy-retained-combined'].includes(item.coverage)
   && item.error === null
 )));
-const legacyContextRecord = report.chunks.find((item) => item.coverage === 'legacy-retained-combined');
-assert.deepStrictEqual(legacyContextRecord.chunks, legacyContextChunks);
-assert.strictEqual(legacyContextRecord.execution, 'not-run');
+const legacyRecords = report.chunks.filter((item) => item.coverage === 'legacy-retained-combined');
+assert.strictEqual(legacyRecords.length, 2);
+assert.deepStrictEqual(
+  legacyRecords.find((item) => item.file.startsWith('api/runtimeV2/context')).chunks,
+  legacyContextChunks
+);
+assert.deepStrictEqual(
+  legacyRecords.find((item) => item.file.startsWith('core ')).chunks,
+  legacyMessageHandlerChunks
+);
+assert.ok(legacyRecords.every((item) => item.execution === 'not-run'));
 assert.ok(report.entrypoints.every((entrypoint) => {
-  if (entrypoint.name === 'src/runtime-v2/context') {
+  if (entrypoint.name === 'src/runtime-v2/context' || entrypoint.name === 'src/message/handler') {
     return entrypoint.validation === 'not-run'
       && entrypoint.missingChunks.length === 0
       && entrypoint.error === null;
