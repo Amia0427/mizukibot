@@ -26,6 +26,7 @@ const {
 const {
   buildPersonaReasoningForwardText
 } = require('../../../utils/reasoningForwardPersona');
+const { protectFinalOutput } = require('../../../utils/promptSecurity');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -116,7 +117,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
   async function emitWholeReplyAsSingleStream(state, finalReply) {
     const request = normalizeObject(state.request, {});
     const guard = applyGroupDirectStyleGuard(finalReply, request);
-    const text = sanitizeUserFacingText(guard.text).trim();
+    const text = protectFinalOutput(sanitizeUserFacingText(guard.text).trim(), UNSAFE_STREAM_FALLBACK_REPLY).text;
     if (!request.streaming || typeof request.onDelta !== 'function' || !text) return text;
     request.onDelta(text, text);
     return text;
@@ -260,9 +261,10 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       const originalMeta = readSanitizedMeta(sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted'), {
         returnMeta: true
       }));
-      const originalReply = originalMeta.text;
+      const protectedOriginal = protectFinalOutput(originalMeta.text, UNSAFE_STREAM_FALLBACK_REPLY);
+      const originalReply = protectedOriginal.text;
       let hasSafetyRestriction = streamedReply?.hasSafetyRestriction === true || originalMeta.hasSafetyRestriction === true;
-      if (isUnsafeUserFacingReply(originalReply)) {
+      if (protectedOriginal.blocked || isUnsafeUserFacingReply(originalReply)) {
         emitRuntimeEvent(state, 'unsafe_reply_blocked', {
           node: 'direct_reply',
           stage: 'streaming_upstream',
@@ -326,7 +328,10 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
       const safeFinalMeta = readSanitizedMeta(sanitizeUserFacingText(guardedFinalReply, { returnMeta: true }));
       hasSafetyRestriction = Boolean(hasSafetyRestriction || safeFinalMeta.hasSafetyRestriction);
-      const safeFinalReply = safeFinalMeta.text || EMPTY_STREAM_FALLBACK_REPLY;
+      const safeFinalReply = protectFinalOutput(
+        safeFinalMeta.text || EMPTY_STREAM_FALLBACK_REPLY,
+        UNSAFE_STREAM_FALLBACK_REPLY
+      ).text;
       if (isUnsafeUserFacingReply(safeFinalReply)) {
         emitRuntimeEvent(state, 'unsafe_reply_blocked', {
           node: 'direct_reply',
@@ -493,7 +498,10 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
         const safeFinalMeta = readSanitizedMeta(sanitizeUserFacingText(guardedFinalReply, { returnMeta: true }));
         hasSafetyRestriction = Boolean(hasSafetyRestriction || safeFinalMeta.hasSafetyRestriction);
-        const safeFinalReply = safeFinalMeta.text || EMPTY_STREAM_FALLBACK_REPLY;
+        const safeFinalReply = protectFinalOutput(
+          safeFinalMeta.text || EMPTY_STREAM_FALLBACK_REPLY,
+          UNSAFE_STREAM_FALLBACK_REPLY
+        ).text;
         if (isUnsafeUserFacingReply(safeFinalReply)) {
           emitRuntimeEvent(state, 'unsafe_reply_blocked', {
             node: 'direct_reply',

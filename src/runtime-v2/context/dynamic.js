@@ -499,7 +499,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     extraBlocks.push(createPromptBlock('roleplay_inner_protocol', 'Roleplay Inner Protocol', roleplayInnerProtocolText, {
       stage: 'main',
       priority: 207,
-      authority: 'runtime_context',
+      authority: 'runtime_policy',
       kind: 'roleplay_inner_protocol',
       source: 'runtime',
       lane: 'dynamic_context',

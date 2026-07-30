@@ -1,5 +1,10 @@
 # MizukiBot
 
+## 运行维护 2026-07-31 02:13 +08:00
+
+- 提示词注入防护已统一收口：仅显式可信 authority 可生成 `system`，记忆、连续性、工具证据、视觉/OCR 与会话摘要均作为低权限数据处理；持久化写入和所有回复出口增加污染/真实根提示词泄露拦截。
+- 安全专项、`lint`、`typecheck`、prompt 清单与相邻回归通过；完整边界及验收记录见 [维护日志](docs/maintenance-log.md) 和 [实施计划](docs/superpowers/plans/2026-07-30-prompt-injection-hardening.md)。
+
 ## 运行维护 2026-07-30 21:30 +08:00
 
 - 新增[瑞希的 QQ 绘图陪伴玩法手册](docs/qq-visual-rendering-companion-playbook-2026-07-30.md)，提供可直接复制的私聊陪伴与群聊娱乐提示词，并将需要定时、记忆授权或状态存储的构想统一标记为“尚未上线”。

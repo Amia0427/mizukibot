@@ -1787,3 +1787,10 @@
 - 功能提交 `c7ac6a7`：同步 `.env.example`、运行配置、引擎默认值和回归测试；主进程已重启，运行配置确认 `idleMinutes=120`、`minGapMinutes=240`、`maxPerDay=2`、`maxUnanswered=2`，`/live`、`/ready` 均返回 200。
 - 验收：主动私聊定向测试、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0；完整 `npm test` 退出 1，主动私聊测试通过，失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`mainReplyUnifiedDiagnostics.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，属于未修改的并行或既有范围。
 - 小目标已完成：主动私聊触达节奏已调得更积极，现有防打扰上限和自动暂停保护未放宽；本次文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-07-31 02:13 +08:00
+
+- 安全边界：提示词块改用封闭 authority 白名单，未知来源默认降为带 `[UntrustedContext]` 边界的 `assistant`；记忆、连续性、工具证据、会话摘要、快速回复动态上下文和压缩摘要不再提升为 `system`。
+- 持久化与输出：短期/会话结构化摘要任一嵌套字段命中污染即整份拒绝且不消费历史；会话摘要存储与图片索引在写入点复检，视觉 OCR 仅供当前轮；真实 `SYSTEM.txt` 及运行时已装配 `system_root` 建立有限指纹，普通回复、快速回复、最终发送和跨 delta 流式发送统一拦截泄露。
+- 验收：14 项安全/相邻专项全部通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0。`npm test` 退出 1：五项为本分支既有 `adminStableSystemPrompt`、`configPersonaPrompt`、`mainReplyUnifiedDiagnostics`、`memoryV3EmbeddingBackfillConcurrency`、`memoryV3RagExplainDiagnostic`，另一项为暂存区外并行小剧场实现尚未同步 `messageHandlerModuleBoundary`；排除该并行用例后的 552 项中 547 项通过，失败仍为上述五项。本次安全文件未涉及这些失败范围。
+- 受保护的 `prompts/admin.txt` 与未跟踪 `AGENT.md` 未修改、未暂存；并行开发文档和小剧场改动保持原样，未纳入本次提交，不推送远端。

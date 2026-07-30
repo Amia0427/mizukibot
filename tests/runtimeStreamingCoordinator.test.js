@@ -10,6 +10,7 @@ const {
   createAdminPrivateMainReplyStreamFirstTokenTimeoutError
 } = require('../utils/adminPrivateMainReplyStreamTimeout');
 const { trimTextByTokenBudget } = require('../utils/contextBudget');
+const { registerSensitivePromptContent } = require('../utils/promptSecurity');
 
 module.exports = (async () => {
   const deltas = [];
@@ -773,6 +774,23 @@ module.exports = (async () => {
   assert.ok(groupTimeoutStreamed.finalReply.length < longGroupReply.length);
   assert.strictEqual(groupTimeoutDeltas.length, 1);
   assert.strictEqual(groupTimeoutDeltas[0].text, groupTimeoutStreamed.finalReply);
+
+  const protectedPromptFragment = 'streaming coordinator protected root prompt fragment that must not be emitted';
+  registerSensitivePromptContent(protectedPromptFragment);
+  const protectedDeltas = [];
+  const protectedHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || '')
+  });
+  const protectedReply = await protectedHelpers.maybeStreamFinalReply({
+    request: {
+      streaming: true,
+      onDelta(delta, fullText) {
+        protectedDeltas.push({ delta, fullText });
+      }
+    }
+  }, protectedPromptFragment);
+  assert.ok(!protectedReply.includes(protectedPromptFragment));
+  assert.deepStrictEqual(protectedDeltas, [{ delta: protectedReply, fullText: protectedReply }]);
 
   console.log('runtimeStreamingCoordinator.test.js passed');
 })().catch((error) => {

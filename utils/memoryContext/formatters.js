@@ -3,6 +3,7 @@ const {
   getPromptTokenLimit,
   limitPromptText
 } = require('./budget');
+const { wrapUntrustedPromptContent } = require('../promptSecurity');
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -61,8 +62,8 @@ function clampPromptMessage(label, text, tokenBudget, strategy = 'tail') {
   const body = limitPromptText(text, tokenBudget, strategy);
   if (!body) return [];
   return [{
-    role: 'system',
-    content: `[${label}]\n${body}`
+    role: 'assistant',
+    content: wrapUntrustedPromptContent(`[${label}]\n${body}`)
   }];
 }
 

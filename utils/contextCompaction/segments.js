@@ -4,6 +4,7 @@ const {
   normalizeMessageContent,
   trimTextByTokenBudget
 } = require('../contextBudget');
+const { wrapUntrustedPromptContent } = require('../promptSecurity');
 
 function createContextCompactionSegments(deps = {}) {
   const {
@@ -112,8 +113,10 @@ function createContextCompactionSegments(deps = {}) {
       .filter(Boolean);
     if (!lines.length) return [];
     return [{
-      role: 'system',
-      content: `[${label}]\n${lines.join('\n')}`
+      role: options.role === 'system' ? 'system' : 'assistant',
+      content: options.role === 'system'
+        ? `[${label}]\n${lines.join('\n')}`
+        : wrapUntrustedPromptContent(`[${label}]\n${lines.join('\n')}`)
     }];
   }
 
@@ -165,7 +168,8 @@ function createContextCompactionSegments(deps = {}) {
       next.messages = summarizeMessages(selected, {
         label: 'ToolEvidenceDigest',
         maxItems: maxToolResults,
-        maxChars: lowValueMaxChars
+        maxChars: lowValueMaxChars,
+        role: 'assistant'
       });
       next.compacted = true;
       next.estimatedTokens = estimateMessagesTokens(next.messages);
@@ -176,7 +180,8 @@ function createContextCompactionSegments(deps = {}) {
       next.messages = summarizeMessages(next.messages, {
         label: 'PlannerArtifactsDigest',
         maxItems: maxToolResults,
-        maxChars: lowValueMaxChars
+        maxChars: lowValueMaxChars,
+        role: 'assistant'
       });
       next.compacted = true;
       next.estimatedTokens = estimateMessagesTokens(next.messages);
@@ -187,7 +192,8 @@ function createContextCompactionSegments(deps = {}) {
       next.messages = summarizeMessages(next.messages, {
         label: 'DailyJournalDigest',
         maxItems: Math.min(3, next.messages.length),
-        maxChars: lowValueMaxChars
+        maxChars: lowValueMaxChars,
+        role: 'assistant'
       });
       next.compacted = true;
       next.estimatedTokens = estimateMessagesTokens(next.messages);

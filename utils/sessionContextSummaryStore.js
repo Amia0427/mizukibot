@@ -3,6 +3,7 @@ const path = require('path');
 const config = require('../config');
 const { getJsonStore } = require('./storeRegistry');
 const { BoundedCache } = require('./boundedCache');
+const { hasPersistentPromptThreat } = require('./promptSecurity');
 const SESSION_SUMMARY_DIR = path.join(config.DATA_DIR, 'session_context_summaries');
 const sessionSummaryCache = new BoundedCache({
   maxEntries: Math.max(8, Number(config.EPHEMERAL_CACHE_MAX_SESSIONS || 256) || 256),
@@ -169,7 +170,12 @@ function normalizeSessionItems(sessionKey = '', items = []) {
   const key = String(sessionKey || '').trim();
   return (Array.isArray(items) ? items : [])
     .map((item) => normalizeSummaryItem({ ...item, sessionKey: item?.sessionKey || key }))
-    .filter((item) => item.sessionKey && item.userId && item.summary)
+    .filter((item) => (
+      item.sessionKey
+      && item.userId
+      && item.summary
+      && !hasPersistentPromptThreat({ summary: item.summary, structured: item.structured })
+    ))
     .slice(-Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_MAX_ITEMS_PER_SESSION) || 1));
 }
 
@@ -226,6 +232,15 @@ function getSessionSummaryCooldownStatus(sessionKey = '', now = Date.now()) {
 }
 
 function saveSessionContextSummary(item = {}, options = {}) {
+  if (hasPersistentPromptThreat({ summary: item.summary, structured: item.structured })) {
+    return {
+      saved: false,
+      reason: 'prompt_threat',
+      duplicate: false,
+      cooldownLimited: false,
+      item: null
+    };
+  }
   const normalized = normalizeSummaryItem({
     ...item,
     createdAt: Number(options.now || item.createdAt || Date.now()) || Date.now()

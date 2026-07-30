@@ -3,6 +3,7 @@
 const { getConfig } = require('./config');
 const { normalizeArray, normalizeObject, normalizeText } = require('./normalization');
 const { estimateTokens, trimTextByTokenBudget } = require('../../../utils/contextBudget');
+const { mapPromptBlockToMessage } = require('../../../utils/promptSecurity');
 
 function createPromptBlock(id, label, content, options = {}) {
   const text = String(content || '').trim();
@@ -80,10 +81,10 @@ function trimLineBlock(lines = [], tokenBudget = 0, strategy = 'head') {
     .filter(Boolean);
 }
 
-function blocksToMessages(blocks = [], role = 'system') {
+function blocksToMessages(blocks = []) {
   return normalizeArray(blocks)
     .filter((item) => item && typeof item === 'object')
-    .map((item) => ({ role, content: String(item.content || '').trim() }))
+    .map(mapPromptBlockToMessage)
     .filter((item) => item.content);
 }
 

@@ -287,10 +287,8 @@ function createPrepareNode(deps = {}) {
   }
 
   function blocksToMessages(blocks = []) {
-    return normalizePromptBlocks(blocks).map((block) => ({
-      role: 'system',
-      content: String(block.content || '').trim()
-    }));
+    const { mapPromptBlockToMessage } = require('../../../utils/promptSecurity');
+    return normalizePromptBlocks(blocks).map(mapPromptBlockToMessage);
   }
 
   function serializePromptBlocks(blocks = []) {

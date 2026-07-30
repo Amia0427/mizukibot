@@ -1,4 +1,7 @@
-const { splitPromptBlocksByTrust } = require('./promptSecurity');
+const {
+  mapPromptBlockToMessage,
+  splitPromptBlocksByTrust
+} = require('./promptSecurity');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -183,10 +186,7 @@ function compilePromptBlocks(blocks = [], options = {}) {
     }
   }
 
-  const renderedSystemMessages = assembledBlocks.map((block) => ({
-    role: 'system',
-    content: block.content
-  }));
+  const renderedSystemMessages = assembledBlocks.map(mapPromptBlockToMessage);
   const trustSplit = splitPromptBlocksByTrust(assembledBlocks);
 
   return {

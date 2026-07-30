@@ -4,6 +4,7 @@ const { normalizeText, clampText } = require('./helpers');
 const { loadProfileProjection } = require('./storage');
 const { buildStableProfileText } = require('../memoryProfileSurface');
 const { filterPollutedTextLines } = require('../recallPollutionGuard');
+const { wrapUntrustedPromptContent } = require('../promptSecurity');
 
 function budget(name, fallback) {
   return Math.max(0, Number(config[name] || fallback) || fallback || 0);
@@ -12,7 +13,7 @@ function budget(name, fallback) {
 function toMessage(label, text, tokenBudget) {
   const value = trimTextByTokenBudget(String(text || '').trim(), tokenBudget, 'tail');
   if (!value) return [];
-  return [{ role: 'system', content: `[${label}]\n${value}` }];
+  return [{ role: 'assistant', content: wrapUntrustedPromptContent(`[${label}]\n${value}`) }];
 }
 
 function appendSelectionReason(existing = '', reason = '') {

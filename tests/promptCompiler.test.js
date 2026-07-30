@@ -123,5 +123,19 @@ const { buildPromptSnapshot } = require('../utils/promptCompiler');
     }
   ], { stage: 'main', userId: 'admin_1', adminUserIds: ['admin_1'] });
   assert.deepStrictEqual(adminIdWithoutExplicitAdminSnapshot.assembledBlocks.map((item) => item.id), ['public']);
+
+  const trustSnapshot = buildPromptSnapshot([
+    { id: 'root', authority: 'system_root', content: 'trusted root', priority: 1 },
+    { id: 'memory', authority: 'memory_fact', content: 'untrusted memory', priority: 2 },
+    { id: 'unknown', authority: 'new_source', content: 'unknown source', priority: 3 }
+  ], { stage: 'main' });
+  assert.deepStrictEqual(trustSnapshot.renderedSystemMessages.map((message) => message.role), [
+    'system',
+    'assistant',
+    'assistant'
+  ]);
+  assert.ok(trustSnapshot.renderedSystemMessages[1].content.includes('[UntrustedContext]'));
+  assert.deepStrictEqual(trustSnapshot.trustedBlocks.map((block) => block.id), ['root']);
+  assert.deepStrictEqual(trustSnapshot.untrustedBlocks.map((block) => block.id), ['memory', 'unknown']);
   console.log('promptCompiler.test.js passed');
 })();
