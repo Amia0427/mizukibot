@@ -1,0 +1,336 @@
+# 消息与 Agent 运行时
+
+本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-07-31。
+
+读完后应能回答：一条 OneBot 消息在哪里被接收、在哪些位置可能提前返回、何时进入 Runtime V2、工具如何受策略约束、回复如何防重复与过期，以及回复后的持久化为何不应阻塞用户可见结果。
+
+## 先认识稳定边界
+
+| 边界 | 稳定入口 | 当前实现所有者 | 说明 |
+| --- | --- | --- | --- |
+| 主进程 | [`../../index.js`](../../index.js) | 同文件组合各运行时 | 单实例锁、Web/NapCat、后台调度、就绪与优雅关停都从这里接线 |
+| 消息处理器 | [`../../core/messageHandler.js`](../../core/messageHandler.js) | [`../../core/messageHandler.runtime.js`](../../core/messageHandler.runtime.js) | `core/messageHandler.js` 是兼容入口；运行逻辑仍在大型 runtime 文件 |
+| 新消息命名空间 | [`../../src/message/index.js`](../../src/message/index.js) | `src/message/` 与 `core/` 混合 | 迁移期 facade，不代表所有实现已经移动到 `src/` |
+| Agent 公共 API | [`../../api/agentGraph.js`](../../api/agentGraph.js) | [`../../api/runtimeV2/host/index.js`](../../api/runtimeV2/host/index.js) | 保留旧调用签名，但 V2 是唯一主机 |
+| 图结构 | [`../../api/runtimeV2/topology.js`](../../api/runtimeV2/topology.js) | `api/runtimeV2/nodes/` | 节点名、固定边和条件边的真值来源 |
+| 路由执行 | [`../../core/messageRouteFlow/index.js`](../../core/messageRouteFlow/index.js) | 同目录与消息处理器 | 把领域路由转成直接回复、工具计划、后台任务或管理员动作 |
+| 回复出口 | [`../../core/messageReplyRuntime.js`](../../core/messageReplyRuntime.js) | 同文件及系统回复模块 | 用户可见文本净化、敏感词保护、流式分段与 QQ 发送 |
+| 回复后任务 | [`../../utils/postReplyJobQueue/index.js`](../../utils/postReplyJobQueue/index.js) | `utils/postReplyWorker/` | 日记、学习、Memory V3 事件、物化和质量维护 |
+
+不要直接把 `*.chunk.js` 当作扩展入口。仓库中部分 chunk 是历史拆分产物或源码级回归哨兵；新增行为应落在上表的实现所有者，公开导出通过稳定入口暴露。
+
+## 推荐阅读顺序
+
+第一次阅读不要顺着 `core/messageHandler.runtime.js` 从第一行看到最后一行。按下面的窄链路走，能更快建立正确模型。
+
+1. [`../../index.js`](../../index.js)：只看 `createMessageHandler`、`acceptIncomingMessage`、`acceptNapCatIncomingMessage`、`connectNapCat`、`startNapCatTransport`、`startMainProcess` 和关停组合。
+2. [`../../core/messageIngressDispatcher.js`](../../core/messageIngressDispatcher.js)：理解进程级异步入口队列的容量、丢弃和 drain 语义。
+3. [`../../core/messageIngress.js`](../../core/messageIngress.js)：理解 notice、消息类型、自消息过滤和标准化 `InboundMessageContext`。
+4. [`../../core/messageHandler.runtime.js`](../../core/messageHandler.runtime.js)：用函数名搜索 `createMessageHandler` 和 `handleIncomingMessage`，只追当前改动涉及的早退分支。
+5. [`../../core/messageRouteFlow/index.js`](../../core/messageRouteFlow/index.js)：看正式路由怎样构造 reply envelope，以及何时调用 Agent。
+6. [`../../api/agentGraph.js`](../../api/agentGraph.js) -> [`../../api/agentGraphFacade.js`](../../api/agentGraphFacade.js) -> [`../../api/agentGraphV2.js`](../../api/agentGraphV2.js)：确认公共签名如何进入 V2 host。
+7. [`../../api/runtimeV2/topology.js`](../../api/runtimeV2/topology.js)：先读图，再按需进入 `api/runtimeV2/nodes/`。
+8. [`../../api/runtimeV2/host/index.js`](../../api/runtimeV2/host/index.js)：最后看组合根、依赖注入、checkpoint 和 `askAIByGraphV2`。
+9. [`../../core/messageReplyRuntime.js`](../../core/messageReplyRuntime.js) 与 [`../../api/runtimeV2/nodes/persist.js`](../../api/runtimeV2/nodes/persist.js)：分别确认“已发送”和“已持久化”不是同一件事。
+10. [`../../utils/postReplyWorker/processJob.js`](../../utils/postReplyWorker/processJob.js)：理解慢副作用如何继续执行。
+
+每读一个模块，同时搜索它的调用者与对应测试：
+
+```bash
+rg -n "目标导出名|目标文件名" index.js api core src utils tests
+rg -n "module\.exports|exports\." path/to/module.js
+```
+
+## 主进程生命周期
+
+### 启动
+
+`index.js` 在加载配置后创建消息处理器、NapCat action client、主动消息引擎、scheduler 和可选内联 post-reply worker。`startMainProcess()` 的顺序具有行为意义：
+
+1. 获取 `.mizukibot.lock` 对应的单实例锁，避免两个主进程竞争同一个 OneBot 连接。
+2. 清理过期临时文件，启动 Web 服务并初始化 meme 管理器。
+3. 按配置安排 Memory V3 embedding backfill 和资源快照。
+4. 启动 HTTP 反向入口，同时尝试 NapCat WebSocket。
+5. 等 Web 与 HTTP reverse server 真正监听后，才把 readiness 标记为 ready。
+
+`startConnectedRuntimes()` 是连接后的组合点，负责启动主动消息、tick、daily journal summary、scheduler、post-reply worker 和 NapCat log follower。新增需要随连接启停的后台能力，应接入这个生命周期或抽成与它同级的 runtime；不要在模块顶层悄悄启动定时器。
+
+### 重连
+
+WebSocket `close` 会记录离线状态并按递增延时重连，上限 30 秒。`connectNapCat()` 会拒绝在 shutdown、已有 OPEN 或 CONNECTING 连接时重复创建 socket。HTTP reverse 与 WebSocket 可以同时存在，因此入站去重不能依赖“只有一个 transport”。
+
+### 关停
+
+`createMainProcessLifecycle` 按阶段执行：停止接收 -> 停止运行时 -> drain worker -> 清理外部资源 -> flush 热存储和 SQLite -> 释放单实例锁。消息入口的 `stop({ drain: true })` 与 post-reply worker 的 `drainAndStop()` 都受关停超时约束。
+
+新增资源必须明确归入以下一种所有权：
+
+- 可停止 runtime：提供幂等 `stop()`。
+- 可 drain worker：提供带超时的等待语义。
+- 外部连接：提供关闭或清缓存函数。
+- 持久化资源：在 finalize 阶段完成 flush/close。
+
+只监听 `process.on('exit')` 不足以保证异步清理完成。
+
+## 一条消息的端到端链路
+
+```mermaid
+flowchart TD
+    A["NapCat WebSocket / HTTP reverse"] --> B["prepareNapCatEventPacket"]
+    B -->|action response| X["NapCat action client 消费"]
+    B -->|event| C["messageIngressDispatcher"]
+    C --> D["handleIncomingMessage"]
+    D --> E["去重、权限、连续消息、并发锁"]
+    E --> F["被动群感知或特殊命令"]
+    E --> G["detectIntentHybrid"]
+    G --> H["direct-chat planner / route execution plan"]
+    H --> I["messageRouteFlow"]
+    I --> J["api/agentGraph 公共入口"]
+    J --> K["Runtime V2 LangGraph"]
+    K --> L["reply envelope"]
+    L --> M["敏感保护、流式分段、NapCat 发送"]
+    M --> N["短期状态和 telemetry"]
+    N --> O["post-reply queue"]
+```
+
+### 1. Transport 只负责接收和 action 响应分流
+
+WebSocket `message` 与 HTTP reverse handler 都调用 `acceptNapCatIncomingMessage()`。它先执行 `prepareNapCatEventPacket()`：
+
+- 记录 NapCat packet 日志。
+- 可选交给 follower 处理 live packet。
+- 让 `napcatActionClient.handleMessage()` 消费带 echo 的 action 响应。
+- 只有非 action 响应事件才继续进入消息处理器。
+
+这里不应放业务路由。Transport 的职责是解析、连接状态、认证、重连和把事件交给统一入口。
+
+### 2. 进程级入口队列限制总压力
+
+启用 `MESSAGE_INGRESS_ASYNC_ENABLED` 后，`acceptIncomingMessage()` 只把任务压入 `createMessageIngressDispatcher()`。dispatcher 使用全局 `maxActive` 和 `maxQueueLength`：
+
+- 队列满时明确丢弃并记录快照，而不是无限积压。
+- 单个 handler 失败只增加失败计数，不让 drain 循环停止。
+- shutdown 可以停止接收后等待 active 与 queue 清空。
+
+它只限制“进入 handler 的总量”，不保证同一用户、同一会话或前台模型调用的顺序；这些约束在消息处理器内第二次实施。
+
+### 3. 消息处理器先完成廉价过滤和特殊分支
+
+`handleIncomingMessage()` 的前半段顺序应保持廉价检查优先：
+
+1. notice 处理；非 message、未知 message type、自消息直接返回。
+2. request trace 和 inbound timing 建立。
+3. `message_id` 等事件键去重，防止双 transport 或重投递重复处理。
+4. 私聊 allowlist、Luckin 命令、`/create`、主动消息控制、meme 上传等特殊入口。
+5. 连续消息预处理：合并短时间内的片段，解析 reply/forward/card；返回 `deferred` 时本轮不继续。
+6. 选择 private/default 入站并发池，获取 per-user 锁。
+7. 解析图片、引用、@、卡片与 directed context，构造标准 `InboundMessageContext`。
+
+特殊命令通常在通用 Agent 之前返回。新增特殊入口时必须说明为什么不能成为正常 route/capability，并补充“未命中时继续走主链”的测试；否则很容易扩大热路径并绕过统一安全、记忆和 telemetry。
+
+### 4. 群聊是否直达 Bot 决定主动与被动链路
+
+非私聊且没有 direct bot anchor 时，消息进入 `runPassiveFlow()`，最终由 [`../../src/features/passive-awareness/reply.js`](../../src/features/passive-awareness/reply.js) 编排感知、规则 gate、模型决策、presence 状态和可选回复，然后主链返回。
+
+私聊或明确 @/引用 Bot 的消息继续正式路由。此处还会处理视觉 caption、card-only 修正、短期 session key、stable thread id 和 freshness guard。
+
+### 5. 路由与执行计划是两个决策
+
+消息处理器先调用 `detectIntentHybrid()` 得到高层 `topRouteType`、清洗文本和 route metadata。对 `direct_chat` 还会运行 direct-chat planner，决定：
+
+- 是否允许工具；
+- 允许哪些工具/能力桶；
+- 是否允许流式输出；
+- 是否需要后台任务；
+- route policy/debug key。
+
+`routeExecutionPlan` 是后续工具策略、提示词、telemetry 和回复格式的共同输入。不要只新增一个 route 字符串而不更新执行计划、允许工具和测试，否则“路由识别成功”也可能在执行层被拒绝。
+
+符合严格条件的普通文本可能走 normal fast reply。这是独立热路径，发送成功后自己更新短期历史和副作用；失败才回退正式路由。修改主回复行为时要先确认问题是否只发生在 fast path、formal path，还是两者共有的回复出口。
+
+### 6. 正式路由把消息交给 Agent 公共 API
+
+`createMessageRouteFlow()` 根据执行计划处理管理员、后台控制、不可用分支和正式 Agent 调用。直接回复分支最终使用保留的调用签名：
+
+```js
+askAIByGraph(question, userInfo, userId, customPrompt, imageUrl, options)
+```
+
+`api/agentGraph.js` 只是公共壳，`api/agentGraphFacade.js` 即使收到历史 V1 名称也会转到 V2。`LANGGRAPH_RUNTIME_VERSION` 现在只是兼容告警，不再选择旧主机。
+
+`options` 不是纯输入：V2 host 会回填 `persistedReplyText`、`displayReplyText`、`reasoningText`、`reasoningForwardText`、流式状态和安全限制标志。修改这个契约时，必须同时检查 message route flow、stream dispatcher、telemetry 和 persist 的消费者。
+
+## Runtime V2 图
+
+图结构以 `LANGGRAPH_V2_TOPOLOGY` 为准：
+
+```text
+prepare -> enhance_live_state -> route
+  route(chat/proactive/review/image/minecraft) -> direct_reply
+  route(tool_plan) -> planner -> dispatch -> validate
+  direct_reply -> planner | persist | END
+  validate -> draft_reply | repair_or_continue
+  repair_or_continue -> dispatch | draft_reply
+  draft_reply -> dispatch | humanize
+  humanize -> final_validate -> persist -> END
+```
+
+### 节点职责
+
+| 节点 | 主要职责 | 常见修改原因 |
+| --- | --- | --- |
+| `prepare` | 恢复 checkpoint/短期状态、构建记忆与 prompt、能力预检、延迟预算 | 改上下文输入、prompt 预算、恢复语义 |
+| `enhance_live_state` | 把当前动态状态补入准备结果 | 改实时状态增强，不应承担通用路由 |
+| `route` | 把请求归入 chat/tool_plan 等图分支 | 增加图级模式 |
+| `direct_reply` | 主模型直接回答，并可编译模型 tool calls | 改直接回复或 direct tool loop |
+| `planner` | 生成/恢复结构化执行计划 | 增加计划字段或单一决策权规则 |
+| `dispatch` | 执行 capability batch，收集 execution envelope | 增加 capability 调度、并行或 preflight |
+| `validate` | 验证工具证据与计划结果 | 改证据充分性、最大轮次 |
+| `repair_or_continue` | 基于失败构造修复计划或转回答 | 改可修复错误策略 |
+| `draft_reply` | 用工具证据合成草稿，也可再次产生工具步骤 | 改证据到答案的合成 |
+| `humanize` | 按路由决定润色/流式最终文本 | 改人格润色或分段，不应改事实 |
+| `final_validate` | 失败回复分类、prompt 安全和最终保护 | 改最后一道安全/失败判定 |
+| `persist` | 写短期状态、事件并排队慢副作用 | 改持久化或后台任务边界 |
+
+### 工具执行不是任意函数调用
+
+工具从 capability registry 和 executors 解析，经以下层次约束：
+
+1. route/planner 生成 allowed tools 与 execution plan。
+2. capability preflight 验证可用性。
+3. tool policy 再次执行授权检查。
+4. scheduler 决定 batch、是否可并行以及 side-effect 顺序。
+5. 每一步返回标准 execution envelope，进入验证、修复与最终证据包。
+
+需要增加工具时，优先在 capability registry、executor 和 policy 三处形成闭环，不要在 `direct_reply` 中写工具名特判。副作用工具默认不应与其他步骤随意并行。
+
+### Checkpoint 与恢复
+
+Runtime V2 使用 [`../../utils/langgraphV2Store.js`](../../utils/langgraphV2Store.js) 持久化节点快照和事件。thread id 必须稳定关联当前会话/请求；节点通过 `saveAndEmit()` 记录状态。`runPersistInBackgroundFromCheckpoint(threadId)` 会重新加载 checkpoint，并仅把 `deferPersist` 改为 false 后执行 persist 节点。
+
+因此，节点应尽量返回可序列化状态，不要把 socket、client、闭包或巨大原始响应放进 graph state。运行时依赖由 host 组合根注入，不由 state 携带。
+
+## 回复出口与可见结果
+
+Agent 返回的文本先组成 reply envelope。它至少区分：
+
+- `replyText`：当前用户可见文本；
+- `persistedReplyText`：进入历史和学习链路的规范文本；
+- `reasoningText` / `reasoningForwardText`：受单独策略控制，不能混入主回复；
+- `usedStreamingSend` 与 `replyOptions`：防止流已发送后再重复发送整段；
+- `freshness`：新消息到达后丢弃旧回复。
+
+`messageReplyRuntime` 在最终发送前执行用户可见文本净化和 sensitive guard。群聊通常通过 `systemGroupReply` 排队，私聊走 private reply；流式 dispatcher 自己串行 chunk、控制间隔、限制段数，并在每次 send 前再次检查 freshness。
+
+只有 NapCat action 返回成功才算“已发送”。文本已由模型生成、已写入 checkpoint 或已进入 `replyEnvelope` 都不能作为发送成功的证据。
+
+## 三层并发与新鲜度
+
+并发问题必须先定位层次：
+
+1. `messageIngressDispatcher`：进程级总入口容量，保护 event loop。
+2. `createInboundConcurrencyController`：private/default 分池，区分 admin/general，并限制 per-user inflight。
+3. `createForegroundConcurrencyController`：限制昂贵前台模型任务，并给管理员保留槽位。
+
+连续消息预处理还有自己的 debounce/session；stream dispatcher 有自己的发送串行队列；post-reply worker 又是独立队列。不要用一个全局 mutex 试图覆盖所有层。
+
+freshness guard 使用 session key 与递增版本防止旧回复覆盖新上下文。任何新发送路径若绕过 `sendReply`/stream dispatcher，都必须显式携带 `shouldSend` 或等价的新鲜度判断。
+
+## 前台持久化与后台任务
+
+`persist` 节点负责对当前图状态做最小且必要的提交，包括短期历史、session 状态、bridge snapshot、persona outcome 和 post-reply job。对于 direct chat，消息层可以设置 `deferPersist`，在用户可见发送后通过 checkpoint 继续 persist，降低首包延迟。
+
+post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegistry.js`](../../utils/postReplyWorker/taskRegistry.js)：
+
+- `memoryLearning`、`selfImprovement`、`dailyJournal`；
+- `memoryEvent` -> `materialize` -> `vectorMaintenance`；
+- materialize 后可做 `memoryQualityAudit` 和 `profileMaintenance`；
+- enrich phase 独立处理更重的增强。
+
+任务状态、attempt、lease 和 completedTasks 用于幂等恢复。新增后台步骤必须声明依赖、fatal/nonfatal 策略、压力下是否可跳过，并让 job result 保持 JSON 可序列化。
+
+## 关键开发契约
+
+### 公共入口与实现文件分开
+
+- 外部调用继续从 `api/agentGraph.js`、`core/messageHandler.js` 或领域 index 导入。
+- 新实现落在真实所有者；不要为了“路径更现代”复制一份逻辑到 facade。
+- 改导出形状前先读模块边界测试，尤其是 [`../../tests/messageHandlerModuleBoundary.test.js`](../../tests/messageHandlerModuleBoundary.test.js)。
+
+### 组合根负责依赖注入
+
+消息处理器和 V2 host 都支持 override/deps 注入。测试应替换网络、模型、时钟或存储依赖，而不是 monkey-patch 全局模块缓存。业务模块不应自行 new 第二个 action client 或 runtime singleton。
+
+### route metadata 是跨层协议
+
+`routePolicyKey`、`routeDebugKey`、`topRouteType`、`groupId`、`chatType`、`threadId`、`messageId` 和 request trace 会穿过路由、prompt、工具策略、发送、持久化和诊断。添加字段时要决定：是否可序列化、是否进入 checkpoint、是否含敏感信息、是否需要出现在 post-reply job。
+
+### 失败必须保留类型
+
+模型空回复、provider 失败、工具失败、发送失败、stale reply 和 rate limit 是不同故障。不要把它们都吞成一句通用回复；保留 `finalErrorCode`、failure type、节点和 request trace，用户文本再由统一失败回复处理。
+
+## 常见改动落点
+
+| 目标 | 首选落点 | 同时检查 |
+| --- | --- | --- |
+| 新 OneBot notice | `core/messageIngress.js` | NapCat ingress 测试、是否需要业务 side effect |
+| 新消息级特殊命令 | `core/messageHandler.runtime.js` 中廉价早退区 | 权限、未命中回落、private/group 差异、memory skip 日志 |
+| 新高层路由 | 当前 intent router 与 message route flow | execution plan、policy key、prompt 与路由测试 |
+| 新 Agent 图分支 | `api/runtimeV2/topology.js` 与独立 node | state shape、checkpoint、条件路由、LangGraph 测试 |
+| 新工具能力 | capability registry/executor/policy | planner catalog、preflight、side-effect 并行规则、evidence envelope |
+| 改流式回复 | `core/messageReplyRuntime.js` 与 V2 streaming coordinator | chunk 去重、最终 flush、新鲜度、私聊/群聊间隔 |
+| 改回复后学习 | persist node 或 post-reply task | 前台延迟、幂等、job 依赖、失败重试 |
+| 新随进程运行的 scheduler | `index.js` 生命周期组合 | readiness、重连、stop/drain、资源快照 |
+
+## 高风险误区
+
+- 把 `MESSAGE_INGRESS_ASYNC_MAX_ACTIVE` 当成同一用户串行保证。它只控制总量。
+- 在 WebSocket 和 HTTP reverse 各写一套业务处理，导致双入口行为漂移。
+- 在模型返回后直接发送，绕过 sensitive guard、freshness 和 reply telemetry。
+- 流式已发送后又走标准发送，产生重复回复。
+- 在 graph state 放不可序列化对象，导致 checkpoint 恢复失败。
+- 在 `direct_reply` 内新增工具特判，绕开 capability policy 和 execution envelope。
+- 把 post-reply 失败当成主回复失败，拖慢或重复用户可见回复。
+- 修改 chunk 或兼容 sentinel，却没有改变真实入口。
+- 用“进程没有报错”代替发送、持久化或 drain 的实际验收。
+
+## 验证命令
+
+### 消息入口与并发
+
+```bash
+node scripts/run-tests.js tests/napcatWsIngressSmoke.test.js tests/messageIngressDispatcher.test.js tests/messageHandlerInboundConcurrency.test.js
+```
+
+验收点：WebSocket/HTTP 事件都进入统一 handler；队列容量和 drain 生效；同一用户限制不被全局并发绕过。
+
+### 模块边界、路由与回复
+
+```bash
+node scripts/run-tests.js tests/messageHandlerModuleBoundary.test.js tests/messageRouteFlowGroupStreaming.test.js tests/messageReplyRuntimeFreshness.test.js
+```
+
+验收点：facade 导出不变；流式路径不重复最终发送；新消息能阻止过期回复。
+
+### Runtime V2 与持久化
+
+```bash
+node scripts/run-tests.js tests/langgraphV2.test.js tests/persistNodeConfig.test.js tests/postReplyJobQueue.test.js
+```
+
+验收点：图分支可达；persist 配置契约正确；post-reply job 可入队、恢复和完成。
+
+### 诊断现有运行实例
+
+```bash
+npm run diag:napcat-health
+npm run diag:route-decision
+npm run diag:main-reply
+npm run diag:main-reply-lag
+npm run diag:runtime
+node scripts/inspect-post-reply-jobs.js
+```
+
+排查时用同一个 message/request/thread 标识串起 ingress、router、Runtime V2、reply send 和 post-reply 证据。重启只能恢复进程状态，不能证明竞态、发送失败或持久化错误已经修复。
+
+继续阅读记忆、prompt 和 persist 内部结构时，转到 [记忆与提示词](04-memory-and-prompts.md)。
