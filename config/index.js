@@ -108,6 +108,9 @@ module.exports = {
   // NapCat OneBot HTTP action endpoint (bot posts actions to NapCat)
   NAPCAT_HTTP_API_BASE_URL: pick('NAPCAT_HTTP_API_BASE_URL', 'http://127.0.0.1:3000'),
   NAPCAT_HTTP_ACTION_SECRET: pick('NAPCAT_HTTP_ACTION_SECRET', ''),
+  VISUAL_RENDER_ENABLED: pickBool('VISUAL_RENDER_ENABLED', false),
+  VISUAL_RENDER_HTML_API_URL: pick('VISUAL_RENDER_HTML_API_URL', 'http://127.0.0.1:6099/plugin/napcat-plugin-puppeteer/api/render'),
+  VISUAL_RENDER_TIMEOUT_MS: Math.max(1000, pickNum('VISUAL_RENDER_TIMEOUT_MS', 10000)),
   NAPCAT_WS_URL: pick('NAPCAT_WS_URL', ''),
   NAPCAT_WS_TOKEN: pick('NAPCAT_WS_TOKEN', ''),
   // HTTP reverse ingress port (NapCat posts events to bot)

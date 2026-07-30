@@ -1,5 +1,5 @@
 const config = require('../../../config');
-const { getPolicy } = require('../../../utils/toolPolicy');
+const { getPolicy, sanitizeToolArgsForLog } = require('../../../utils/toolPolicy');
 const {
   createMemoryCliTurnState,
   decideMemoryCliTurnAction,
@@ -417,6 +417,10 @@ function buildToolContext(state, overrides = {}, helpers = {}) {
     : null;
   return {
     userId: normalizeText(request.userId),
+    question: normalizeText(request.question),
+    rawText: normalizeText(routeMeta.rawText || request.question),
+    cleanText: normalizeText(routeMeta.cleanText || request.question),
+    chatType: normalizeText(routeMeta.chatType || routeMeta.chat_type || (routeMeta.groupId || routeMeta.group_id ? 'group' : 'private')),
     routePolicyKey: normalizeText(request.routePolicyKey),
     topRouteType: normalizeText(request.topRouteType),
     routeMeta,
@@ -447,8 +451,7 @@ function logToolExecution(envelope = {}, step = {}, state = {}, extra = {}) {
   const request = normalizeObject(state.request, {});
   const routeMeta = normalizeObject(request.routeMeta, {});
   const args = normalizeObject(envelope.args, normalizeObject(step.inputs, {}));
-  const sanitizedArgs = { ...args };
-  delete sanitizedArgs.__context;
+  const sanitizedArgs = sanitizeToolArgsForLog(normalizeText(envelope.tool_name || step.tool), args);
   console.log('[graph-tool]', {
     node: normalizeText(extra.node || state.execution?.currentNode) || 'unknown',
     topRouteType: normalizeText(request.topRouteType || routeMeta.topRouteType),

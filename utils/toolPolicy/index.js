@@ -60,6 +60,7 @@ const TOOL_POLICIES = {
   list_scheduled_tasks: { risk: 'medium', capability: 'local_read' },
   cancel_scheduled_task: { risk: 'medium', capability: 'local_write' },
   delete_scheduled_task: { risk: 'medium', capability: 'local_write' },
+  render_qq_visual: { risk: 'medium', capability: 'local_write' },
   skill_image_generate_pro: { risk: 'high', capability: 'fs_write' },
   minecraft_connect: { risk: 'high', capability: 'network' },
   minecraft_disconnect: { risk: 'medium', capability: 'network' },
@@ -175,6 +176,40 @@ function normalizeWebFetchArgs(args = {}) {
   if (!/^https?:\/\//i.test(url)) throw new Error('web_fetch requires http/https url');
   next.url = url;
   return next;
+}
+
+function normalizeVisualRenderArgs(args = {}) {
+  const renderer = String(args.renderer || '').trim().toLowerCase();
+  const markup = String(args.markup || '').trim();
+  if (!new Set(['svg', 'html']).has(renderer)) throw new Error('render_qq_visual renderer must be svg or html');
+  if (!markup) throw new Error('render_qq_visual requires markup');
+  if (markup.length > 100000) throw new Error('render_qq_visual markup too large');
+
+  const normalized = { renderer, markup };
+  if (args.width !== undefined) {
+    const width = Number(args.width);
+    if (!Number.isInteger(width) || width < 320 || width > 1200) {
+      throw new Error('render_qq_visual width must be an integer between 320 and 1200');
+    }
+    normalized.width = width;
+  }
+  if (args.max_height !== undefined) {
+    const maxHeight = Number(args.max_height);
+    if (!Number.isInteger(maxHeight) || maxHeight < 200 || maxHeight > 2000) {
+      throw new Error('render_qq_visual max_height must be an integer between 200 and 2000');
+    }
+    normalized.max_height = maxHeight;
+  }
+  return normalized;
+}
+
+function sanitizeToolArgsForLog(toolName = '', args = {}) {
+  const sanitized = { ...(args && typeof args === 'object' ? args : {}) };
+  delete sanitized.__context;
+  if (String(toolName || '').trim() === 'render_qq_visual' && Object.prototype.hasOwnProperty.call(sanitized, 'markup')) {
+    sanitized.markup = `[redacted markup ${String(sanitized.markup || '').length} chars]`;
+  }
+  return sanitized;
 }
 
 function normalizeSharedLinkArgs(args = {}) {
@@ -351,6 +386,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
     return normalizeImageArgs(args);
   }
 
+  if (toolName === 'render_qq_visual') {
+    return normalizeVisualRenderArgs(args);
+  }
+
   if (toolName === 'memory_cli') {
     return normalizeMemoryCliArgs(args, context);
   }
@@ -429,6 +468,7 @@ module.exports = {
   NOTEBOOK_ROOT,
   TOOL_POLICIES,
   getPolicy,
+  sanitizeToolArgsForLog,
   sanitizeUserId,
   enforceToolPolicy,
   mustStayInside,

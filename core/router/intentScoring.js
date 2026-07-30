@@ -92,6 +92,15 @@ function hasExplicitActSignal(text = '') {
   return EXPLICIT_ACT_PATTERN.test(String(text || '').trim());
 }
 
+function hasStructuredVisualRenderIntent(text = '') {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  const action = /(画|绘制|制作|生成|设计|渲染|做一张|draw|render|create|make)/i;
+  if (/\b(?:html|svg)\b/i.test(value) && action.test(value)) return true;
+  return /(?:画|绘制|制作|生成|设计|渲染|做一张).{0,16}(?:图表|海报|信息图|信息卡|卡片|流程图|时间线|架构图|关系图|状态图|状态卡|表格图片)/i.test(value)
+    || /(?:图表|海报|信息图|信息卡|卡片|流程图|时间线|架构图|关系图|状态图|状态卡).{0,16}(?:画|绘制|制作|生成|设计|渲染)/i.test(value);
+}
+
 function isSimpleTransformTask(text = '', imageUrl = null) {
   const t = String(text || '').trim();
   if (!t || imageUrl) return false;
@@ -139,6 +148,7 @@ function scoreProductivityIntent(text = '') {
 module.exports = {
   INTENT_ALIASES,
   hasExplicitActSignal,
+  hasStructuredVisualRenderIntent,
   hasInlineContentForTransform,
   isSelfContainedProductivityPlan,
   isSimpleTransformTask,

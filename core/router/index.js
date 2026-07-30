@@ -29,6 +29,7 @@ const {
 const {
   INTENT_ALIASES,
   hasExplicitActSignal,
+  hasStructuredVisualRenderIntent,
   isSimpleTransformTask,
   isSelfContainedProductivityPlan,
   isStrictTimeDirectQuestion,
@@ -97,6 +98,17 @@ function hasQzonePublishSignal(text = '') {
 function detectQqActionIntent(cleanText = '', imageUrl = null) {
   const text = String(cleanText || '').trim();
   if (!text || imageUrl) return null;
+
+  if (hasStructuredVisualRenderIntent(text)) {
+    return {
+      key: 'qq_render_visual',
+      allowedTools: ['render_qq_visual'],
+      reason: 'qq-render-visual',
+      toolNeed: ['image'],
+      executionMode: 'staged',
+      responseIntent: 'action_guidance'
+    };
+  }
 
   if (/(查看|列出|显示|看看|查询).{0,8}(当前|本群|定时|任务|计划任务|定时任务)/i.test(text)
     || /(定时任务|计划任务).{0,8}(列表|清单|情况)/i.test(text)) {

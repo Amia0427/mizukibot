@@ -54,6 +54,7 @@ const nativeWeather = createLazyModuleProxy('nativeWeather', () => require('../s
 const nativeSkillValidation = createLazyModuleProxy('nativeSkillValidation', () => require('../skills_native/skillValidation'));
 const nativeClawddocs = createLazyModuleProxy('nativeClawddocs', () => require('../skills_native/clawddocs'));
 const nativeSummarize = createLazyModuleProxy('nativeSummarize', () => require('../skills_native/summarize'));
+const nativeVisualRender = createLazyModuleProxy('nativeVisualRender', () => require('../skills_native/visualRender'));
 const nativeStockQuote = createLazyModuleProxy('nativeStockQuote', () => require('../skills_native/stocks/quote'));
 const nativeStockDividend = createLazyModuleProxy('nativeStockDividend', () => require('../skills_native/stocks/dividend'));
 const nativeStockPortfolio = createLazyModuleProxy('nativeStockPortfolio', () => require('../skills_native/stocks/portfolio'));
@@ -924,6 +925,10 @@ const TOOL_EXECUTORS = {
     const docPath = String(args.doc_path ?? args.path ?? '').trim();
     const skillDir = ensureSkillPath('clawddocs');
     return nativeClawddocs.fetchDoc(skillDir, docPath);
+  },
+
+  render_qq_visual: async (args = {}) => {
+    return nativeVisualRender.renderQqVisual(args);
   },
 
   skill_image_generate_pro: async (args = {}) => {

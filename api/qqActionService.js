@@ -20,6 +20,8 @@ const {
   sanitizeDiaryImageMeta,
   sanitizeDiaryImageText,
   sendGroupImageMessage,
+  sendImageMessageForContext,
+  sendPrivateImageMessage,
   shouldAttemptBotDiaryImage,
   tryGenerateBotDiaryQzoneImage
 } = require('./qqActionService.imageDiary');
@@ -589,12 +591,14 @@ module.exports = {
   sanitizeDiaryImageMeta,
   sanitizeDiaryImageText,
   sendGroupImageMessage,
+  sendImageMessageForContext,
   sendGroupPoke,
   scheduleGroupMessage,
   buildReasoningForwardNodes,
   sendGroupMessage,
   sendGroupForwardMessage,
   sendPrivatePoke,
+  sendPrivateImageMessage,
   sendPrivateMessage,
   sendPrivateForwardMessage,
   sendReasoningForwardMessage,

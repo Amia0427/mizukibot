@@ -6,6 +6,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'get_context_stats',
   'url_safety_check',
   'read_shared_link',
+  'render_qq_visual',
   'getWeather',
   'skill_weather',
   'notebook_search',

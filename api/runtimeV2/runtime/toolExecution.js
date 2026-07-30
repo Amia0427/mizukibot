@@ -5,6 +5,7 @@ const {
 } = require('../../../utils/localToolAccess');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
 const { routeHasReadableCardContext } = require('../../../utils/cardContext');
+const { sanitizeToolArgsForLog } = require('../../../utils/toolPolicy');
 const {
   WEB_LOOKUP_ALLOWED_TOOLS,
   routeHasExplicitWebSearchRequirement
@@ -347,6 +348,10 @@ function createToolExecutionHelpers(deps = {}) {
       : null;
     return {
       userId: String(request.userId || '').trim(),
+      question: String(request.question || '').trim(),
+      rawText: String(routeMeta.rawText || request.question || '').trim(),
+      cleanText: String(routeMeta.cleanText || request.question || '').trim(),
+      chatType: String(routeMeta.chatType || routeMeta.chat_type || (routeMeta.groupId || routeMeta.group_id ? 'group' : 'private')).trim(),
       routePolicyKey: String(request.routePolicyKey || '').trim(),
       topRouteType: String(request.topRouteType || '').trim(),
       routeMeta,
@@ -372,8 +377,7 @@ function createToolExecutionHelpers(deps = {}) {
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
     const args = normalizeObject(envelope.args, normalizeObject(step.inputs, {}));
-    const sanitizedArgs = { ...args };
-    delete sanitizedArgs.__context;
+    const sanitizedArgs = sanitizeToolArgsForLog(String(envelope.tool_name || step.tool || '').trim(), args);
     console.log('[graph-tool]', {
       node: String(extra.node || state.execution?.currentNode || '').trim() || 'unknown',
       topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),

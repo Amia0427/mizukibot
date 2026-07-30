@@ -62,6 +62,7 @@ function buildRouteDebugKey(route = {}) {
     return 'admin/default';
   }
   if (qqActionKey === 'qq_publish_qzone') return 'act/qq-publish-qzone';
+  if (qqActionKey === 'qq_render_visual') return 'act/qq-render-visual';
   if (qqActionKey === 'qq_schedule_message') return 'act/qq-schedule-message';
   if (qqActionKey === 'qq_schedule_qzone') return 'act/qq-schedule-qzone';
   if (qqActionKey === 'qq_list_scheduled') return 'act/qq-list-scheduled';
@@ -118,6 +119,7 @@ function resolvePolicyKey(route = {}) {
 function resolveQqActionTools(route = {}) {
   const qqActionKey = String(route?.meta?.qqActionKey || '').trim().toLowerCase();
   if (qqActionKey === 'qq_publish_qzone') return ['qzone_draft'];
+  if (qqActionKey === 'qq_render_visual') return ['render_qq_visual'];
   if (qqActionKey === 'qq_schedule_message') return ['schedule_group_message', 'create_scheduled_command'];
   if (qqActionKey === 'qq_schedule_qzone') return ['create_qzone_auto_task', 'create_scheduled_command'];
   if (qqActionKey === 'qq_list_scheduled') return ['list_scheduled_tasks'];
@@ -167,6 +169,7 @@ function isPrivateAdminUser(route = {}, runtimeConfig = config) {
 function isPrivateSafeTool(toolName = '') {
   const normalized = String(toolName || '').trim();
   if (!normalized) return false;
+  if (normalized === 'render_qq_visual') return true;
 
   const blockedByName = new Set([
     'publish_qzone',
