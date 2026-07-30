@@ -1774,3 +1774,10 @@
 - 定向验收：`node scripts/run-tests.js tests/privateProactiveEngine.test.js tests/privateProactiveModelConfig.test.js tests/privateProactiveIntegrationSource.test.js tests/privateProactiveMessageHandler.test.js tests/runtimeStatusDiagnostics.test.js tests/messageHandlerPrivateFreshness.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0。
 - 完整验收：`npm test` 于本轮退出 1；主动私聊用例全部通过，失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`mainReplyUnifiedDiagnostics.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，均属于未修改的并行/既有范围，本轮未越界修复。
 - 小目标已完成：主动模型稳定性和判断阈值修复、真实主动发送及重启恢复均已验收；文档追加提交，当前分支未推送远端。
+
+## 运行维护 2026-07-30 11:29 +08:00
+
+- 策略调整：`PRIVATE_PROACTIVE_IDLE_MINUTES` 默认值由 180 降为 120，`PRIVATE_PROACTIVE_MIN_GAP_MINUTES` 默认值由 360 降为 240；每日 2 批、`09:00-15:00`/`17:00-23:00` 双窗口、全局 50 次模型预算和连续两批无私聊回复暂停均保持不变。
+- 功能提交 `c7ac6a7`：同步 `.env.example`、运行配置、引擎默认值和回归测试；主进程已重启，运行配置确认 `idleMinutes=120`、`minGapMinutes=240`、`maxPerDay=2`、`maxUnanswered=2`，`/live`、`/ready` 均返回 200。
+- 验收：主动私聊定向测试、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0；完整 `npm test` 退出 1，主动私聊测试通过，失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`mainReplyUnifiedDiagnostics.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，属于未修改的并行或既有范围。
+- 小目标已完成：主动私聊触达节奏已调得更积极，现有防打扰上限和自动暂停保护未放宽；本次文档单独提交，当前分支未推送远端。

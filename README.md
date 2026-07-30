@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-07-30 11:29 +08:00
+
+- 主动私聊策略调整：全局沉默门槛由 180 分钟降为 120 分钟，两批主动私聊最小间隔由 360 分钟降为 240 分钟；每日最多 2 批、双随机窗口和连续两批无回复暂停保持不变。
+- 功能提交 `c7ac6a7`；定向主动私聊测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 退出 0，重启后运行配置为 `idleMinutes=120`、`minGapMinutes=240`，`/live`、`/ready` 均返回 200。
+- 完整 `npm test` 退出 1，失败仍为两个管理员提示词、`mainReplyUnifiedDiagnostics` 和两个既有 Memory V3 用例，主动私聊测试通过；小目标已完成，未推送远端。
+
 ## 运行维护 2026-07-30 11:18 +08:00
 
 - 主动私聊判断修复：模型请求改用 `max_tokens=4096`、`reasoning_effort=minimal` 和 `response_format={type:json_object}`；运行时硬条件已满足时，提示词默认要求发送，仅在用户明确拒绝或上下文明显不适合时允许拒绝；`finish_reason=length/MAX_TOKENS` 现在记录为模型输出截断，不再伪装成判断器过滤。

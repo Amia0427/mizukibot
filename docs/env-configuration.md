@@ -1,12 +1,12 @@
 # Env Configuration
 
-更新时间：2026-07-29 08:42 +08:00
+更新时间：2026-07-30 11:29 +08:00
 
 ## QQ 私聊主动触达
 
 - `PRIVATE_PROACTIVE_ENABLED=true`：总开关。关闭时不登记新用户、不发送首次告知，也不启动扫描。
-- `PRIVATE_PROACTIVE_IDLE_MINUTES=180`：用户在机器人可见群聊或私聊中的全局沉默门槛，单位为分钟。
-- `PRIVATE_PROACTIVE_MIN_GAP_MINUTES=360`：两批主动私聊的最小间隔，单位为分钟。
+- `PRIVATE_PROACTIVE_IDLE_MINUTES=120`：用户在机器人可见群聊或私聊中的全局沉默门槛，单位为分钟。
+- `PRIVATE_PROACTIVE_MIN_GAP_MINUTES=240`：两批主动私聊的最小间隔，单位为分钟。
 - `PRIVATE_PROACTIVE_MAX_PER_DAY=2`：单个用户每日最多成功发送的主动私聊批次数。
 - `PRIVATE_PROACTIVE_SCAN_INTERVAL_MINUTES=10`：机会扫描间隔，单位为分钟。
 - `PRIVATE_PROACTIVE_WINDOWS=09:00-15:00,17:00-23:00`：每日机会窗口；每位用户在每个窗口拥有一个按用户和日期稳定计算的随机机会。
