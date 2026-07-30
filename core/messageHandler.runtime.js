@@ -672,9 +672,18 @@ function createMessageHandler({
   inboundConcurrencyControllerOverride = null,
   runVisionCaptionWorkerOverride = null,
   normalGroupMainReplyRateLimiterOverride = null,
-  triggerRemoteRestartOverride = null
+  triggerRemoteRestartOverride = null,
+  smallTheaterRuntimeOverride = null
 }) {
+  const {
+    createSmallTheaterRuntime,
+    matchesSmallTheaterCommand
+  } = require('./smallTheater');
   const globalNapCatActionClient = actionClient;
+  const smallTheaterRuntime = smallTheaterRuntimeOverride || createSmallTheaterRuntime({
+    config,
+    actionClient: globalNapCatActionClient
+  });
   const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
   const logInboundTiming = createInboundTimingLogger(inboundTimingLogFile, config.ENABLE_DEBUG_LOG);
   const inboundDeduper = createMessageEventDeduper({
@@ -1725,7 +1734,8 @@ function createMessageHandler({
       return;
     }
 
-    if (isPrivateChatType(chatType) && !isPrivateChatUserAllowed(senderId, config)) {
+    const isSmallTheaterCommand = matchesSmallTheaterCommand(createCommandText);
+    if (isPrivateChatType(chatType) && !isPrivateChatUserAllowed(senderId, config) && !isSmallTheaterCommand) {
       console.log('[message] private chat rejected by allowlist', {
         messageId: msg.message_id,
         userId: senderId,
@@ -1945,6 +1955,46 @@ function createMessageHandler({
         appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, payload);
         console.log('[memory-write] skipped', payload);
       };
+      const smallTheaterResult = await smallTheaterRuntime.handle({
+        rawText: slashCommandText,
+        quotedText: String(continuousMeta?.replyContext?.text || '').trim(),
+        userId: senderId,
+        groupId,
+        chatType,
+        requestId: String(effectiveMsg.message_id || msg.message_id || '').trim()
+      });
+      if (smallTheaterResult?.handled) {
+        let sent = smallTheaterResult.ok === true;
+        if (String(smallTheaterResult.replyText || '').trim()) {
+          sent = await sendGroupReply({
+            chatType,
+            groupId,
+            userId: senderId,
+            senderId,
+            replyText: smallTheaterResult.replyText,
+            atSender: !isPrivateChatType(chatType),
+            retries: 1,
+            waitMs: 300,
+            source: 'small_theater',
+            routePolicyKey: 'small-theater/command',
+            triggerReason: `small_theater.${String(smallTheaterResult.code || 'unknown').trim()}`,
+            topRouteType: 'small_theater'
+          });
+        }
+        logMemoryWriteSkip('small_theater', {
+          command: 'small_theater',
+          resultCode: String(smallTheaterResult.code || '').trim(),
+          memoryHitCount: Number(smallTheaterResult.memoryHitCount || 0) || 0
+        });
+        appendRequestCompleteTrace({
+          routePolicyKey: 'small-theater/command',
+          topRouteType: 'small_theater',
+          replyPath: 'small_theater',
+          sent: Boolean(sent),
+          finalErrorCode: smallTheaterResult.ok ? '' : String(smallTheaterResult.code || '').trim()
+        });
+        return;
+      }
       if (!isPrivateChatType(chatType)) {
         recordHumanInbound(groupId, senderId, Number(effectiveMsg?.time ? Number(effectiveMsg.time) * 1000 : Date.now()));
       }

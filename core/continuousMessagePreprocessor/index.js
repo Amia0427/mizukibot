@@ -699,7 +699,7 @@ function isCommandBypass(msg = {}, options = {}) {
 
   if (!clean) return false;
   if (isFastAdminDiagnosticCommand(clean, options)) return true;
-  if (/^\s*\/(?:meme|dailyshare|life)(?:\s|$)/i.test(clean)) return true;
+  if (/^\s*\/(?:meme|dailyshare|life|小剧场)(?:\s|$)/iu.test(clean)) return true;
   if (/^(任务状态|取消任务|结束任务|任务补充|任务继续)\b/i.test(clean)) return true;
   return false;
 }
