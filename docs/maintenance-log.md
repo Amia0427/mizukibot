@@ -1,3 +1,11 @@
+## 运行维护 2026-08-01 02:28 +08:00
+
+- 根因：工具 schema、executor 与策略分散维护，旧 `getPolicy` 对未知名称 fail open；Runtime V2 的 scheduler、direct tool loop、dispatch checkpoint 和 cache 对混合读写工具只按名称判断，allowlist 或伪造 MCP descriptor 可能绕过注册边界。
+- 实现：新增版本化 `tool_policy_manifest_v1`，覆盖 124 个 schema、125 个 executor 和 125 项 policy；stock、ontology 与 scheduled command 按规范化 action 解析 `none/local_write/external_send/destructive`。两个 Runtime V2 执行入口默认阻断未知能力、internal executor 与未知 action，动态 MCP 只认 `api/toolRegistry.js` 的精确注册名称；参数化 policy 已贯通 batch、cache、inflight dedupe、checkpoint 与 execution envelope。
+- 验收：`npm test` 在 178.2 秒内退出 0，`npm run coverage` 在 189.9 秒内退出 0；整体覆盖率为行 71.68%、函数 80.45%、分支 62.03%。四个 scope 均通过：overall `71.68/80.45/62.03`、web `79.84/87.50/80.59`、Runtime V2 `77.63/74.46/63.73`、stable boundaries `85.98/82.24/72.12`（行/函数/分支）。796 文件 lint、typecheck、Agent 静态映射、Prompt 清单、全仓 secrets 与 `git diff --check` 均退出 0。
+- 边界：本轮只收口 Runtime V2；确认票据、跨消息确认状态机、持久化幂等账本、授权审计事件及 `api/legacy/aiHost.js` 共享执行内核延期。未修改或暂存 `prompts/admin.txt` 与 `AGENT.md`，未执行远端推送。
+- 提交后记录：实现提交 `2d1afad` 已完成；版本化工具能力清单小目标已完成，验收结果已保留，当前分支未推送。
+
 ## 运行维护 2026-08-01 00:40 +08:00
 
 - 根因：两个 eval CLI 仍默认依赖 gitignored `artifacts/`，干净检出无法复现；tracked fixture 没有统一版本、摘要和 synthetic-only 隐私契约，空集也可能被误判为通过。Memory routing stability 只验证召回意图分类，不能替代 Recall/MRR 与泄漏指标。

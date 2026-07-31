@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 运行维护 2026-08-01 02:28 +08:00
+
+- 新增 `tool_policy_manifest_v1`，统一覆盖 124 个 schema、125 个 executor 与 125 项 policy；混合读写工具按 action 解析副作用，未知工具、internal executor、未知 action 和伪造 MCP 在 Runtime V2 默认阻断。
+- scheduler、direct tool loop、dispatch checkpoint、只读缓存和 execution envelope 统一消费参数化 policy，副作用调用不会并行、缓存或 inflight dedupe；动态 MCP 只信任 `api/toolRegistry.js` 的精确注册名称。
+- 验收：`npm test` 178.2 秒、`npm run coverage` 189.9 秒及 lint、typecheck、Agent 静态检查、Prompt 清单、全仓 secrets、`git diff --check` 均退出 0；覆盖率为行 71.68%、函数 80.45%、分支 62.03%，四个 scope 全部通过。
+- 提交后记录：实现提交 `2d1afad` 已完成；Runtime V2 工具能力清单小目标已完成，确认票据、持久化幂等账本和 legacy 执行入口留待后续，当前分支未推送。
+
 ## 运行维护 2026-08-01 00:40 +08:00
 
 - 新增 `harness_eval_manifest_v1` 版本化评估清单，固定 2 个 tracked synthetic suite、52 条 case、规范化 SHA-256 与递归隐私校验；空集、重复 ID、路径越界、真实账号、邮箱、非保留域 URL 和非占位凭据统一失败。
@@ -561,7 +568,7 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-31 02:15 +08:00
+更新时间：2026-08-01 02:28 +08:00
 维护记录：2026-07-31 02:15 +08:00，提交 `1674530` 新增 8 篇独立开发者源码文档及完整性回归；Node 20.20.2 下文档链接/路径/npm 脚本检查、测试运行器回归、lint、typecheck、Agent 静态检查、prompt 检查和全仓 secrets 检查均通过，小目标已完成，未推送远端。
 维护记录：2026-07-24 08:21 +08:00，提交 `bc1d10f` 将 `meme` 的9个chunk迁为显式CommonJS模块，93/93函数、16项API、legacy与5个子门面身份、6项singleton和0本地循环均已验收；Node 20/24聚焦、静态门禁及Node 24并发4全量521个tracked测试通过，目标5推进至3/6。
 维护记录：2026-07-21 21:42 +08:00，`passive-awareness` 已完成显式CommonJS迁移，21项API和5个子门面契约保持不变；静态门禁和并发4全量通过，目标5推进至2/6。

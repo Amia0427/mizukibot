@@ -153,9 +153,11 @@ Expected: all exit 0.
 Run: `npm test && npm run coverage`
 Expected: all tracked tests and four coverage scopes pass.
 
-- [ ] **Step 3: Commit implementation, then append its hash and completion record**
+- [x] **Step 3: Commit implementation, then append its hash and completion record**
 
 Commit code, tests, the plan and stable development documentation with `feat: enforce tool capability manifest`; after that, update README, maintenance log and this plan with the implementation hash and a short `2026-08-01` timestamp, then create a separate documentation commit. Do not push.
+
+完成记录（2026-08-01 02:28 +08:00）：实现提交 `2d1afad` 已创建；`npm test`、`npm run coverage`、lint、typecheck、Agent 静态检查、Prompt 清单、全仓 secrets 与 `git diff --check` 均退出 0，四个 coverage scope 全部通过。README、维护日志和本计划已记录实现哈希，文档提交单独创建且不推送。
 
 ## Deferred Follow-up: Confirmation and Replay Protocol
 
