@@ -8,6 +8,13 @@ const {
   normalizeWeatherArgs
 } = require('./skillArgs');
 const { createDynamicMcpArgNormalizer } = require('./dynamicMcp');
+const {
+  POLICY_VERSION,
+  TOOL_POLICIES,
+  getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy
+} = require('./manifest');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 
@@ -20,64 +27,6 @@ const {
 } = createDynamicMcpArgNormalizer({
   getToolRegistry
 });
-
-const TOOL_POLICIES = {
-  notebook_reindex_folder: { risk: 'high', capability: 'fs_read' },
-  notebook_add_document: { risk: 'medium', capability: 'fs_write' },
-  notebook_list_docs: { risk: 'medium', capability: 'fs_read' },
-  notebook_search: { risk: 'medium', capability: 'fs_read' },
-  memory_cli: { risk: 'medium', capability: 'memory_read' },
-  get_context_stats: { risk: 'low', capability: 'general' },
-  self_improvement_recent: { risk: 'low', capability: 'memory_read' },
-  self_improvement_search: { risk: 'low', capability: 'memory_read' },
-  self_improvement_patterns: { risk: 'low', capability: 'memory_read' },
-  self_improvement_rules: { risk: 'low', capability: 'memory_read' },
-  self_improvement_guides: { risk: 'low', capability: 'memory_read' },
-  web_search: { risk: 'medium', capability: 'network' },
-  web_fetch: { risk: 'medium', capability: 'network' },
-  read_shared_link: { risk: 'medium', capability: 'network' },
-  get_current_time: { risk: 'low', capability: 'general' },
-  skill_weather: { risk: 'medium', capability: 'network' },
-  notebook_append_journal: { risk: 'medium', capability: 'fs_write' },
-  notebook_read_recent_journal: { risk: 'low', capability: 'fs_read' },
-  skill_summarize: { risk: 'medium', capability: 'network_or_file' },
-  skill_youtube_transcript: { risk: 'medium', capability: 'network' },
-  skill_web_search: { risk: 'medium', capability: 'network' },
-  skill_arxiv_search: { risk: 'medium', capability: 'network' },
-  skill_arxiv_get: { risk: 'medium', capability: 'network' },
-  skill_arxiv_latest: { risk: 'medium', capability: 'network' },
-  skill_brave_search: { risk: 'medium', capability: 'network' },
-  skill_tavily_search: { risk: 'medium', capability: 'network' },
-  skill_brave_extract: { risk: 'medium', capability: 'network' },
-  skill_tavily_extract: { risk: 'medium', capability: 'network' },
-  skill_stock_price_query: { risk: 'medium', capability: 'network' },
-  skill_ontology_graph: { risk: 'medium', capability: 'fs_write' },
-  qzone_draft: { risk: 'medium', capability: 'local_write' },
-  publish_qzone: { risk: 'medium', capability: 'local_write' },
-  schedule_group_message: { risk: 'medium', capability: 'local_write' },
-  create_qzone_auto_task: { risk: 'high', capability: 'local_write' },
-  create_scheduled_command: { risk: 'medium', capability: 'local_write' },
-  list_scheduled_tasks: { risk: 'medium', capability: 'local_read' },
-  cancel_scheduled_task: { risk: 'medium', capability: 'local_write' },
-  delete_scheduled_task: { risk: 'medium', capability: 'local_write' },
-  render_qq_visual: { risk: 'medium', capability: 'local_write' },
-  skill_image_generate_pro: { risk: 'high', capability: 'fs_write' },
-  minecraft_connect: { risk: 'high', capability: 'network' },
-  minecraft_disconnect: { risk: 'medium', capability: 'network' },
-  minecraft_status: { risk: 'low', capability: 'network' },
-  minecraft_chat: { risk: 'medium', capability: 'network' },
-  minecraft_move_to: { risk: 'medium', capability: 'network' },
-  minecraft_follow_player: { risk: 'medium', capability: 'network' },
-  minecraft_look_at: { risk: 'low', capability: 'network' },
-  minecraft_stop: { risk: 'low', capability: 'network' }
-};
-
-function getPolicy(toolName) {
-  if (String(toolName || '').startsWith('mcp_')) {
-    return { risk: 'medium', capability: 'network' };
-  }
-  return TOOL_POLICIES[toolName] || { risk: 'low', capability: 'general' };
-}
 
 function resolveNotebookUserId(args = {}, context = {}) {
   const requested = sanitizeUserId(args.userId ?? args.user_id);
@@ -466,8 +415,11 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
 module.exports = {
   NOTEBOOK_ROOT,
+  POLICY_VERSION,
   TOOL_POLICIES,
   getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy,
   sanitizeToolArgsForLog,
   sanitizeUserId,
   enforceToolPolicy,

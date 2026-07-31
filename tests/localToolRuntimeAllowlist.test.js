@@ -3,6 +3,11 @@ const assert = require('assert');
 const { executeStep } = require('../api/runtimeV2/capabilities/scheduler');
 const { buildCapabilityRegistry } = require('../api/runtimeV2/capabilities/registry');
 const { createToolExecutionHelpers } = require('../api/runtimeV2/runtime/toolExecution');
+const {
+  getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy
+} = require('../utils/toolPolicy');
 
 function createToolHelpers(executor) {
   return createToolExecutionHelpers({
@@ -17,9 +22,10 @@ function createToolHelpers(executor) {
     summarizeToolLogValue(value) {
       return typeof value === 'string' ? value : JSON.stringify(value);
     },
-    getPolicy() {
-      return {};
-    },
+    getPolicy,
+    hasPublicToolPolicy,
+    resolveToolPolicy,
+    isDynamicToolRegistered: () => false,
     enforceToolPolicy(_toolName, args) {
       return args;
     },
@@ -53,7 +59,7 @@ function createToolHelpers(executor) {
       return false;
     },
     toolExecutors: {
-      local_lookup: executor
+      get_current_time: executor
     }
   });
 }
@@ -67,8 +73,8 @@ module.exports = (async () => {
 
   const blockedByToolStep = await helpers.runToolStep({
     id: 'local_step_blocked',
-    tool: 'local_lookup',
-    inputs: { query: 'secret' }
+    tool: 'get_current_time',
+    inputs: {}
   }, {
     request: {
       userId: 'u1',
@@ -82,17 +88,17 @@ module.exports = (async () => {
   assert.strictEqual(helperCalls, 0, 'unallowed tool must not reach executor');
   assert.strictEqual(blockedByToolStep.status, 'blocked');
   assert.strictEqual(blockedByToolStep.blockedReason, 'tool_not_allowed');
-  assert.match(blockedByToolStep.result, /Tool not allowed: local_lookup/);
+  assert.match(blockedByToolStep.result, /Tool not allowed: get_current_time/);
 
   const allowedByToolStep = await helpers.runToolStep({
     id: 'local_step_allowed',
-    tool: 'local_lookup',
-    inputs: { query: 'public' }
+    tool: 'get_current_time',
+    inputs: {}
   }, {
     request: {
       userId: 'u1',
       routeMeta: {},
-      allowedTools: ['local_lookup']
+      allowedTools: ['get_current_time']
     },
     execution: {},
     plan: { steps: [] }
@@ -105,9 +111,9 @@ module.exports = (async () => {
   let schedulerCalls = 0;
   const registry = {
     byName: new Map([[
-      'local_lookup',
+      'get_current_time',
       {
-        name: 'local_lookup',
+        name: 'get_current_time',
         executor: async () => {
           schedulerCalls += 1;
           return 'scheduler ok';
@@ -121,7 +127,7 @@ module.exports = (async () => {
     node: 'dispatch',
     registry,
     executors: {
-      local_lookup: async () => {
+      get_current_time: async () => {
         schedulerCalls += 1;
         return 'scheduler ok';
       }
@@ -135,8 +141,8 @@ module.exports = (async () => {
 
   const blockedByScheduler = await executeStep({
     id: 'scheduler_blocked',
-    tool: 'local_lookup',
-    inputs: { query: 'secret' }
+    tool: 'get_current_time',
+    inputs: {}
   }, {
     request: {
       userId: 'u1',
@@ -153,13 +159,13 @@ module.exports = (async () => {
 
   const allowedByScheduler = await executeStep({
     id: 'scheduler_allowed',
-    tool: 'local_lookup',
-    inputs: { query: 'public' }
+    tool: 'get_current_time',
+    inputs: {}
   }, {
     request: {
       userId: 'u1',
       routeMeta: {},
-      allowedTools: ['local_lookup']
+      allowedTools: ['get_current_time']
     },
     execution: {},
     plan: { steps: [] }
@@ -192,9 +198,10 @@ module.exports = (async () => {
       summarizeToolLogValue(value) {
         return typeof value === 'string' ? value : JSON.stringify(value);
       },
-      getPolicy() {
-        return {};
-      },
+      getPolicy,
+      hasPublicToolPolicy,
+      resolveToolPolicy,
+      isDynamicToolRegistered: () => false,
       enforceToolPolicy(_toolName, args) {
         return args;
       },
@@ -250,8 +257,8 @@ module.exports = (async () => {
       allowedTools: [rawRegistryTestToolName]
     });
 
-    assert.strictEqual(adminPrivateRawRegistryStep.status, 'completed');
-    assert.strictEqual(adminPrivateRawRegistryStep.result, 'admin raw registry ok');
+    assert.strictEqual(adminPrivateRawRegistryStep.status, 'blocked');
+    assert.strictEqual(adminPrivateRawRegistryStep.blockedReason, 'unknown_capability');
   } finally {
     delete toolRegistry.TOOL_EXECUTORS[rawRegistryTestToolName];
     companionConfig.BOT_TOOL_MODE = originalBotToolMode;
@@ -276,9 +283,10 @@ module.exports = (async () => {
       summarizeToolLogValue(value) {
         return typeof value === 'string' ? value : JSON.stringify(value);
       },
-      getPolicy() {
-        return {};
-      },
+      getPolicy,
+      hasPublicToolPolicy,
+      resolveToolPolicy,
+      isDynamicToolRegistered: () => false,
       enforceToolPolicy(_toolName, args) {
         return args;
       },

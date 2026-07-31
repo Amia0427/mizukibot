@@ -5,7 +5,12 @@ const {
 } = require('../../../utils/localToolAccess');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
 const { routeHasReadableCardContext } = require('../../../utils/cardContext');
-const { sanitizeToolArgsForLog } = require('../../../utils/toolPolicy');
+const {
+  getPolicy: getManifestPolicy,
+  hasPublicToolPolicy: hasManifestPublicToolPolicy,
+  resolveToolPolicy: resolveManifestToolPolicy,
+  sanitizeToolArgsForLog
+} = require('../../../utils/toolPolicy');
 const {
   WEB_LOOKUP_ALLOWED_TOOLS,
   routeHasExplicitWebSearchRequirement
@@ -47,7 +52,10 @@ function createToolExecutionHelpers(deps = {}) {
     config,
     stableHash,
     summarizeToolLogValue,
-    getPolicy,
+    getPolicy = getManifestPolicy,
+    resolveToolPolicy = resolveManifestToolPolicy,
+    hasPublicToolPolicy = hasManifestPublicToolPolicy,
+    isDynamicToolRegistered,
     enforceToolPolicy,
     shouldRunParallel,
     capabilityRegistry,
@@ -221,6 +229,8 @@ function createToolExecutionHelpers(deps = {}) {
   }
 
   function isSideEffectPolicy(policy = {}) {
+    const effect = String(policy.effect || '').trim().toLowerCase();
+    if (effect) return effect !== 'none';
     return isWriteLikeCapability(policy.capability) || String(policy.risk || '').trim().toLowerCase() === 'high';
   }
 
@@ -431,7 +441,7 @@ function createToolExecutionHelpers(deps = {}) {
 
   function buildBlockedToolEnvelope(step = {}, memoryCliTurn = null, reason = 'tool_not_allowed') {
     const toolName = String(step?.tool || '').trim();
-    const policy = getPolicy(toolName);
+    const policy = getPolicy(toolName, step.inputs || {});
     const blockedResult = `Tool not allowed: ${toolName || 'unknown'}`;
     let nextMemoryCliTurn = createMemoryCliTurnState(memoryCliTurn);
     let invalidateMemoryPrompt = false;
@@ -497,7 +507,7 @@ function createToolExecutionHelpers(deps = {}) {
 
   async function runToolStep(step, state, runtimeOptions = {}) {
     const toolName = String(step.tool || '').trim();
-    const policy = getPolicy(toolName);
+    let policy = getPolicy(toolName, step.inputs || {});
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
     const executionState = normalizeObject(state.execution, {});
@@ -541,6 +551,23 @@ function createToolExecutionHelpers(deps = {}) {
       return envelope;
     }
 
+    const dynamicTool = typeof isDynamicToolRegistered === 'function'
+      && isDynamicToolRegistered(toolName);
+    const baseResolution = resolveToolPolicy(toolName);
+    const publicTool = hasPublicToolPolicy(toolName);
+    if (!publicTool && !dynamicTool) {
+      const reason = baseResolution.policy?.exposure === 'internal'
+        ? 'internal_capability'
+        : 'unknown_capability';
+      const envelope = buildBlockedToolEnvelope(step, executionState.memoryCliTurn, reason);
+      maybeCaptureToolFailure(envelope, step, state);
+      logToolExecution(envelope, step, state, {
+        node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+        allowedTools
+      });
+      return envelope;
+    }
+
     try {
       let preparedArgs = step.inputs || {};
       if (toolName === 'web_fetch') {
@@ -572,6 +599,21 @@ function createToolExecutionHelpers(deps = {}) {
       let normalizedArgs = enforceToolPolicy(toolName, preparedArgs, {
         userId: state.request.userId
       });
+      const policyResolution = resolveToolPolicy(toolName, normalizedArgs);
+      policy = dynamicTool ? getPolicy(toolName, normalizedArgs) : policyResolution.policy;
+      if (!dynamicTool && policyResolution.reason === 'unknown_action') {
+        const envelope = buildBlockedToolEnvelope(
+          { ...step, inputs: normalizedArgs },
+          executionState.memoryCliTurn,
+          'unknown_action'
+        );
+        maybeCaptureToolFailure(envelope, { ...step, inputs: normalizedArgs }, state);
+        logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
+          node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+          allowedTools
+        });
+        return envelope;
+      }
       const cachedEnvelope = readCachedEnvelope(step, state, normalizedArgs);
       if (cachedEnvelope) {
         logToolExecution(cachedEnvelope, { ...step, inputs: normalizedArgs }, state, {

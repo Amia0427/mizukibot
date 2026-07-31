@@ -1,5 +1,10 @@
 const config = require('../../../config');
-const { getPolicy, sanitizeToolArgsForLog } = require('../../../utils/toolPolicy');
+const {
+  getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy,
+  sanitizeToolArgsForLog
+} = require('../../../utils/toolPolicy');
 const {
   createMemoryCliTurnState,
   decideMemoryCliTurnAction,
@@ -8,6 +13,7 @@ const {
   updateMemoryCliTurnStateAfterResult
 } = require('../../../utils/memoryCliTurnPolicy');
 const { buildCapabilityRegistry } = require('./registry');
+const { getDynamicToolNames } = require('../toolRegistryFacade');
 const { maybeRunGlobalToolRuntime } = require('../globalToolRuntimeFacade');
 const { isToolAllowedByRuntimeList } = require('../../../utils/localToolAccess');
 const {
@@ -27,20 +33,28 @@ function isWriteLikeCapability(capability = '') {
   return /write/i.test(String(capability || ''));
 }
 
-function isSideEffectCapability(descriptor = null) {
-  if (!descriptor) return false;
+function resolveCapabilityPolicy(descriptor = null, args = {}) {
+  if (!descriptor) return getPolicy('', args);
+  const source = normalizeText(descriptor.metadata?.source);
+  if (source === 'static' || source === 'global') return getPolicy(descriptor.name, args);
+  return normalizeObject(descriptor.policy, getPolicy(descriptor.name, args));
+}
+
+function isSideEffectCapability(descriptor = null, args = {}) {
+  if (!descriptor) return true;
+  const policy = resolveCapabilityPolicy(descriptor, args);
+  if (normalizeText(policy.effect)) return policy.effect !== 'none';
   if (descriptor.sideEffect) return true;
   if (String(descriptor.risk || '').trim().toLowerCase() === 'high') return true;
-  const policy = getPolicy(descriptor.name);
   return isWriteLikeCapability(policy.capability) || String(policy.risk || '').trim().toLowerCase() === 'high';
 }
 
-function isParallelSafeCapability(descriptor = null) {
+function isParallelSafeCapability(descriptor = null, args = {}) {
   if (!descriptor) return false;
-  if (descriptor.parallelSafe === false) return false;
-  if (isSideEffectCapability(descriptor)) return false;
+  if (isSideEffectCapability(descriptor, args)) return false;
   if (descriptor.kind === 'mcp' || descriptor.kind === 'subagent') return false;
   if (descriptor.name === 'web_fetch') return false;
+  if (descriptor.parallelSafe === false && normalizeText(descriptor.metadata?.source) !== 'static') return false;
   return true;
 }
 
@@ -89,7 +103,7 @@ function resolveCapabilityResource(descriptor = null, step = {}) {
 
 function isCacheableCapability(descriptor = null, step = {}) {
   if (!descriptor) return false;
-  if (!isParallelSafeCapability(descriptor)) return false;
+  if (!isParallelSafeCapability(descriptor, step.inputs)) return false;
   if (step.cacheable === false || step.noCache === true || step.no_cache === true) return false;
   if (descriptor.cacheable === false || descriptor.metadata?.cacheable === false) return false;
   return true;
@@ -144,7 +158,7 @@ function buildExecutionBatches(steps = [], descriptorRegistry = null) {
 
     for (const step of normalizeArray(steps)) {
       const descriptor = resolveCapability(registry, step?.tool);
-      if (!descriptor || !isParallelSafeCapability(descriptor)) {
+      if (!descriptor || !isParallelSafeCapability(descriptor, step?.inputs)) {
         if (currentParallelBatch.length > 0) {
           batches.push({
             mode: currentParallelBatch.length > 1 ? 'parallel' : 'serial',
@@ -192,7 +206,7 @@ function buildExecutionBatches(steps = [], descriptorRegistry = null) {
     const candidates = ready.length > 0 ? ready : [pending[0]];
     const firstSerialIndex = candidates.findIndex((step) => {
       const descriptor = resolveCapability(registry, step?.tool);
-      return !descriptor || !isParallelSafeCapability(descriptor);
+      return !descriptor || !isParallelSafeCapability(descriptor, step?.inputs);
     });
 
     if (firstSerialIndex === 0) {
@@ -312,7 +326,7 @@ function computeToolEnvelope(step = {}, rawResult = '', descriptor = null, helpe
     args,
     status,
     result: resultText,
-    side_effect: isSideEffectCapability(descriptor),
+    side_effect: isSideEffectCapability(descriptor, rawArgs),
     retryable: status !== 'completed',
     attempt: Number(step.attempts || 0) + 1,
     duration_ms: 0,
@@ -612,6 +626,24 @@ async function executeStep(step = {}, state = {}, context = {}) {
     return blockedEnvelope;
   }
 
+  const isDynamicToolRegistered = typeof context.isDynamicToolRegistered === 'function'
+    ? context.isDynamicToolRegistered
+    : (name) => getDynamicToolNames().includes(normalizeText(name));
+  const dynamicTool = isDynamicToolRegistered(toolName);
+  const baseResolution = resolveToolPolicy(toolName);
+  if (!hasPublicToolPolicy(toolName) && !dynamicTool) {
+    const reason = baseResolution.policy.exposure === 'internal'
+      ? 'internal_capability'
+      : 'unknown_capability';
+    const blockedEnvelope = buildBlockedToolEnvelope(step, executionState, descriptor, helpers, reason);
+    maybeCaptureToolFailure(blockedEnvelope, step, state, helpers);
+    logToolExecution(blockedEnvelope, step, state, {
+      node: runtimeNode,
+      allowedTools
+    });
+    return blockedEnvelope;
+  }
+
   try {
     let preparedArgs = normalizeObject(step.inputs, {});
     if (toolName === 'web_fetch') {
@@ -626,6 +658,22 @@ async function executeStep(step = {}, state = {}, context = {}) {
     let normalizedArgs = enforceToolPolicy(toolName, preparedArgs, {
       userId: state.request?.userId
     });
+    const policyResolution = resolveToolPolicy(toolName, normalizedArgs);
+    if (!dynamicTool && policyResolution.reason === 'unknown_action') {
+      const blockedEnvelope = buildBlockedToolEnvelope(
+        { ...step, inputs: normalizedArgs },
+        executionState,
+        descriptor,
+        helpers,
+        'unknown_action'
+      );
+      maybeCaptureToolFailure(blockedEnvelope, { ...step, inputs: normalizedArgs }, state, helpers);
+      logToolExecution(blockedEnvelope, { ...step, inputs: normalizedArgs }, state, {
+        node: runtimeNode,
+        allowedTools
+      });
+      return blockedEnvelope;
+    }
 
     if (toolName === 'memory_cli') {
       if (isUnresolvedMemoryOpenCommand(normalizedArgs.command)) {
@@ -793,19 +841,22 @@ async function executeBatch(steps = [], state = {}, context = {}) {
       ...context,
       registry: descriptorRegistry
     });
+    let timeoutHandle = null;
     const envelope = timeoutMs > 0
       ? await Promise.race([
         run,
-        new Promise((resolve) => setTimeout(() => resolve(computeToolEnvelope(
-          item,
-          `Tool error: timeout after ${timeoutMs}ms`,
-          descriptor,
-          {
-            ...normalizeObject(context.helpers, {}),
-            source: 'dispatch'
-          }
-        )), timeoutMs))
-      ])
+        new Promise((resolve) => {
+          timeoutHandle = setTimeout(() => resolve(computeToolEnvelope(
+            item,
+            `Tool error: timeout after ${timeoutMs}ms`,
+            descriptor,
+            {
+              ...normalizeObject(context.helpers, {}),
+              source: 'dispatch'
+            }
+          )), timeoutMs);
+        })
+      ]).finally(() => clearTimeout(timeoutHandle))
       : await run;
     const finalEnvelope = {
       ...envelope,
@@ -881,7 +932,7 @@ function shouldRunParallel(steps = [], descriptorRegistry = null) {
   const registry = descriptorRegistry || buildCapabilityRegistry();
   return normalized.every((step) => {
     const descriptor = resolveCapability(registry, step?.tool);
-    return isParallelSafeCapability(descriptor);
+    return isParallelSafeCapability(descriptor, step?.inputs);
   });
 }
 

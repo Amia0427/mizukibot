@@ -1,6 +1,6 @@
 # 消息与 Agent 运行时
 
-本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-07-31。
+本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-01。
 
 读完后应能回答：一条 OneBot 消息在哪里被接收、在哪些位置可能提前返回、何时进入 Runtime V2、工具如何受策略约束、回复如何防重复与过期，以及回复后的持久化为何不应阻塞用户可见结果。
 
@@ -198,11 +198,15 @@ prepare -> enhance_live_state -> route
 
 1. route/planner 生成 allowed tools 与 execution plan。
 2. capability preflight 验证可用性。
-3. tool policy 再次执行授权检查。
-4. scheduler 决定 batch、是否可并行以及 side-effect 顺序。
-5. 每一步返回标准 execution envelope，进入验证、修复与最终证据包。
+3. [`../../utils/toolPolicy/manifest.js`](../../utils/toolPolicy/manifest.js) 按工具名和规范化 action 解析版本化 policy。
+4. 两个 Runtime V2 执行入口验证公开静态注册或真实动态 MCP 注册，未知工具、internal executor 和未知 action 默认阻断。
+5. scheduler 按同一 policy 决定 batch、只读缓存、是否可并行以及 side-effect 顺序。
+6. dispatch 在副作用前后持久化 checkpoint，direct tool loop 不并发或合并副作用调用。
+7. 每一步返回标准 execution envelope，进入验证、修复与最终证据包。
 
-需要增加工具时，优先在 capability registry、executor 和 policy 三处形成闭环，不要在 `direct_reply` 中写工具名特判。副作用工具默认不应与其他步骤随意并行。
+policy 至少声明 `risk/capability/effect/confirmation/scope/idempotency/replay/exposure`。混合读写工具必须按 action 解析；未携带 action 时使用保守写入策略。动态 MCP 只以 `api/toolRegistry.js` 的精确注册名称为准，`mcp_*` 前缀或 descriptor metadata 不能作为注册证明。
+
+需要增加工具时，必须同时补 schema、executor、manifest policy 和测试，并运行 `npm run check:agent:static`。不要在 `direct_reply` 中写工具名特判，也不要让写入/删除/外发能力进入只读缓存或并行批次。
 
 ### Checkpoint 与恢复
 

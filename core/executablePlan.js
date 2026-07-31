@@ -112,7 +112,7 @@ function validateExecutablePlanTools(plan = {}, allowedTools = [], options = {})
       allowedPlanSteps.push(step);
       continue;
     }
-    const policy = getPolicy(action);
+    const policy = getPolicy(action, step.args || {});
     const blockedReason = !policy
       ? 'missing-policy'
       : (requireAllowed && !allowed.has(action) ? 'tool-not-allowed' : '');

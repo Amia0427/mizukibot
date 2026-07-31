@@ -1,6 +1,6 @@
 # 测试与质量门禁
 
-更新：2026-07-31 +08:00
+更新：2026-08-01 +08:00
 
 本项目没有统一测试框架包装所有用例。`tests/*.test.js` 大多是直接使用 Node `assert` 的可执行 CommonJS 脚本，仓库用 `scripts/run-tests.js` 负责发现、隔离、并发、超时和结果汇总。
 
@@ -116,10 +116,11 @@ node scripts/run-tests.js tests/refactorSrcFacades.test.js tests/hotpathRequireG
 
 ```bash
 node scripts/run-tests.js tests/toolContractsValidation.test.js tests/toolExecutionValidation.test.js
+node scripts/run-tests.js tests/toolPolicyCoverage.test.js tests/toolPolicyRuntimeEffects.test.js tests/capabilityPolicyParity.test.js tests/toolUnknownCapabilityGate.test.js
 node scripts/run-tests.js tests/httpClientSecurity.test.js tests/networkSafetyHttpIntegration.test.js
 ```
 
-工具测试同时检查 schema 与 executor 名称一致、参数拒绝、权限过滤和失败文本；HTTP 测试应使用本地受控 server 或 fake request，覆盖重定向和 SSRF 边界。
+工具测试同时检查 schema/executor/policy manifest 全覆盖、参数化 action 的副作用、并行与缓存行为、未知能力默认阻断、参数拒绝、权限过滤和失败文本。动态 MCP 测试必须使用受控 registry 精确注册，不能用 `mcp_*` 名称前缀伪造已注册能力；HTTP 测试应使用本地受控 server 或 fake request，覆盖重定向和 SSRF 边界。
 
 ### 3.5 记忆、Prompt 与 Web
 
@@ -169,7 +170,7 @@ npm run check:agent:static
 - 任意配置、日志、文档、测试夹具或发布边界变化必须跑 `check:secrets:all`；
 - tool schema、executor、Runtime 图或 Agent 入口变化必须跑 `check:agent:static`。
 
-`check:agent:static` 设置 `CHECK_RUN=0`，只验证构造和契约；需要真实 provider 的动态自检不属于普通提交门禁，不能用个人密钥在 CI 中代替。
+`check:agent:static` 设置 `CHECK_RUN=0`，只验证构造和契约；它会输出 schema、executor、policy 数量，并在映射缺失、过期 policy、非法字段或公开/internal 暴露不一致时退出 1。需要真实 provider 的动态自检不属于普通提交门禁，不能用个人密钥在 CI 中代替。
 
 ### 4.3 全量测试和覆盖率
 

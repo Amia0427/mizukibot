@@ -447,7 +447,7 @@ function createDispatchNode(deps = {}) {
     };
 
     for (const step of selectedSteps) {
-      const policy = getPolicy(step.tool);
+      const policy = getPolicy(step.tool, step.inputs || {});
       const argsHash = stableHash(step.inputs || {});
       const reusableEnvelope = findEvidenceEnvelope(step, argsHash);
       if (String(step.status || '').trim() === 'completed' && reusableEnvelope && reusableEnvelope.side_effect) {
@@ -501,7 +501,7 @@ function createDispatchNode(deps = {}) {
               applyEnvelope(buildRuntimeBindingFailureEnvelope(runnableStep));
               continue;
             }
-            if (isSideEffectPolicy(getPolicy(step.tool))) {
+            if (isSideEffectPolicy(getPolicy(step.tool, runnableStep.inputs || {}))) {
               checkpointBeforeSideEffect(runnableStep);
             }
             const [envelope] = await executeBatch([runnableStep], buildDispatchState(), {
@@ -525,7 +525,7 @@ function createDispatchNode(deps = {}) {
           applyEnvelope(buildRuntimeBindingFailureEnvelope(step));
         }
         const runnableBatchItems = resolvedBatchItems.filter((step) => !isRuntimeBindingUnresolved(step));
-        const sideEffectSteps = runnableBatchItems.filter((step) => isSideEffectPolicy(getPolicy(step.tool)));
+        const sideEffectSteps = runnableBatchItems.filter((step) => isSideEffectPolicy(getPolicy(step.tool, step.inputs || {})));
         if (sideEffectSteps.length > 0) {
           const preEvents = sideEffectSteps.map((step) => createEvent('checkpoint', {
             node: 'dispatch',
@@ -557,7 +557,7 @@ function createDispatchNode(deps = {}) {
         }
         const runnableBatchItems = resolvedBatchItems.filter((step) => !isRuntimeBindingUnresolved(step));
         if (runnableBatchItems.length === 0) continue;
-        for (const step of runnableBatchItems.filter((item) => isSideEffectPolicy(getPolicy(item.tool)))) {
+        for (const step of runnableBatchItems.filter((item) => isSideEffectPolicy(getPolicy(item.tool, item.inputs || {})))) {
           checkpointBeforeSideEffect(step);
         }
         const batchResults = await executeBatch(runnableBatchItems, buildDispatchState(), {

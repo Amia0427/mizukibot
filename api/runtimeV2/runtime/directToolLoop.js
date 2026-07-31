@@ -23,6 +23,7 @@ function createDirectToolLoopHelpers(deps = {}) {
     runToolStep,
     computeToolEnvelope,
     getPolicy,
+    isSideEffectPolicy,
     logToolExecution,
     resolveToolLoopReply
   } = deps;
@@ -199,7 +200,7 @@ function createDirectToolLoopHelpers(deps = {}) {
 
     const createBlockedDirectToolEnvelope = (item, failureType = 'tool_error') => {
       const toolName = String(item?.toolName || '').trim();
-      const policy = getPolicy(toolName);
+      const policy = getPolicy(toolName, item?.step?.inputs || item?.parsedArgs || {});
       const allowedList = normalizeArray(effectiveAllowedTools).join(', ') || 'none';
       const blockedResult = `Tool not allowed: ${toolName || 'unknown'}. Allowed tools this turn: ${allowedList}. Do not call blocked tools again; answer directly or retry with an allowed tool only if necessary.`;
       const baseEnvelope = computeToolEnvelope(item?.step || {}, blockedResult, policy);
@@ -220,14 +221,14 @@ function createDirectToolLoopHelpers(deps = {}) {
     };
 
     const createToolLimitEnvelope = (item) => ({
-      ...computeToolEnvelope(item?.step || {}, `Tool call limit reached: max ${maxToolCallsPerTurn} tool calls per turn. Answer with the evidence already available instead of calling more tools.`, getPolicy(item?.toolName)),
+      ...computeToolEnvelope(item?.step || {}, `Tool call limit reached: max ${maxToolCallsPerTurn} tool calls per turn. Answer with the evidence already available instead of calling more tools.`, getPolicy(item?.toolName, item?.step?.inputs || item?.parsedArgs || {})),
       status: 'blocked',
       retryable: false,
       blockedReason: 'tool_call_limit_reached'
     });
 
     const createDuplicateToolEnvelope = (item, previousEnvelope = {}) => ({
-      ...computeToolEnvelope(item?.step || {}, `Duplicate tool call skipped for ${item?.toolName || 'unknown'}; reused previous result.\n${String(previousEnvelope.result || '')}`, getPolicy(item?.toolName)),
+      ...computeToolEnvelope(item?.step || {}, `Duplicate tool call skipped for ${item?.toolName || 'unknown'}; reused previous result.\n${String(previousEnvelope.result || '')}`, getPolicy(item?.toolName, item?.step?.inputs || item?.parsedArgs || {})),
       status: String(previousEnvelope.status || '').trim() || 'completed',
       retryable: false,
       duplicateOfToolCallId: previousEnvelope.tool_call_id || '',
@@ -271,6 +272,8 @@ function createDirectToolLoopHelpers(deps = {}) {
       for (const item of list) {
         const toolName = String(item?.toolName || item?.step?.tool || '').trim();
         if (!toolName || toolName === 'memory_cli') return false;
+        const policy = getPolicy(toolName, item.step?.inputs || item.parsedArgs || {});
+        if (typeof isSideEffectPolicy === 'function' && isSideEffectPolicy(policy)) return false;
         const fingerprint = buildToolCallFingerprint(toolName, item.step?.inputs || item.parsedArgs || {});
         if (!fingerprint || fingerprints.has(fingerprint)) return false;
         if (duplicateGuardEnabled && duplicateToolResults.has(fingerprint)) return false;
@@ -306,7 +309,7 @@ function createDirectToolLoopHelpers(deps = {}) {
           return recorded;
         }
         return recordDirectToolEnvelope(
-          computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName)),
+          computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName, sourceItem.step?.inputs || sourceItem.parsedArgs || {})),
           sourceItem.toolCall
         );
       });
@@ -354,7 +357,7 @@ function createDirectToolLoopHelpers(deps = {}) {
         return settledItem?.status === 'fulfilled'
           ? settledItem.value
           : recordDirectToolEnvelope(
-            computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem?.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName)),
+            computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem?.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName, sourceItem.step?.inputs || sourceItem.parsedArgs || {})),
             sourceItem.toolCall
           );
       });

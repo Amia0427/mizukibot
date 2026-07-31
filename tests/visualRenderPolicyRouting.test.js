@@ -13,6 +13,7 @@ const { COMPANION_TOOL_PRESET } = require('../utils/companionTools');
 const {
   enforceToolPolicy,
   getPolicy,
+  POLICY_VERSION,
   sanitizeToolArgsForLog
 } = require('../utils/toolPolicy');
 
@@ -34,8 +35,15 @@ assert.strictEqual(schema.function.parameters.properties.max_height.maximum, 200
 assert.strictEqual(typeof TOOL_EXECUTORS.render_qq_visual, 'function');
 
 assert.deepStrictEqual(getPolicy('render_qq_visual'), {
+  version: POLICY_VERSION,
   risk: 'medium',
-  capability: 'local_write'
+  capability: 'local_write',
+  effect: 'external_send',
+  confirmation: 'explicit',
+  scope: 'group',
+  idempotency: 'required',
+  replay: 'block_uncertain',
+  exposure: 'public'
 });
 assert.ok(COMPANION_TOOL_PRESET.includes('render_qq_visual'));
 

@@ -157,6 +157,9 @@ function normalizeExecutionEnvelope(rawEnvelope = {}, fallbackStep = {}, options
   if (Object.prototype.hasOwnProperty.call(envelope, 'blockedReason')) {
     normalized.blockedReason = normalizeText(envelope.blockedReason);
   }
+  if (Object.prototype.hasOwnProperty.call(envelope, 'cached')) {
+    normalized.cached = Boolean(envelope.cached);
+  }
   if (Object.prototype.hasOwnProperty.call(envelope, 'unsatisfiedRequirement')) {
     normalized.unsatisfiedRequirement = normalizeText(envelope.unsatisfiedRequirement);
   }
@@ -438,15 +441,28 @@ function buildToolEvidenceBundle(state = {}, options = {}) {
 
 function createCapabilityDescriptor(raw = {}) {
   const descriptor = normalizeObject(raw, {});
+  const policy = normalizeObject(descriptor.policy, null);
+  const hasExplicitReadOnly = descriptor.readOnly !== undefined;
+  const hasExplicitSideEffect = descriptor.sideEffect !== undefined;
+  const sideEffect = hasExplicitSideEffect
+    ? Boolean(descriptor.sideEffect)
+    : (hasExplicitReadOnly
+      ? descriptor.readOnly === false
+      : Boolean(policy?.effect && policy.effect !== 'none'));
+  const readOnly = hasExplicitReadOnly ? descriptor.readOnly !== false : !sideEffect;
+  const parallelSafe = descriptor.parallelSafe === undefined
+    ? readOnly && !sideEffect
+    : descriptor.parallelSafe !== false && !sideEffect;
   return {
     name: normalizeText(descriptor.name || descriptor.toolName || descriptor.functionName),
     kind: normalizeText(descriptor.kind || 'tool') || 'tool',
     schema: descriptor.schema || null,
     executor: typeof descriptor.executor === 'function' ? descriptor.executor : null,
-    risk: normalizeText(descriptor.risk || 'low') || 'low',
-    readOnly: descriptor.readOnly !== false,
-    sideEffect: Boolean(descriptor.sideEffect),
-    parallelSafe: descriptor.parallelSafe !== false,
+    policy,
+    risk: normalizeText(descriptor.risk || policy?.risk || 'low') || 'low',
+    readOnly,
+    sideEffect,
+    parallelSafe,
     resumable: descriptor.resumable !== false,
     maxCallsPerTurn: Number.isFinite(Number(descriptor.maxCallsPerTurn))
       ? Math.max(1, Math.floor(Number(descriptor.maxCallsPerTurn)))

@@ -162,14 +162,14 @@ module.exports = (async () => {
 
   const timeoutRegistry = {
     byName: new Map([
-      ['default_timeout', {
-        name: 'default_timeout',
+      ['web_search', {
+        name: 'web_search',
         kind: 'tool',
         parallelSafe: true,
         executor: async () => new Promise((resolve) => setTimeout(() => resolve('late'), 35))
       }],
-      ['custom_timeout', {
-        name: 'custom_timeout',
+      ['get_current_time', {
+        name: 'get_current_time',
         kind: 'tool',
         parallelSafe: true,
         timeoutMs: 60,
@@ -178,14 +178,14 @@ module.exports = (async () => {
     ])
   };
   const results = await scheduler.executeBatch([
-    { id: 'default', kind: 'tool', tool: 'default_timeout', inputs: {} },
-    { id: 'custom', kind: 'tool', tool: 'custom_timeout', inputs: {} }
-  ], { request: { allowedTools: ['default_timeout', 'custom_timeout'] } }, {
+    { id: 'default', kind: 'tool', tool: 'web_search', inputs: {} },
+    { id: 'custom', kind: 'tool', tool: 'get_current_time', inputs: {} }
+  ], { request: { allowedTools: ['web_search', 'get_current_time'] } }, {
     registry: timeoutRegistry,
     timeoutMs: 20,
     batches: [{ mode: 'parallel', items: [
-      { id: 'default', kind: 'tool', tool: 'default_timeout', inputs: {} },
-      { id: 'custom', kind: 'tool', tool: 'custom_timeout', inputs: {} }
+      { id: 'default', kind: 'tool', tool: 'web_search', inputs: {} },
+      { id: 'custom', kind: 'tool', tool: 'get_current_time', inputs: {} }
     ] }]
   });
   assert.strictEqual(results.find((item) => item.step_id === 'default').status, 'failed');

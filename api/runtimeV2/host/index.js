@@ -95,7 +95,13 @@ const {
   shouldRunParallel
 } = require('../capabilities/scheduler');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
-const { getPolicy, enforceToolPolicy } = require('../../../utils/toolPolicy');
+const {
+  getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy,
+  enforceToolPolicy
+} = require('../../../utils/toolPolicy');
+const { getDynamicToolNames } = require('../../toolRegistry');
 const { appendDailyJournalEntry } = require('../../../utils/dailyJournal');
 const { runHumanizerAgent, isHumanizerAgentEnabled } = require('../../humanizerAgent');
 const {
@@ -990,6 +996,11 @@ function createRuntime(options = {}) {
     stableHash,
     summarizeToolLogValue,
     getPolicy,
+    resolveToolPolicy,
+    hasPublicToolPolicy,
+    isDynamicToolRegistered(toolName) {
+      return getDynamicToolNames().includes(String(toolName || '').trim());
+    },
     enforceToolPolicy,
     shouldRunParallel,
     capabilityRegistry,
@@ -1066,6 +1077,7 @@ function createRuntime(options = {}) {
     runToolStep,
     computeToolEnvelope,
     getPolicy,
+    isSideEffectPolicy,
     logToolExecution,
     resolveToolLoopReply
   });
