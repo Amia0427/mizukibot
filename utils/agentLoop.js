@@ -64,7 +64,8 @@ function collectFailures(execLogs = []) {
       action: normalizeText(row.action),
       purpose: normalizeText(row.purpose),
       error: normalizeText(row.error) || 'tool failed',
-      args: normalizeArgs(row.args)
+      args: normalizeArgs(row.args),
+      retryable: row.retryable !== false
     }));
 }
 
@@ -119,6 +120,7 @@ function verifyExecutionResult({ question = '', plan = null, execLogs = [], roun
         purpose: normalizeText(step.purpose),
         error: unsatisfied[0],
         args: normalizeArgs(step.args),
+        retryable: log ? log.retryable !== false : true,
         requirement,
         runtimeBinding
       });
@@ -152,11 +154,17 @@ function verifyExecutionResult({ question = '', plan = null, execLogs = [], roun
   }
 
   const nextFailure = unresolved[0] || null;
-  const shouldRetry = !done && round < maxRounds && Boolean(nextFailure && nextFailure.action);
+  const shouldRetry = !done
+    && round < maxRounds
+    && Boolean(nextFailure && nextFailure.action)
+    && nextFailure.retryable !== false;
   const retryableSteps = executableSteps
     .filter((step) => normalizeObject(step?.repairPolicy, {}).strategy !== 'never_retry_completed_side_effect')
     .map((step) => String(step.id))
-    .filter((stepId) => unresolved.some((item) => String(item?.step_id) === stepId));
+    .filter((stepId) => unresolved.some((item) => (
+      String(item?.step_id) === stepId && item.retryable !== false
+    )));
+  const hasNonRetryableFailure = unresolved.some((item) => item.retryable === false);
 
   return {
     done,
@@ -183,7 +191,7 @@ function verifyExecutionResult({ question = '', plan = null, execLogs = [], roun
     },
     repair_strategy: {
       deterministicFirst: true,
-      allowModelRepair: retryableSteps.length === 0 && round < maxRounds
+      allowModelRepair: !hasNonRetryableFailure && retryableSteps.length === 0 && round < maxRounds
     }
   };
 }

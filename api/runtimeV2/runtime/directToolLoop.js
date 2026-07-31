@@ -182,6 +182,13 @@ function createDirectToolLoopHelpers(deps = {}) {
         node: 'direct_reply',
         tool_call_id: toolCallId
       }));
+      if (normalizedEnvelope.authorizationEvent?.type === 'tool_authorization_decision') {
+        loopEvents.push(createEvent('tool_authorization_decision', {
+          ...normalizedEnvelope.authorizationEvent,
+          node: 'direct_reply',
+          tool_call_id: toolCallId
+        }));
+      }
       loopEvents.push(createEvent('memoryCliTurn', {
         node: 'direct_reply',
         memoryCliTurn: nextMemoryCliTurn

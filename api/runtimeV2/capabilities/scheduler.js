@@ -16,6 +16,7 @@ const { buildCapabilityRegistry } = require('./registry');
 const { getDynamicToolNames } = require('../toolRegistryFacade');
 const { maybeRunGlobalToolRuntime } = require('../globalToolRuntimeFacade');
 const { isToolAllowedByRuntimeList } = require('../../../utils/localToolAccess');
+const { executeAuthorizedToolCall: executeAuthorizedToolCallDefault } = require('../../toolAuthorization');
 const {
   normalizeArray,
   normalizeExecutionEnvelope,
@@ -451,6 +452,48 @@ function buildToolContext(state, overrides = {}, helpers = {}) {
   };
 }
 
+function buildAuthorizationActor(state = {}) {
+  const request = normalizeObject(state.request, {});
+  const routeMeta = normalizeObject(request.routeMeta, {});
+  const groupId = normalizeText(routeMeta.groupId || routeMeta.group_id);
+  const chatType = normalizeText(
+    routeMeta.chatType || routeMeta.chat_type || (groupId ? 'group' : 'private')
+  ).toLowerCase();
+  return {
+    userId: normalizeText(request.userId),
+    chatType,
+    groupId: chatType === 'group' ? groupId : ''
+  };
+}
+
+function buildAuthorizationInvocationKey(step = {}, state = {}, source = 'runtime_v2_scheduler') {
+  const request = normalizeObject(state.request, {});
+  const routeMeta = normalizeObject(request.routeMeta, {});
+  const traceId = normalizeText(request.requestTrace?.requestId || routeMeta.requestTrace?.requestId);
+  const scopeId = normalizeText(
+    state.thread?.threadId || traceId || request.sessionKey || request.userId
+  );
+  const stepId = normalizeText(step.directToolCallId || step.toolCallId || step.id);
+  return [source, scopeId, stepId, normalizeText(step.tool)].filter(Boolean).join(':');
+}
+
+function buildAuthorizedEnvelope(step, descriptor, helpers, result = {}) {
+  if (result.status === 'completed') {
+    return computeToolEnvelope(step, result.result, descriptor, helpers);
+  }
+  const reason = normalizeText(result.reason || result.status) || 'authorization_denied';
+  const resultText = normalizeText(result.result) || 'Tool authorization denied: ' + reason;
+  return normalizeExecutionEnvelope({
+    ...computeToolEnvelope(step, resultText, descriptor, helpers),
+    status: result.status === 'confirmation_required' ? 'confirmation_required' : 'blocked',
+    retryable: false,
+    result: resultText,
+    blockedReason: reason,
+    authorization: normalizeObject(result.authorization, null),
+    authorizationEvent: normalizeObject(result.auditEvent, null)
+  }, step);
+}
+
 function summarizeToolLogValue(value, maxLen = 160) {
   if (value === undefined) return '';
   const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -493,6 +536,7 @@ function maybeCaptureToolFailure(envelope = {}, step = {}, state = {}, helpers =
   if (status === 'completed') return;
   const blockedReason = normalizeText(envelope?.blockedReason).toLowerCase();
   if (blockedReason.startsWith('runtime_binding_unresolved:')) return;
+  if (blockedReason === 'confirmation_required') return;
   if (typeof helpers.captureToolFailure !== 'function') return;
   const request = normalizeObject(state.request, {});
   const routeMeta = normalizeObject(request.routeMeta, {});
@@ -674,6 +718,29 @@ async function executeStep(step = {}, state = {}, context = {}) {
       });
       return blockedEnvelope;
     }
+    const resolvedPolicy = dynamicTool
+      ? getPolicy(toolName, normalizedArgs)
+      : policyResolution.policy;
+    const authorize = typeof context.executeAuthorizedToolCall === 'function'
+      ? context.executeAuthorizedToolCall
+      : (typeof helpers.executeAuthorizedToolCall === 'function'
+        ? helpers.executeAuthorizedToolCall
+        : executeAuthorizedToolCallDefault);
+    const toolContext = buildToolContext(state, {
+      ...context,
+      toolName
+    }, helpers);
+    const executeAndFormat = async (executorArgs) => {
+      let out = await executor(executorArgs);
+      if (context.applyResultFormatter === true && typeof descriptor?.resultFormatter === 'function') {
+        out = await descriptor.resultFormatter(out, {
+          step,
+          state,
+          args: normalizedArgs
+        });
+      }
+      return out;
+    };
 
     if (toolName === 'memory_cli') {
       if (isUnresolvedMemoryOpenCommand(normalizedArgs.command)) {
@@ -731,31 +798,42 @@ async function executeStep(step = {}, state = {}, context = {}) {
         return unknownEnvelope;
       }
 
-      let out = await executor({
+      const preparedInputs = {
         ...normalizedArgs,
-        command: decision.preparedCommand || normalizedArgs.command,
-        __context: buildToolContext(state, {
-          ...context,
-          toolName
-        }, helpers)
+        command: decision.preparedCommand || normalizedArgs.command
+      };
+      const authorizationResult = await authorize({
+        toolName,
+        rawArgs: preparedArgs,
+        normalizedArgs: preparedInputs,
+        policy: resolvedPolicy,
+        actor: buildAuthorizationActor(state),
+        invocationKey: buildAuthorizationInvocationKey(step, state),
+        toolContext,
+        executor: executeAndFormat
       });
-      if (context.applyResultFormatter === true && typeof descriptor?.resultFormatter === 'function') {
-        out = await descriptor.resultFormatter(out, {
-          step,
-          state,
-          args: normalizedArgs
+      const authorizedEnvelope = buildAuthorizedEnvelope(
+        { ...step, inputs: preparedInputs },
+        descriptor,
+        helpers,
+        authorizationResult
+      );
+      if (authorizedEnvelope.status !== 'completed') {
+        maybeCaptureToolFailure(authorizedEnvelope, { ...step, inputs: preparedInputs }, state, helpers);
+        logToolExecution(authorizedEnvelope, { ...step, inputs: preparedInputs }, state, {
+          node: runtimeNode,
+          allowedTools: state.request?.allowedTools
         });
+        return authorizedEnvelope;
       }
       const resultEnvelope = normalizeExecutionEnvelope({
-        ...computeToolEnvelope({
-          ...step,
-          inputs: {
-            ...normalizedArgs,
-            command: decision.preparedCommand || normalizedArgs.command
-          }
-        }, out, descriptor, helpers),
+        ...authorizedEnvelope,
         memoryCliTurn: createMemoryCliTurnState(
-          updateMemoryCliTurnStateAfterResult(executionState.memoryCliTurn, decision.parsed, out)
+          updateMemoryCliTurnStateAfterResult(
+            executionState.memoryCliTurn,
+            decision.parsed,
+            authorizationResult.result
+          )
         ),
         invalidateMemoryPrompt: true,
         repairApplied: Boolean(decision.repairApplied),
@@ -775,21 +853,22 @@ async function executeStep(step = {}, state = {}, context = {}) {
       return unknownEnvelope;
     }
 
-    let out = await executor({
-      ...normalizedArgs,
-      __context: buildToolContext(state, {
-        ...context,
-        toolName
-      }, helpers)
+    const authorizationResult = await authorize({
+      toolName,
+      rawArgs: preparedArgs,
+      normalizedArgs,
+      policy: resolvedPolicy,
+      actor: buildAuthorizationActor(state),
+      invocationKey: buildAuthorizationInvocationKey(step, state),
+      toolContext,
+      executor: executeAndFormat
     });
-    if (context.applyResultFormatter === true && typeof descriptor?.resultFormatter === 'function') {
-      out = await descriptor.resultFormatter(out, {
-        step,
-        state,
-        args: normalizedArgs
-      });
-    }
-    const envelope = computeToolEnvelope({ ...step, inputs: normalizedArgs }, out, descriptor, helpers);
+    const envelope = buildAuthorizedEnvelope(
+      { ...step, inputs: normalizedArgs },
+      descriptor,
+      helpers,
+      authorizationResult
+    );
     maybeCaptureToolFailure(envelope, { ...step, inputs: normalizedArgs }, state, helpers);
     logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
       node: runtimeNode,

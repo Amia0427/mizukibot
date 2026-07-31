@@ -116,6 +116,7 @@ const { appendDailyJournalEntry } = require('../../utils/dailyJournal');
 const { recordMemoryScope } = require('../../utils/memoryScopeIndex');
 const { isToolSchemaValidationError } = require('../../utils/modelCompat');
 const { getPolicy, enforceToolPolicy } = require('../../utils/toolPolicy');
+const { executeAuthorizedToolCall: executeAuthorizedToolCallDefault } = require('../toolAuthorization');
 const { getPolicyDefinition } = require('../../core/routeProfiles');
 const { buildExecutablePlanFromLegacyPlan } = require('../../core/executablePlan');
 const { deriveSuccessCriteria, verifyExecutionResult, buildRepairPlan } = require('../../utils/agentLoop');
@@ -1049,8 +1050,83 @@ function isToolAllowed(toolName, context = {}) {
   return allowedSet.has(String(toolName || '').trim());
 }
 
+function buildLegacyAuthorizationActor(context = {}) {
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object'
+    ? context.routeMeta
+    : {};
+  const groupId = String(routeMeta.groupId || routeMeta.group_id || context.groupId || '').trim();
+  const chatType = String(
+    routeMeta.chatType || routeMeta.chat_type || context.chatType || (groupId ? 'group' : 'private')
+  ).trim().toLowerCase();
+  return {
+    userId: String(context.userId || '').trim(),
+    chatType,
+    groupId: chatType === 'group' ? groupId : ''
+  };
+}
+
+function buildLegacyAuthorizationInvocationKey(toolName = '', context = {}) {
+  const toolCallId = String(context.toolCallId || context.tool_call_id || '').trim();
+  if (toolCallId) return ['legacy', 'tool-call', toolCallId, toolName].join(':');
+  const planStepId = String(context.planStepId || '').trim();
+  if (planStepId) {
+    return [
+      'legacy',
+      'plan',
+      String(context.taskId || context.requestId || context.userId || '').trim(),
+      planStepId,
+      String(context.planRound || context.round || 1),
+      toolName
+    ].filter(Boolean).join(':');
+  }
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object'
+    ? context.routeMeta
+    : {};
+  const requestId = String(
+    context.requestId
+    || context.requestTrace?.requestId
+    || routeMeta.requestTrace?.requestId
+    || routeMeta.messageId
+    || routeMeta.message_id
+    || context.taskId
+    || ''
+  ).trim();
+  return requestId ? ['legacy', requestId, toolName].join(':') : '';
+}
+
+function buildLegacyToolContext(context = {}) {
+  return {
+    userId: String(context.userId || '').trim(),
+    routePolicyKey: String(context.routePolicyKey || '').trim(),
+    topRouteType: String(context.topRouteType || '').trim(),
+    routeMeta: context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {}
+  };
+}
+
+async function runLegacyAuthorizedTool({
+  toolName,
+  rawArgs,
+  normalizedArgs,
+  policy,
+  executor,
+  context
+}) {
+  const authorize = typeof context.executeAuthorizedToolCall === 'function'
+    ? context.executeAuthorizedToolCall
+    : executeAuthorizedToolCallDefault;
+  return authorize({
+    toolName,
+    rawArgs,
+    normalizedArgs,
+    policy,
+    actor: buildLegacyAuthorizationActor(context),
+    invocationKey: buildLegacyAuthorizationInvocationKey(toolName, context),
+    toolContext: buildLegacyToolContext(context),
+    executor
+  });
+}
+
 async function executeToolCall(toolName, rawArgs = {}, context = {}) {
-  const policy = getPolicy(toolName);
   const executor = getToolExecutors()[toolName];
   if (!isToolAllowed(toolName, context)) {
     throw new Error(`Tool not allowed: ${toolName}`);
@@ -1060,6 +1136,7 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
   }
 
   const normalizedArgs = enforceToolPolicy(toolName, rawArgs, context);
+  const policy = getPolicy(toolName, normalizedArgs);
   if (toolName === 'memory_cli') {
     const decision = decideMemoryCliTurnAction(normalizedArgs.command, context.memoryCliTurn);
     if (!decision.ok) {
@@ -1092,14 +1169,19 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
       });
     }
     normalizedArgs.command = decision.preparedCommand || decision.parsed?.raw || normalizedArgs.command;
-    normalizedArgs.__context = {
-      userId: String(context.userId || '').trim(),
-      routePolicyKey: String(context.routePolicyKey || '').trim(),
-      topRouteType: String(context.topRouteType || '').trim(),
-      routeMeta: context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {}
-    };
     try {
-      const out = await executor(normalizedArgs);
+      const authorizationResult = await runLegacyAuthorizedTool({
+        toolName,
+        rawArgs,
+        normalizedArgs,
+        policy,
+        executor,
+        context
+      });
+      if (authorizationResult.status !== 'completed') {
+        return String(authorizationResult.result || authorizationResult.reason || 'Tool authorization denied');
+      }
+      const out = authorizationResult.result;
       const normalizedOut = typeof out === 'string' ? out : JSON.stringify(out);
       context.memoryCliTurn = updateMemoryCliTurnStateAfterResult(context.memoryCliTurn, decision.parsed, normalizedOut);
       console.log('[memory] memory_cli turn state updated', {
@@ -1142,6 +1224,23 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
     ? (planRound ? `plan_${planStepId}_r${planRound}` : `plan_${planStepId}`)
     : '';
 
+  if (policy.confirmation !== 'none') {
+    const authorizationResult = await runLegacyAuthorizedTool({
+      toolName,
+      rawArgs,
+      normalizedArgs,
+      policy,
+      executor,
+      context
+    });
+    return typeof authorizationResult.result === 'string'
+      ? authorizationResult.result
+      : JSON.stringify(authorizationResult.result || {
+          status: authorizationResult.status,
+          reason: authorizationResult.reason
+        });
+  }
+
   const stepId = context.taskId
     ? startTaskStep(context.taskId, {
         ...(plannedTaskStepId ? { id: plannedTaskStepId } : {}),
@@ -1169,7 +1268,15 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
   }
 
   try {
-    const out = await executor(normalizedArgs);
+    const authorizationResult = await runLegacyAuthorizedTool({
+      toolName,
+      rawArgs,
+      normalizedArgs,
+      policy,
+      executor,
+      context
+    });
+    const out = authorizationResult.result;
     const normalizedOut = typeof out === 'string' ? out : JSON.stringify(out);
 
     if (context.taskId && stepId) {
@@ -1680,6 +1787,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
       try {
         toolResult = await executeToolCall(fn, args, {
           ...context,
+          toolCallId: toolCall?.id,
           purpose: 'model requested tool call'
         });
       } catch (e) {
@@ -2288,6 +2396,7 @@ module.exports = {
   sanitizePlan,
   buildPlan,
   buildDynamicPrompt,
+  executeToolCall,
   executePlan,
   executePlanLoop,
   synthesizeFromPlan,

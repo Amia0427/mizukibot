@@ -71,6 +71,39 @@ module.exports = (async () => {
   assert.strictEqual(repairPlan.steps.length, 1);
   assert.strictEqual(repairPlan.steps[0].action, 'web_fetch');
 
+  const authorizationPlan = {
+    goal: '发送群消息',
+    steps: [{
+      id: 'authorization_step',
+      action: 'schedule_group_message',
+      args: { group_id: 'group-1', message: 'hello' },
+      purpose: 'send a message',
+      repairPolicy: { strategy: 'retry_step', allowModelRepair: true }
+    }]
+  };
+  const authorizationVerification = verifyExecutionResult({
+    question: '发送群消息',
+    plan: authorizationPlan,
+    execLogs: [{
+      id: 'authorization_step',
+      action: 'schedule_group_message',
+      args: { group_id: 'group-1', message: 'hello' },
+      purpose: 'send a message',
+      ok: false,
+      error: 'confirmation_required',
+      retryable: false
+    }],
+    round: 1,
+    maxRounds: 3
+  });
+  assert.strictEqual(authorizationVerification.next_action, '');
+  assert.deepStrictEqual(authorizationVerification.retryable_steps, []);
+  assert.strictEqual(buildRepairPlan({
+    previousPlan: authorizationPlan,
+    verification: authorizationVerification,
+    round: 1
+  }), null);
+
   console.log('agentLoopV2.test.js passed');
 })().catch((error) => {
   console.error(error);

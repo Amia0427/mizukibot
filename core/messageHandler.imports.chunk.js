@@ -61,6 +61,7 @@ const { createMessageAdminCoordinator } = require('./messageAdminCommands');
 const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundTasks');
 const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
 const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
+const { handleToolAuthorizationCommand } = require('./messageToolAuthorization');
 const {
   appendInboundTimingLog,
   createInboundTimingLogger,

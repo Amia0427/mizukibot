@@ -15,6 +15,14 @@ const {
   resolveToolPolicy
 } = require('../utils/toolPolicy');
 
+async function executeWithoutConfirmation(input) {
+  return {
+    status: 'completed',
+    executed: true,
+    result: await input.executor({ ...input.normalizedArgs, __context: input.toolContext })
+  };
+}
+
 function buildRegistry(descriptors) {
   return {
     descriptors,
@@ -35,6 +43,7 @@ function createExecutionHelpers(executor, options = {}) {
     resolveToolPolicy,
     hasPublicToolPolicy,
     isDynamicToolRegistered: () => false,
+    executeAuthorizedToolCall: executeWithoutConfirmation,
     enforceToolPolicy: (_toolName, args) => args,
     shouldRunParallel: () => false,
     capabilityRegistry: { byName: new Map() },
@@ -101,6 +110,7 @@ module.exports = (async () => {
   const schedulerState = createState('skill_stock_watchlist', {});
   const schedulerContext = {
     registry: stockRegistry,
+    executeAuthorizedToolCall: executeWithoutConfirmation,
     toolResultCache,
     toolResultCacheTtlMs: 1000,
     helpers: {
@@ -139,6 +149,7 @@ module.exports = (async () => {
   const ontologyCache = new Map();
   const ontologyContext = {
     registry: ontologyRegistry,
+    executeAuthorizedToolCall: executeWithoutConfirmation,
     toolResultCache: ontologyCache,
     toolResultCacheTtlMs: 1000,
     helpers: {

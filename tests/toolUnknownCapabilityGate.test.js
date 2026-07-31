@@ -24,6 +24,18 @@ function createHelpers(executors, isDynamicToolRegistered = () => false) {
     resolveToolPolicy,
     hasPublicToolPolicy,
     isDynamicToolRegistered,
+    executeAuthorizedToolCall: async (input) => ({
+      status: 'confirmation_required',
+      executed: false,
+      retryable: false,
+      result: 'Tool authorization required: TA-REGISTERED-MCP',
+      authorization: {
+        ticketId: 'TA-REGISTERED-MCP',
+        status: 'pending',
+        toolName: input.toolName,
+        confirmation: input.policy.confirmation
+      }
+    }),
     enforceToolPolicy: (_toolName, args) => args,
     shouldRunParallel: () => false,
     capabilityRegistry: { byName: new Map() },
@@ -128,9 +140,9 @@ module.exports = (async () => {
     createStep(fakeMcpName),
     createState(fakeMcpName)
   );
-  assert.strictEqual(registeredMcpDirect.status, 'completed');
+  assert.strictEqual(registeredMcpDirect.status, 'confirmation_required');
   assert.strictEqual(registeredMcpDirect.side_effect, true);
-  assert.strictEqual(registeredMcpCalls, 1);
+  assert.strictEqual(registeredMcpCalls, 0);
 
   let schedulerCalls = 0;
   const createSchedulerContext = (toolName, options = {}) => {
@@ -149,6 +161,18 @@ module.exports = (async () => {
         byName: new Map([[toolName, descriptor]])
       },
       isDynamicToolRegistered: options.isDynamicToolRegistered || (() => false),
+      executeAuthorizedToolCall: async (input) => ({
+        status: 'confirmation_required',
+        executed: false,
+        retryable: false,
+        result: 'Tool authorization required: TA-REGISTERED-MCP',
+        authorization: {
+          ticketId: 'TA-REGISTERED-MCP',
+          status: 'pending',
+          toolName: input.toolName,
+          confirmation: input.policy.confirmation
+        }
+      }),
       helpers: {
         enforceToolPolicy: (_toolName, args) => args
       }
@@ -205,9 +229,9 @@ module.exports = (async () => {
       isDynamicToolRegistered: (toolName) => toolName === fakeMcpName
     })
   );
-  assert.strictEqual(registeredMcpScheduler.status, 'completed');
+  assert.strictEqual(registeredMcpScheduler.status, 'confirmation_required');
   assert.strictEqual(registeredMcpScheduler.side_effect, true);
-  assert.strictEqual(schedulerCalls, 1);
+  assert.strictEqual(schedulerCalls, 0);
 
   console.log('toolUnknownCapabilityGate.test.js passed');
 })().catch((error) => {

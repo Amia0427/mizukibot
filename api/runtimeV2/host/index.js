@@ -227,11 +227,32 @@ function applyRuntimeReplyOutput(out = {}, options = {}, sanitize = sanitizeUser
   const rawReply = output.displayReply || output.finalReply || output.draftReply || '';
   const sanitized = sanitize(rawReply, { returnMeta: true });
   const finalReply = String(typeof sanitized === 'object' ? sanitized.text : sanitized).trim();
+  const pendingAuthorizations = [];
+  const seenTicketIds = new Set();
+  const addPendingAuthorization = (envelope = {}) => {
+    if (String(envelope.status || '').trim() !== 'confirmation_required') return;
+    const authorization = normalizeObject(envelope.authorization, null);
+    const ticketId = String(authorization?.ticketId || '').trim();
+    if (!ticketId || seenTicketIds.has(ticketId)) return;
+    seenTicketIds.add(ticketId);
+    pendingAuthorizations.push({ ...authorization });
+  };
+  normalizeArray(out.execution?.toolResults).forEach(addPendingAuthorization);
+  normalizeArray(out.plan?.steps).forEach((step) => {
+    normalizeArray(step?.evidence).forEach(addPendingAuthorization);
+  });
+  options.pendingToolAuthorizations = pendingAuthorizations;
   options.hasSafetyRestriction = Boolean(
     output.hasSafetyRestriction === true
     || (typeof sanitized === 'object' && sanitized.hasSafetyRestriction === true)
   );
-  return finalReply || '刚才网络有点不稳，你再发一次我接着回。';
+  const replyText = finalReply || '刚才网络有点不稳，你再发一次我接着回。';
+  if (pendingAuthorizations.length === 0) return replyText;
+  const commands = pendingAuthorizations.map((authorization) => [
+    `确认执行：/tool-confirm ${authorization.ticketId}`,
+    `取消执行：/tool-cancel ${authorization.ticketId}`
+  ].join('\n'));
+  return `${replyText}\n\n${commands.join('\n\n')}`;
 }
 
 function createRuntime(options = {}) {

@@ -58,6 +58,7 @@ const { createMessageAdminCoordinator } = require('./messageAdminCommands');
 const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundTasks');
 const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
 const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
+const { handleToolAuthorizationCommand } = require('./messageToolAuthorization');
 const {
   appendInboundTimingLog,
   createInboundTimingLogger,
@@ -1542,6 +1543,46 @@ function createMessageHandler({
     );
     const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
+    const toolAuthorizationCommand = await handleToolAuthorizationCommand(rawMessageText, {
+      userId: senderId,
+      chatType,
+      groupId: String(groupId || '').trim()
+    });
+    if (toolAuthorizationCommand.handled) {
+      const decisionEvent = toolAuthorizationCommand.result?.auditEvent || {};
+      appendTraceTiming('tool_authorization_decision', {
+        stage: 'tool_authorization_decision',
+        ...buildTraceBase(),
+        routePolicyKey: 'tool/authorization',
+        topRouteType: 'admin',
+        authorizationId: String(
+          decisionEvent.authorizationId || toolAuthorizationCommand.ticketId || ''
+        ).trim(),
+        decision: String(decisionEvent.decision || toolAuthorizationCommand.result?.status || '').trim(),
+        reason: String(decisionEvent.reason || toolAuthorizationCommand.result?.reason || '').trim()
+      });
+      const sent = await sendGroupReply({
+        chatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText: toolAuthorizationCommand.replyText,
+        atSender: false,
+        retries: 1,
+        waitMs: 300,
+        source: 'message_handler',
+        routePolicyKey: 'tool/authorization',
+        triggerReason: 'tool_authorization_command',
+        topRouteType: 'admin'
+      });
+      appendRequestCompleteTrace({
+        routePolicyKey: 'tool/authorization',
+        topRouteType: 'admin',
+        replyPath: 'tool_authorization_command',
+        sent: Boolean(sent)
+      });
+      return;
+    }
     const luckinHandled = await getLuckinCommandService().handleIncomingMessage(msg, {
       chatType,
       groupId,

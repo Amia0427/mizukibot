@@ -574,11 +574,22 @@ function createDispatchNode(deps = {}) {
       }
     }
 
+    const authorizationEvents = toolResults
+      .filter((item) => item.authorizationEvent?.type === 'tool_authorization_decision')
+      .map((item) => (
+        createEvent('tool_authorization_decision', {
+          ...item.authorizationEvent,
+          node: 'dispatch',
+          step_id: item.step_id,
+          tool_call_id: item.tool_call_id
+        })
+      ));
     const nextEvents = events
       .concat(toolResults.map((item) => createEvent('tool_result', {
         ...item,
         ...buildMemoryToolTelemetry(item)
       })))
+      .concat(authorizationEvents)
       .concat([createEvent('node_complete', { node: 'dispatch' })]);
 
     return saveAndEmit({

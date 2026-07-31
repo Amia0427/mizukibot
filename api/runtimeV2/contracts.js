@@ -168,6 +168,12 @@ function normalizeExecutionEnvelope(rawEnvelope = {}, fallbackStep = {}, options
       ? null
       : normalizeObject(envelope.runtimeBinding, {});
   }
+  if (envelope.authorization && typeof envelope.authorization === 'object') {
+    normalized.authorization = normalizeObject(envelope.authorization, {});
+  }
+  if (envelope.authorizationEvent && typeof envelope.authorizationEvent === 'object') {
+    normalized.authorizationEvent = normalizeObject(envelope.authorizationEvent, {});
+  }
   return normalized;
 }
 
@@ -322,7 +328,9 @@ function extractExecLogsFromEnvelopes(envelopes = []) {
     batchId: normalizeText(envelope.batch_id),
     batchIndex: Number.isFinite(Number(envelope.batch_index)) ? Number(envelope.batch_index) : null,
     duration_ms: Number.isFinite(Number(envelope.duration_ms)) ? Number(envelope.duration_ms) : 0,
-    source: normalizeText(envelope.source)
+    source: normalizeText(envelope.source),
+    retryable: envelope.retryable !== false,
+    authorization: normalizeObject(envelope.authorization, null)
   }));
 }
 

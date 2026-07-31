@@ -513,6 +513,8 @@ function buildExecLogsFromSteps(steps = []) {
       error: latestEnvelope && latestEnvelope.status !== 'completed'
         ? String(latestEnvelope.result || step.blockingReason || 'tool failed')
         : '',
+      retryable: latestEnvelope ? latestEnvelope.retryable !== false : true,
+      authorization: normalizeObject(latestEnvelope?.authorization, null),
       unsatisfiedRequirement: String(latestEnvelope?.unsatisfiedRequirement || '').trim(),
       runtimeBinding: latestEnvelope?.runtimeBinding === null ? null : normalizeObject(latestEnvelope?.runtimeBinding, step.runtimeBinding),
       dependsOn: normalizeArray(step.dependsOn),

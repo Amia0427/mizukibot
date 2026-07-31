@@ -26,6 +26,11 @@ module.exports = (async () => {
     hasPublicToolPolicy,
     resolveToolPolicy,
     isDynamicToolRegistered: () => false,
+    executeAuthorizedToolCall: async (input) => ({
+      status: 'completed',
+      executed: true,
+      result: await input.executor({ ...input.normalizedArgs, __context: input.toolContext })
+    }),
     enforceToolPolicy(_toolName, args) {
       return args;
     },
