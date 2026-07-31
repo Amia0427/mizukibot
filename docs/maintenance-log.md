@@ -1,3 +1,10 @@
+## 运行维护 2026-08-01 00:25 +08:00
+
+- 根因：journal/date Recall Plan 已禁止远端 rerank，但 explain 测试仍要求 rerank 生效；显式 `source=journal` 又会优先进入 `explicit_source`，意外恢复远端 rerank。另有四项全量失败分别来自临时 Prompt 副本继承只读属性、测试未隔离受保护 admin 夹具、群回复字符上限由 220 调整到 8000 后输入未同步，以及 embedding 节点夹具缺少 `active/strict` 元数据。
+- 修复：显式 journal/continuity 来源继承 lexical-first、零 rerank 预算和 `allowRemoteRerank=false`；RAG explain 保留 rerank decision，并断言未发起远端请求。Prompt 测试只在可写临时副本中写入安全 admin 夹具，主回复诊断和 embedding 并发测试同步当前生产契约；Web 认证补齐有效会话、本地同源写请求、限流容量和安全 Cookie 分支。
+- 验收：四项 Memory V3 定向测试、四项既有失败复跑、`npm test`、`npm run coverage`、`npm run lint`、`npm run typecheck`、`npm run check:agent:static`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 均退出 0。覆盖率整体为行 71.61%、分支 61.94%、函数 80.42%；web 分支 80.59%，四个 scope 全部通过。
+- 边界：未修改或暂存 `prompts/admin.txt` 与 `AGENT.md`，未执行远端推送；版本化 harness eval 与统一工具授权协议进入下一阶段。
+
 ## 运行维护 2026-07-30 19:50 +08:00
 
 - 小目标：完成目标5第六个生产入口迁移，将 `message/handler` 的11个共享词法作用域 chunk 收敛为单一静态 CommonJS 运行时；生产入口不再加载或执行旧 chunk，旧文件保持未修改。

@@ -36,8 +36,10 @@ process.env.MEMORY_JOURNAL_LONG_TERM_DEDUPE_THRESHOLD = '0.9';
 process.env.MEMORY_JOURNAL_SEGMENT_DOCS_ENABLED = 'true';
 
 const httpClient = require('../api/httpClient');
+let rerankRequestCount = 0;
 httpClient.postWithRetry = async (_url, body) => {
   if (Array.isArray(body?.documents)) {
+    rerankRequestCount += 1;
     return {
       data: {
         results: body.documents.map((_doc, index) => ({
@@ -176,8 +178,12 @@ module.exports = buildMemoryV3RagExplainDiagnostic({
   assert.ok(report.stages.candidateSources.filtered.bySource.journal >= 1);
   assert.strictEqual(report.stages.journalSegmentHits.count, 1);
   assert.ok(report.stages.longTermProfileHits.count >= 1);
-  assert.strictEqual(report.stages.rerank.enabled, true);
-  assert.strictEqual(report.stages.rerank.applied, true);
+  assert.strictEqual(report.diagnostics.retrievalPlan.recallPlan.route, 'continuity/date');
+  assert.strictEqual(report.diagnostics.retrievalPlan.recallPlan.allowRemoteRerank, false);
+  assert.strictEqual(report.stages.rerank.enabled, false);
+  assert.strictEqual(report.stages.rerank.applied, false);
+  assert.strictEqual(report.stages.rerank.decision.reason, 'plan_disallowed');
+  assert.strictEqual(rerankRequestCount, 0);
   assert.ok(report.stages.rerank.beforeTop.length > 0);
   assert.ok(report.stages.rerank.afterTop.length > 0);
   assert.strictEqual(report.stages.journalVsLongTermDedup.enabled, true);

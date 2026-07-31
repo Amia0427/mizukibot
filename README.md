@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-08-01 00:25 +08:00
+
+- Memory V3 journal/date 查询现在始终使用 lexical-first 并禁止远端 rerank，显式 `source=journal` 不再绕过策略；RAG explain 同步暴露 `decision.reason=plan_disallowed`，回归确认远端 rerank 请求数为 0。
+- 修复 Prompt 临时目录只读属性、8000 字群回复诊断和 embedding backfill 夹具契约；`prompts/admin.txt` 未修改，SHA-256 保持 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`。
+- `npm test`、`npm run coverage`、lint、typecheck、Agent 静态检查、Prompt 清单和全仓 secrets 扫描均退出 0；覆盖率为行 71.61%、分支 61.94%、函数 80.42%，四个 scope 全部通过。
+
 ## 运行维护 2026-07-31 02:38 +08:00
 
 - 新增独立命令 `/小剧场 [--无记忆] <剧情素材>`，支持回复文字引用；输出固定四幕 HTML 渲染 PNG，并在普通路由和所有内部记忆写入前返回。

@@ -2,8 +2,11 @@ const assert = require('assert');
 
 const config = require('../config');
 const {
+  SESSION_COOKIE_NAME,
+  buildExpiredSessionCookie,
   createLoginRateLimiter,
   getClientIp,
+  getRequestOrigin,
   verifyWebToken
 } = require('../web/auth');
 const { __test } = require('../web/server');
@@ -32,10 +35,20 @@ async function withConfig(patch, fn) {
   assert.strictEqual(verifyWebToken('secret-token-x', 'secret-token'), false);
   assert.strictEqual(verifyWebToken('', 'secret-token'), false);
   assert.strictEqual(verifyWebToken('secret-token', ''), false);
+  assert.strictEqual(getRequestOrigin(makeReq()), '');
+  assert.strictEqual(__test.isStrictSameOrigin(makeReq({ headers: { origin: 'not a url' } })), false);
+  assert.match(buildExpiredSessionCookie(true), /; Secure$/);
+  assert.doesNotMatch(buildExpiredSessionCookie(false), /Secure/);
 
   await withConfig({ WEB_TOKEN: 'secret-token', WEB_BIND_HOST: '127.0.0.1' }, async () => {
     assert.strictEqual(__test.checkWebAuth(makeReq({ headers: { 'x-web-token': 'secret-token' } })), false);
     assert.strictEqual(__test.checkWebAuth(makeReq({ headers: { authorization: 'Bearer secret-token' } })), false);
+    const sessionId = 'A'.repeat(43);
+    assert.strictEqual(__test.checkWebAuth(makeReq({
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${sessionId}` }
+    }), {
+      sessionManager: { has: (candidate) => candidate === sessionId }
+    }), true);
   });
 
   assert.strictEqual(getClientIp(makeReq({
@@ -61,6 +74,18 @@ async function withConfig(patch, fn) {
 
   await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '127.0.0.1', WEB_LOCAL_ONLY_WITHOUT_TOKEN: true }, async () => {
     assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), true);
+    assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'HEAD', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), true);
+    assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'OPTIONS', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), true);
+    assert.strictEqual(__test.checkWebAuth(makeReq({
+      method: 'POST',
+      remoteAddress: '127.0.0.1',
+      headers: { origin: 'http://127.0.0.1:3005' }
+    }), { host: '127.0.0.1' }), true);
+    assert.strictEqual(__test.checkWebAuth(makeReq({
+      method: 'POST',
+      remoteAddress: '127.0.0.1',
+      headers: { origin: 'not a url' }
+    }), { host: '127.0.0.1' }), false);
     assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '203.0.113.10' }), { host: '127.0.0.1', port: 3005 }), false);
     assert.strictEqual(__test.checkWebAuth(makeReq({
       method: 'GET',
@@ -98,6 +123,15 @@ async function withConfig(patch, fn) {
   assert.deepStrictEqual(limiter.check('client-a'), { allowed: false, retryAfterSeconds: 1 });
   now += 1001;
   assert.deepStrictEqual(limiter.check('client-a'), { allowed: true, retryAfterSeconds: 0 });
+
+  const capacityLimiter = createLoginRateLimiter({ maxAttempts: 2, maxClients: 2, now: () => now });
+  capacityLimiter.recordFailure('oldest');
+  capacityLimiter.recordFailure('oldest');
+  capacityLimiter.recordFailure('second');
+  assert.strictEqual(capacityLimiter.check('oldest').allowed, false);
+  capacityLimiter.recordFailure('third');
+  assert.strictEqual(capacityLimiter.size(), 2);
+  assert.strictEqual(capacityLimiter.check('oldest').allowed, true);
 
   await withConfig({ MODEL_ENDPOINT_ALLOW_LOCAL_HTTP: false }, async () => {
     const safe = await __test.getSettingsEndpointError({

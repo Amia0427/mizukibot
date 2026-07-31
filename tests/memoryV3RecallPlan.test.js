@@ -9,6 +9,22 @@ assert.deepStrictEqual(continuity.allowedSources, ['recent', 'journal', 'task'])
 assert.strictEqual(continuity.lexicalFirst, true);
 assert.strictEqual(continuity.allowRemoteRerank, false);
 
+const explicitJournal = buildRecallPlan({
+  userId: 'u1',
+  query: '咖啡订单',
+  source: 'journal'
+});
+assert.strictEqual(explicitJournal.route, 'source/journal');
+assert.strictEqual(explicitJournal.facet, 'default');
+assert.deepStrictEqual(explicitJournal.allowedSources, ['journal']);
+assert.strictEqual(explicitJournal.candidateBudget.rerank, 0);
+assert.strictEqual(explicitJournal.lexicalFirst, true);
+assert.strictEqual(explicitJournal.allowRemoteRerank, false);
+assert.deepStrictEqual(
+  shouldRunRecallRerank([{ score: 0.5, lexical: 0.05 }, { score: 0.49, lexical: 0.04 }], explicitJournal),
+  { enabled: false, reason: 'plan_disallowed' }
+);
+
 const task = buildRecallPlan({ userId: 'u1', query: '继续上次任务', facet: 'task' });
 assert.deepStrictEqual(task.allowedSources, ['task', 'recent']);
 

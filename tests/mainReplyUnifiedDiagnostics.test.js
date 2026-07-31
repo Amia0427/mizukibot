@@ -45,7 +45,7 @@ module.exports = (async () => {
       groupId: 'g_diag',
       chatType: 'group',
       plannerMode: 'rule',
-      candidateReply: '最先要记的：役是什么。然后理解立直。还有一个坑是振听。推荐的入门路子是先打低段位再复盘。'.repeat(8)
+      candidateReply: '最先要记的：役是什么。然后理解立直。还有一个坑是振听。推荐的入门路子是先打低段位再复盘。'.repeat(200)
     }, {
       plannerMode: 'rule'
     });

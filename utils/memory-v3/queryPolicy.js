@@ -126,6 +126,11 @@ function buildRecallPlan(input = {}) {
     base.allowedSources = requestedSource === 'personal' ? ['personal', 'profile'] : [requestedSource];
     base.route = `source/${requestedSource}`;
     base.reason = 'explicit_source';
+    if (requestedSource === 'journal' || facet === 'continuity' || facet === 'journal') {
+      base.candidateBudget = { local: 72, vector: 40, bm25: 56, rerank: 0 };
+      base.allowRemoteRerank = false;
+      base.lexicalFirst = true;
+    }
   } else if (facet === 'continuity' || facet === 'journal') {
     base.route = 'continuity/date';
     base.reason = 'date_or_continuity';

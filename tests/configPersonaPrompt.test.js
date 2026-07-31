@@ -32,6 +32,11 @@ function estimatePromptTokens(value) {
   try {
     const rootSystemPromptPath = path.join(tempPrompts.promptsDir, 'SYSTEM.txt');
     fs.writeFileSync(rootSystemPromptPath, '主回复根系统提示词测试块：最高优先级。', 'utf8');
+    fs.writeFileSync(
+      path.join(tempPrompts.promptsDir, 'admin.txt'),
+      '管理员测试提示词：只输出角色当下会打出的消息，避免第三人称叙述。',
+      'utf8'
+    );
     process.env.PROMPTS_DIR = tempPrompts.promptsDir;
     useConfigDefault('CONTEXT_WINDOW_MAX_TOKENS');
     useConfigDefault('SHORT_TERM_MEMORY_MAX_TOKENS');
