@@ -1,6 +1,6 @@
 # 测试与质量门禁
 
-更新：2026-08-01 +08:00
+更新：2026-08-01 03:50 +08:00
 
 本项目没有统一测试框架包装所有用例。`tests/*.test.js` 大多是直接使用 Node `assert` 的可执行 CommonJS 脚本，仓库用 `scripts/run-tests.js` 负责发现、隔离、并发、超时和结果汇总。
 
@@ -117,10 +117,11 @@ node scripts/run-tests.js tests/refactorSrcFacades.test.js tests/hotpathRequireG
 ```bash
 node scripts/run-tests.js tests/toolContractsValidation.test.js tests/toolExecutionValidation.test.js
 node scripts/run-tests.js tests/toolPolicyCoverage.test.js tests/toolPolicyRuntimeEffects.test.js tests/capabilityPolicyParity.test.js tests/toolUnknownCapabilityGate.test.js
+node scripts/run-tests.js tests/toolAuthorizationStore.test.js tests/toolAuthorizationExecution.test.js tests/toolAuthorizationRuntimeV2.test.js tests/toolAuthorizationLegacy.test.js tests/messageToolAuthorization.test.js tests/messageToolAuthorizationIngress.test.js
 node scripts/run-tests.js tests/httpClientSecurity.test.js tests/networkSafetyHttpIntegration.test.js
 ```
 
-工具测试同时检查 schema/executor/policy manifest 全覆盖、参数化 action 的副作用、并行与缓存行为、未知能力默认阻断、参数拒绝、权限过滤和失败文本。动态 MCP 测试必须使用受控 registry 精确注册，不能用 `mcp_*` 名称前缀伪造已注册能力；HTTP 测试应使用本地受控 server 或 fake request，覆盖重定向和 SSRF 边界。
+工具测试同时检查 schema/executor/policy manifest 全覆盖、参数化 action 的副作用、并行与缓存行为、未知能力默认阻断、参数拒绝、权限过滤和失败文本。授权专项还必须覆盖一次性领取、过期/取消/重复确认、身份与群聊绑定、管理员撤权、参数/上下文哈希、policy/schema/动态注册变化、进程中断恢复及 `uncertain` 不重试。动态 MCP 测试必须使用受控 registry 精确注册，不能用 `mcp_*` 名称前缀伪造已注册能力；HTTP 测试应使用本地受控 server 或 fake request，覆盖重定向和 SSRF 边界。
 
 ### 3.5 记忆、Prompt 与 Web
 
@@ -289,3 +290,11 @@ npm audit --omit=dev
 ```
 
 不要写“应该通过”“未发现明显问题”或只贴退出码。说明命令覆盖的行为，以及没有验证的部分。
+
+### 2026-08-01 工具确认与防重放
+
+- 实现提交：`fa84dfd`。
+- 聚焦验收：授权 store/service、Runtime V2 direct/scheduler、legacy、消息确认/取消 6 项测试全部通过；另行通过模块边界与相邻 repair/cache/unknown-capability 回归。
+- 仓库门禁：最终 `npm test` 169.4 秒、`npm run coverage` 192.0 秒，lint、typecheck、Agent 静态检查、Prompt、全仓/暂存区 secrets 与 diff check 均退出 0。
+- 覆盖率：overall `71.49/80.23/62.01`、web `79.84/87.50/80.59`、Runtime V2 `77.61/74.77/63.62`、stable boundaries `85.89/82.24/72.04`（行/函数/分支），四个 scope 无失败。
+- 数据与保护项：验收后 `data/tool_authorizations.sqlite` 为 0 张票据、0 条审计记录；`prompts/admin.txt` 与 `AGENT.md` SHA-256 分别保持 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`、`B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`。

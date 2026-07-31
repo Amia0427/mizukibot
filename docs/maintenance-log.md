@@ -1,3 +1,11 @@
+## 运行维护 2026-08-01 03:50 +08:00
+
+- 根因：能力 manifest 已能判定副作用，但 Runtime V2 direct、scheduler 与 legacy 仍各自调用 executor；`explicit/admin_explicit` 没有跨消息确认、一次性领取和崩溃后禁止重放协议，`retryable=false` 也未完整贯穿验证/repair。
+- 实现：提交 `fa84dfd` 新增 SQLite 授权账本与共享 `executeAuthorizedToolCall`。票据绑定用户和 private/group/群号，确认时复验参数/上下文哈希、schema、完整 policy、管理员身份与动态 MCP 精确注册；`pending/executing/completed/uncertain/cancelled/expired` 使用条件事务转换，终态清除原始参数和上下文。`/tool-confirm`、`/tool-cancel` 在消息聚合和模型路由前执行，授权事件进入 Runtime V2 与消息 trace。
+- 防重放：Runtime V2 direct/scheduler 和 legacy 共用授权边界；确认等待、身份拒绝、过期、已消费及 uncertain 均为 `retryable=false`，不进入 repair、缓存、并行重放或 inflight 重放。executor 开始后的异常、进程中断、完成状态落盘失败统一记为 `uncertain`。
+- 验收：6 项授权聚焦测试及模块边界/repair/cache/unknown-capability 相邻回归通过；最终 `npm test` 169.4 秒、`npm run coverage` 192.0 秒，lint、typecheck、Agent 静态、Prompt、全仓/暂存区 secrets 和 diff check 均退出 0。覆盖率四个 scope 为 overall `71.49/80.23/62.01`、web `79.84/87.50/80.59`、Runtime V2 `77.61/74.77/63.62`、stable boundaries `85.89/82.24/72.04`（行/函数/分支）。
+- 边界：验收后授权库为 0 张票据、0 条审计记录；未修改或暂存 `prompts/admin.txt` 与 `AGENT.md`，两者保护哈希未变化，未推送远端。工具确认与防重放小目标已完成，文档独立提交。
+
 ## 运行维护 2026-08-01 02:28 +08:00
 
 - 根因：工具 schema、executor 与策略分散维护，旧 `getPolicy` 对未知名称 fail open；Runtime V2 的 scheduler、direct tool loop、dispatch checkpoint 和 cache 对混合读写工具只按名称判断，allowlist 或伪造 MCP descriptor 可能绕过注册边界。

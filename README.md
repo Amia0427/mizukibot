@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 运行维护 2026-08-01 03:50 +08:00
+
+- 工具副作用统一经过 SQLite 一次性授权账本；Runtime V2 direct、scheduler 与 legacy 共用 `executeAuthorizedToolCall`，`explicit/admin_explicit` 只创建绑定用户和聊天上下文的确认票据，不在原请求内执行。
+- `/tool-confirm <ID>` 与 `/tool-cancel <ID>` 在模型路由前处理；确认时重新校验参数/上下文哈希、schema、完整 policy、管理员身份与动态 MCP 精确注册。票据按 `pending -> executing -> completed|uncertain` 消费，进程中断或完成落盘失败均禁止自动重放。
+- 验收：`npm test` 169.4 秒、`npm run coverage` 192.0 秒及 lint、typecheck、Agent 静态检查、Prompt 清单、全仓/暂存区 secrets、diff check 均退出 0；四个覆盖率 scope 全部通过，授权账本验收后为 0 张票据、0 条审计记录。
+- 提交后记录：实现提交 `fa84dfd` 已完成；工具确认与防重放小目标已完成，`prompts/admin.txt` 与 `AGENT.md` 哈希未变化，当前分支未推送。
+
 ## 运行维护 2026-08-01 02:28 +08:00
 
 - 新增 `tool_policy_manifest_v1`，统一覆盖 124 个 schema、125 个 executor 与 125 项 policy；混合读写工具按 action 解析副作用，未知工具、internal executor、未知 action 和伪造 MCP 在 Runtime V2 默认阻断。

@@ -200,13 +200,18 @@ prepare -> enhance_live_state -> route
 2. capability preflight 验证可用性。
 3. [`../../utils/toolPolicy/manifest.js`](../../utils/toolPolicy/manifest.js) 按工具名和规范化 action 解析版本化 policy。
 4. 两个 Runtime V2 执行入口验证公开静态注册或真实动态 MCP 注册，未知工具、internal executor 和未知 action 默认阻断。
-5. scheduler 按同一 policy 决定 batch、只读缓存、是否可并行以及 side-effect 顺序。
-6. dispatch 在副作用前后持久化 checkpoint，direct tool loop 不并发或合并副作用调用。
-7. 每一步返回标准 execution envelope，进入验证、修复与最终证据包。
+5. Runtime V2 direct、scheduler 和 legacy 最终都通过 [`../../api/toolAuthorization.js`](../../api/toolAuthorization.js) 调用 executor。
+6. scheduler 按同一 policy 决定 batch、只读缓存、是否可并行以及 side-effect 顺序。
+7. dispatch 在副作用前后持久化 checkpoint，direct tool loop 不并发或合并副作用调用。
+8. 每一步返回标准 execution envelope，进入验证、修复与最终证据包。
 
 policy 至少声明 `risk/capability/effect/confirmation/scope/idempotency/replay/exposure`。混合读写工具必须按 action 解析；未携带 action 时使用保守写入策略。动态 MCP 只以 `api/toolRegistry.js` 的精确注册名称为准，`mcp_*` 前缀或 descriptor metadata 不能作为注册证明。
 
 需要增加工具时，必须同时补 schema、executor、manifest policy 和测试，并运行 `npm run check:agent:static`。不要在 `direct_reply` 中写工具名特判，也不要让写入/删除/外发能力进入只读缓存或并行批次。
+
+`confirmation=none` 直接执行；`explicit` 和 `admin_explicit` 只创建一次性票据，并返回确定性的 `/tool-confirm <ID>` 与 `/tool-cancel <ID>`。消息入口在连续消息聚合和模型路由前解析这两个命令，票据必须匹配原用户、private/group 类型和群号；`admin_explicit` 在确认时再次读取当前管理员配置。
+
+票据保存在 [`../../utils/toolAuthorizationStore.js`](../../utils/toolAuthorizationStore.js)，状态只允许 `pending -> executing -> completed|uncertain`、`pending -> cancelled|expired`。确认执行前重新校验参数和上下文哈希、schema、完整 policy、静态公开能力或动态 MCP 精确注册；领取票据使用 SQLite 条件更新。executor 开始后的异常、进程中断和完成状态落盘失败都进入 `uncertain`，execution envelope 固定 `retryable=false`，不能进入 repair plan。终态会清除原始参数与上下文，但保留摘要哈希和 `tool_authorization_decision` 审计事件。
 
 ### Checkpoint 与恢复
 
@@ -279,6 +284,7 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 | --- | --- | --- |
 | 新 OneBot notice | `core/messageIngress.js` | NapCat ingress 测试、是否需要业务 side effect |
 | 新消息级特殊命令 | `core/messageHandler.runtime.js` 中廉价早退区 | 权限、未命中回落、private/group 差异、memory skip 日志 |
+| 新工具确认命令 | `core/messageToolAuthorization.js` | 同用户/聊天绑定、管理员复验、过期与重复确认、模型路由前早退 |
 | 新高层路由 | 当前 intent router 与 message route flow | execution plan、policy key、prompt 与路由测试 |
 | 新 Agent 图分支 | `api/runtimeV2/topology.js` 与独立 node | state shape、checkpoint、条件路由、LangGraph 测试 |
 | 新工具能力 | capability registry/executor/policy | planner catalog、preflight、side-effect 并行规则、evidence envelope |
@@ -294,6 +300,8 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 - 流式已发送后又走标准发送，产生重复回复。
 - 在 graph state 放不可序列化对象，导致 checkpoint 恢复失败。
 - 在 `direct_reply` 内新增工具特判，绕开 capability policy 和 execution envelope。
+- 把 `confirmation_required` 或 `uncertain` 当作普通工具失败交给模型 repair，导致副作用重复执行。
+- 只在消息文本中展示确认命令，却没有持久化票据、原子领取和当前身份/policy 复验。
 - 把 post-reply 失败当成主回复失败，拖慢或重复用户可见回复。
 - 修改 chunk 或兼容 sentinel，却没有改变真实入口。
 - 用“进程没有报错”代替发送、持久化或 drain 的实际验收。
