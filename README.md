@@ -5,6 +5,7 @@
 - Memory V3 journal/date 查询现在始终使用 lexical-first 并禁止远端 rerank，显式 `source=journal` 不再绕过策略；RAG explain 同步暴露 `decision.reason=plan_disallowed`，回归确认远端 rerank 请求数为 0。
 - 修复 Prompt 临时目录只读属性、8000 字群回复诊断和 embedding backfill 夹具契约；`prompts/admin.txt` 未修改，SHA-256 保持 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`。
 - `npm test`、`npm run coverage`、lint、typecheck、Agent 静态检查、Prompt 清单和全仓 secrets 扫描均退出 0；覆盖率为行 71.61%、分支 61.94%、函数 80.42%，四个 scope 全部通过。
+- 提交后记录（2026-08-01 00:27 +08:00）：实现提交 `e6b6ddc` 已完成；测试契约与覆盖率恢复小目标已完成，当前分支未推送。
 
 ## 运行维护 2026-07-31 02:38 +08:00
 

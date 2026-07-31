@@ -4,6 +4,7 @@
 - 修复：显式 journal/continuity 来源继承 lexical-first、零 rerank 预算和 `allowRemoteRerank=false`；RAG explain 保留 rerank decision，并断言未发起远端请求。Prompt 测试只在可写临时副本中写入安全 admin 夹具，主回复诊断和 embedding 并发测试同步当前生产契约；Web 认证补齐有效会话、本地同源写请求、限流容量和安全 Cookie 分支。
 - 验收：四项 Memory V3 定向测试、四项既有失败复跑、`npm test`、`npm run coverage`、`npm run lint`、`npm run typecheck`、`npm run check:agent:static`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 均退出 0。覆盖率整体为行 71.61%、分支 61.94%、函数 80.42%；web 分支 80.59%，四个 scope 全部通过。
 - 边界：未修改或暂存 `prompts/admin.txt` 与 `AGENT.md`，未执行远端推送；版本化 harness eval 与统一工具授权协议进入下一阶段。
+- 提交后记录（2026-08-01 00:27 +08:00）：实现提交 `e6b6ddc` 已完成；测试契约与覆盖率恢复小目标已完成，验收结果已保留，当前分支未推送。
 
 ## 运行维护 2026-07-30 19:50 +08:00
 
