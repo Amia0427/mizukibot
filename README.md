@@ -6,6 +6,7 @@
 - Memory recall CLI 新增显式 `--cases`，无 `--cases`、`--auto-gold` 或 `--build-cases` 时 fail closed；post-reply eval 默认改用 `tests/fixtures/post-reply-learning-cases.jsonl`，并拒绝空集和未知 case。
 - 新增 `npm run eval:harness:ci`，在 CI coverage 前独立运行 routing stability、synthetic auto-gold recall 和 post-reply learning 评估，不读取本地 `artifacts/` 或真实用户数据。
 - 验收（2026-08-01 00:49 +08:00）：Harness 门禁、聚焦回归、lint、typecheck、全仓 secrets、workflow policy 和 `git diff --check` 均退出 0；完整 `npm test` 180.7 秒自然退出 0。
+- 提交后记录（2026-08-01 00:51 +08:00）：实现提交 `85f421b` 已完成；版本化 Harness eval 小目标已完成，当前分支未推送。
 
 ## 运行维护 2026-08-01 00:25 +08:00
 

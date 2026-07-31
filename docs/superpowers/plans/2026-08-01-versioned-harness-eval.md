@@ -99,6 +99,8 @@ Expected: all tracked tests pass.
 Run: `npm run lint && npm run typecheck && npm run check:secrets:all && git diff --check`
 Expected: all exit 0.
 
-- [ ] **Step 4: Commit implementation, then append its hash and completion record**
+- [x] **Step 4: Commit implementation, then append its hash and completion record**
 
 Commit implementation and this plan with `feat: version harness eval fixtures`; after that, update README and maintenance log with the implementation hash and create a separate documentation commit. Do not push.
+
+完成记录（2026-08-01 00:51 +08:00）：实现提交 `85f421b`，版本化 Harness eval、CI 门禁、文档与验收证据均已落地；未推送远端。

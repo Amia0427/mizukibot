@@ -5,6 +5,7 @@
 - CI：`npm run eval:harness:ci` 在 coverage 前运行 manifest 校验、30 条 routing stability、synthetic auto-gold 真实召回和 22 条 post-reply learning；auto-gold 要求 Recall@5/MRR@5 不低于 0.5，wrong-hit、scope leakage、lifecycle leakage 和 forbidden hit 均为 0。
 - 验收：`npm run eval:harness:ci`、四项聚焦回归、`npm run lint`、`npm run typecheck`、`npm run check:secrets:all`、workflow policy 与 `git diff --check` 均退出 0；完整 `npm test` 于 2026-08-01 00:49 +08:00 在 180.7 秒内自然退出 0，日志为 `C:\Users\Administrator\AppData\Local\Temp\waifu-harness-eval-full-test-20260801.log`。
 - 边界：本轮不提交本地 `artifacts/`、真实用户数据或未跟踪 `AGENT.md`，不执行远端推送。
+- 提交后记录（2026-08-01 00:51 +08:00）：实现提交 `85f421b` 已完成；版本化 Harness eval 小目标已完成，字段级 suite schema 与更大规模召回语料留作后续增强，当前分支未推送。
 
 ## 运行维护 2026-08-01 00:25 +08:00
 
