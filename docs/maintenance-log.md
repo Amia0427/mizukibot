@@ -1,3 +1,11 @@
+## 运行维护 2026-08-01 00:40 +08:00
+
+- 根因：两个 eval CLI 仍默认依赖 gitignored `artifacts/`，干净检出无法复现；tracked fixture 没有统一版本、摘要和 synthetic-only 隐私契约，空集也可能被误判为通过。Memory routing stability 只验证召回意图分类，不能替代 Recall/MRR 与泄漏指标。
+- 实现：新增 `harness_eval_manifest_v1`，以规范化 LF JSONL SHA-256 固定 2 个 suite、52 条 synthetic case；校验器递归拒绝空集、重复 ID、目录越界、账号字段别名、邮箱、非保留域 URL 和非占位凭据。Memory CLI 只接受显式 `--cases/--auto-gold/--build-cases`，post-reply CLI 默认使用 tracked fixture 并拒绝未知 case。
+- CI：`npm run eval:harness:ci` 在 coverage 前运行 manifest 校验、30 条 routing stability、synthetic auto-gold 真实召回和 22 条 post-reply learning；auto-gold 要求 Recall@5/MRR@5 不低于 0.5，wrong-hit、scope leakage、lifecycle leakage 和 forbidden hit 均为 0。
+- 验收：`npm run eval:harness:ci`、四项聚焦回归、`npm run lint`、`npm run typecheck`、`npm run check:secrets:all`、workflow policy 与 `git diff --check` 均退出 0；完整 `npm test` 于 2026-08-01 00:49 +08:00 在 180.7 秒内自然退出 0，日志为 `C:\Users\Administrator\AppData\Local\Temp\waifu-harness-eval-full-test-20260801.log`。
+- 边界：本轮不提交本地 `artifacts/`、真实用户数据或未跟踪 `AGENT.md`，不执行远端推送。
+
 ## 运行维护 2026-08-01 00:25 +08:00
 
 - 根因：journal/date Recall Plan 已禁止远端 rerank，但 explain 测试仍要求 rerank 生效；显式 `source=journal` 又会优先进入 `explicit_source`，意外恢复远端 rerank。另有四项全量失败分别来自临时 Prompt 副本继承只读属性、测试未隔离受保护 admin 夹具、群回复字符上限由 220 调整到 8000 后输入未同步，以及 embedding 节点夹具缺少 `active/strict` 元数据。

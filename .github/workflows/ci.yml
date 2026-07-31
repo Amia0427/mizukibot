@@ -56,6 +56,9 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
+      - name: Run versioned harness eval
+        run: npm run eval:harness:ci
+
       - name: Run coverage gate
         shell: pwsh
         run: |

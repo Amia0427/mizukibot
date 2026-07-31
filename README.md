@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 运行维护 2026-08-01 00:40 +08:00
+
+- 新增 `harness_eval_manifest_v1` 版本化评估清单，固定 2 个 tracked synthetic suite、52 条 case、规范化 SHA-256 与递归隐私校验；空集、重复 ID、路径越界、真实账号、邮箱、非保留域 URL 和非占位凭据统一失败。
+- Memory recall CLI 新增显式 `--cases`，无 `--cases`、`--auto-gold` 或 `--build-cases` 时 fail closed；post-reply eval 默认改用 `tests/fixtures/post-reply-learning-cases.jsonl`，并拒绝空集和未知 case。
+- 新增 `npm run eval:harness:ci`，在 CI coverage 前独立运行 routing stability、synthetic auto-gold recall 和 post-reply learning 评估，不读取本地 `artifacts/` 或真实用户数据。
+- 验收（2026-08-01 00:49 +08:00）：Harness 门禁、聚焦回归、lint、typecheck、全仓 secrets、workflow policy 和 `git diff --check` 均退出 0；完整 `npm test` 180.7 秒自然退出 0。
+
 ## 运行维护 2026-08-01 00:25 +08:00
 
 - Memory V3 journal/date 查询现在始终使用 lexical-first 并禁止远端 rerank，显式 `source=journal` 不再绕过策略；RAG explain 同步暴露 `decision.reason=plan_disallowed`，回归确认远端 rerank 请求数为 0。

@@ -49,6 +49,9 @@ for (const command of [
 }
 
 const coverageStep = findStep(quality, (step) => step.name === 'Run coverage gate');
+const harnessEvalStep = findStep(quality, (step) => step.name === 'Run versioned harness eval');
+assert.strictEqual(harnessEvalStep.run, 'npm run eval:harness:ci');
+assert.ok(quality.steps.indexOf(harnessEvalStep) < quality.steps.indexOf(coverageStep));
 assert.strictEqual(coverageStep.shell, 'pwsh');
 assert.ok(coverageStep.run.split(/\r?\n/).includes('npm run coverage 2>&1 | Tee-Object -FilePath coverage-output.log'));
 assert.ok(coverageStep.run.split(/\r?\n/).includes('if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'));

@@ -32,6 +32,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     autoGold: false,
     baseline: '',
     candidate: '',
+    casesFile: '',
     mode: '',
     limit: 100,
     memoryCli: false
@@ -40,6 +41,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     const item = argv[index];
     if (item === '--build-cases') args.buildCases = true;
     else if (item === '--auto-gold') args.autoGold = true;
+    else if (item === '--cases') {
+      args.casesFile = normalizeText(argv[index + 1]);
+      index += 1;
+    }
     else if (item === '--mode') {
       args.mode = normalizeText(argv[index + 1]).toLowerCase();
       index += 1;
@@ -384,7 +389,33 @@ function buildCases(args = {}) {
   return cases;
 }
 
+function assertNonEmptyCases(cases, label = 'eval cases') {
+  if (!Array.isArray(cases) || cases.length === 0) throw new Error(`${label} is empty`);
+  return cases;
+}
+
+function readExplicitCases(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  if (!fs.existsSync(resolvedPath)) throw new Error(`explicit cases file not found: ${filePath}`);
+  const lines = fs.readFileSync(resolvedPath, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const cases = lines.map((line, index) => {
+    try {
+      return JSON.parse(line);
+    } catch (error) {
+      throw new Error(`invalid JSON in explicit cases file on line ${index + 1}: ${error.message}`);
+    }
+  });
+  return assertNonEmptyCases(cases, `explicit cases file ${filePath}`);
+}
+
 function loadCases(limit = 100, options = {}) {
+  const explicitCasesFile = normalizeText(options.casesFile);
+  if (explicitCasesFile) {
+    return readExplicitCases(explicitCasesFile).slice(0, Math.max(1, Number(limit || 100) || 100));
+  }
   if (options.autoGold === true) return buildAutoGoldCases(limit);
   if (!fs.existsSync(CASES_FILE)) return buildCases({ limit });
   const max = Math.max(1, Number(limit || 100) || 100);
@@ -396,6 +427,11 @@ function normalizeExpectedIds(testCase = {}) {
   const explicit = Array.isArray(testCase.expectedIds) ? testCase.expectedIds : [];
   const aliases = Array.isArray(testCase.expected_ids) ? testCase.expected_ids : [];
   return explicit.concat(aliases).map(normalizeText).filter(Boolean);
+}
+
+function assertExplicitCaseSource(args = {}) {
+  if (args.buildCases === true || args.autoGold === true || normalizeText(args.casesFile)) return;
+  throw new Error('choose an explicit case source with --cases, --auto-gold, or --build-cases');
 }
 
 function normalizeForbiddenIds(testCase = {}) {
@@ -854,20 +890,22 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
 
 async function main() {
   const args = parseArgs();
-  ensureDir(OUT_DIR);
+  assertExplicitCaseSource(args);
   if (args.buildCases) {
-    const cases = buildCases(args);
+    const cases = assertNonEmptyCases(buildCases(args), 'built cases');
     console.log(JSON.stringify({ ok: true, cases: cases.length, file: CASES_FILE }, null, 2));
     return;
   }
 
   const mode = args.mode || args.candidate || args.baseline || 'local_jsonl';
-  const cases = loadCases(args.limit, {
-    autoGold: args.autoGold
-  });
+  const cases = assertNonEmptyCases(loadCases(args.limit, {
+    autoGold: args.autoGold,
+    casesFile: args.casesFile
+  }), 'memory recall eval cases');
   const result = await runMode(mode, cases, {
     memoryCli: args.memoryCli
   });
+  ensureDir(OUT_DIR);
   const outFile = path.join(OUT_DIR, `${mode}-${Date.now()}.json`);
   atomicWriteText(outFile, JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ ok: true, file: outFile, ...result, details: undefined }, null, 2));
@@ -883,6 +921,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertExplicitCaseSource,
+  assertNonEmptyCases,
   buildCases,
   buildAutoGoldCases,
   buildNegativeGoldCases,

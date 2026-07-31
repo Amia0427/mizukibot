@@ -2,6 +2,8 @@
 
 更新时间：2026-06-24 10:25 +08:00
 
+更新 2026-08-01 00:40 +08:00：建立版本化 Harness eval。`harness_eval_manifest_v1` 固定 memory routing stability 30 条与 post-reply learning 22 条 synthetic fixture，并校验数量、规范化摘要、唯一 ID、路径和递归隐私边界；CI 额外运行 synthetic auto-gold 真实召回，要求 Recall@5/MRR@5 不低于 0.5 且 wrong-hit、scope/lifecycle leakage、forbidden hit 为 0。Memory eval CLI 无显式 `--cases/--auto-gold/--build-cases` 时失败，不再静默依赖本地 `artifacts/`。
+
 更新 2026-08-01 00:25 +08:00：修正 journal/date rerank 契约。默认与显式 `source=journal` 查询都保留 lexical-first、零 rerank 预算并设置 `allowRemoteRerank=false`，RAG explain 输出保留 `decision.reason=plan_disallowed`，测试同时断言远端 rerank 请求数为 0。Memory V3 定向回归、全量测试与覆盖率门禁通过；当前覆盖率整体为行 71.61%、分支 61.94%、函数 80.42%。
 
 更新 2026-07-28 10:20 +08:00：Memory V3 RAG 检索优化落地。`embeddingPolicy.shouldVectorizeMemoryNode()` 统一阻断原始 turn、模型回复、污染文本、低置信度和 `suspect/superseded/archived` 节点，只保留确认事实、偏好/任务/关系/风格、图片视觉摘要和 journal rollup；LanceDB 行补齐 scope、生命周期、版本根、来源时间、置信度、textHash 和 modelVersion。`buildRecallPlan()` 将 continuity/date、profile/preference/relationship、task、group/style、default 分开路由，查询 embedding cache key 纳入 scope/来源/modelVersion，连续性查询 lexical-first，rerank 按候选歧义和高价值 facet 门控；评估新增 `forbiddenIds`、`allowEmpty`、p95 延迟比较。验收：`node tests\memoryV3RecallPlan.test.js`、`node tests\memoryV3Query.test.js`、`node tests\memoryV3EmbeddingIndex.test.js`、`node tests\memoryV3LanceDbRecall.test.js`、`node tests\lancedbMemoryStore.test.js`、`node tests\memoryRecallAndLanceDbGates.test.js` 均通过，`npm run diag:memory -- diagnose --skip-probe --json` 通过。当前数据诊断仍有约 962 条孤立 LanceDB 行、10 条待同步和投影过期，`lancedb-gate --auto-gold --limit 20` 未通过，建议先执行受控 full reconcile；本轮未删除或重建数据。

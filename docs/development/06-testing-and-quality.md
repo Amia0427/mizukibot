@@ -190,7 +190,26 @@ npm run coverage:check
 
 不要通过排除新文件、下调基线或只测 getter 来“修复”覆盖率。新增公共分支应由行为断言覆盖。
 
-### 4.4 冒烟入口
+### 4.4 版本化 Harness 评估
+
+```bash
+npm run eval:harness:ci
+```
+
+`tests/fixtures/harness-eval-manifest.json` 固定 suite schema、case 数量和规范化 SHA-256。`scripts/check-harness-eval-fixtures.js` 会拒绝空集、重复 ID、越界路径和非 synthetic 数据；真实对话导出仍只能留在被忽略的 `artifacts/`，不能混入 CI fixture。
+
+该命令依次验证 memory routing stability、synthetic auto-gold 真实召回指标和 post-reply learning。routing suite 只证明是否应召回及 facet 分类，Recall/MRR、wrong-hit、scope/lifecycle leakage 由 auto-gold suite 单独证明，二者不能互相替代。
+
+Memory recall CLI 必须显式选择输入：
+
+```bash
+node scripts/eval-memory-recall.js --auto-gold --limit 20
+node scripts/eval-memory-recall.js --cases tests/fixtures/<compatible-recall-cases>.jsonl
+```
+
+无 `--cases`、`--auto-gold` 或 `--build-cases` 会直接失败，避免静默读取本地 `artifacts/`。Post-reply eval 默认使用 tracked fixture，也可通过 `--cases <path>` 显式覆盖。
+
+### 4.5 冒烟入口
 
 ```bash
 npm run smoke:napcat-ingress
@@ -215,7 +234,8 @@ npm run smoke:pre-release
 5. `npm run check:prompts`
 6. `npm run check:secrets:all`
 7. `npm audit --omit=dev`
-8. `npm run coverage`
+8. `npm run eval:harness:ci`
+9. `npm run coverage`
 
 Linux policy job另外检查 Node 版本、shell 脚本语法和仓库策略测试。`.github/workflows/supply-chain.yml` 还执行 Git 历史 Gitleaks、生产许可证策略、CycloneDX SBOM 和 OSV 依赖漏洞扫描。
 

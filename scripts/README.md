@@ -6,6 +6,7 @@
 - `pre-release-smoke.js`：发布前最小冒烟入口；更新 2026-06-17 20:04 +08:00，支持 `npm run smoke:pre-release -- --root D:\mizuki_release`，串联 expected-shutdown 未确认重启保护、主模型 fallback 重启恢复、普通群纯文本短 debounce 与群/入站并发回归
 - `check-agent.js`：LangGraph / agent 自检
 - `check-prompts.js`：prompt 资源检查
+- `check-harness-eval-fixtures.js`：校验版本化 synthetic Harness fixture 的 manifest、case 数量、规范化摘要、唯一 ID、路径与递归隐私边界；`npm run eval:harness:ci` 会在运行三组评估前先执行该检查
 - `console.js`：本地控制台入口；更新 2026-06-25 23:19 +08:00，新增 `rag` / `memory-rag-explain` 子命令，复用 `diagnose-memory-rag-explain.js`，可用 `npm run console -- rag <userId> "<query>"` 快速按真实用户和问题跑 Memory RAG explain。
 - `lint.js`：轻量检查入口
 

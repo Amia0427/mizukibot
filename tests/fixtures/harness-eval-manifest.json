@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "harness_eval_manifest_v1",
+  "version": "1.0.0",
+  "dataPolicy": "synthetic_only",
+  "suites": [
+    {
+      "id": "memory-recall-routing-stability",
+      "caseSchemaVersion": "memory_recall_stability_v1",
+      "runner": "tests/memoryRecallStabilityCases.test.js",
+      "cases": "memory-recall-stability-cases.jsonl",
+      "caseCount": 30,
+      "canonicalSha256": "f6562db1164d654798b7c0109f9edae0dd05db4c48b169dc634eded2bb494051"
+    },
+    {
+      "id": "post-reply-learning",
+      "caseSchemaVersion": "post_reply_learning_v1",
+      "runner": "tests/postReplyLearningEval.test.js",
+      "cases": "post-reply-learning-cases.jsonl",
+      "caseCount": 22,
+      "canonicalSha256": "c0670cd804e324120ea046d0a443e8b9baed3ce7d4c155ba6225e9af26a2f1c7"
+    }
+  ]
+}
