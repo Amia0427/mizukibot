@@ -41,11 +41,11 @@ function createDispatchNode(deps = {}) {
   const createMemoryCliTurnState = typeof deps.createMemoryCliTurnState === 'function'
     ? deps.createMemoryCliTurnState
     : ((value) => value || null);
-  const persistCheckpoint = typeof deps.persistCheckpoint === 'function'
-    ? deps.persistCheckpoint
-    : () => {};
   const appendRuntimeEvents = typeof deps.appendRuntimeEvents === 'function'
     ? deps.appendRuntimeEvents
+    : () => {};
+  const saveTransition = typeof deps.saveTransition === 'function'
+    ? deps.saveTransition
     : () => {};
   const updatePlanStepsWithEnvelope = typeof deps.updatePlanStepsWithEnvelope === 'function'
     ? deps.updatePlanStepsWithEnvelope
@@ -384,8 +384,8 @@ function createDispatchNode(deps = {}) {
       runtimeBinding: step.runtimeBinding
     });
 
-    const persistDispatchCheckpoint = (pendingInterrupt) => {
-      persistCheckpoint({
+    const persistDispatchTransition = (pendingInterrupt, events) => {
+      saveTransition({
         ...buildDispatchState(),
         execution: {
           ...state.execution,
@@ -394,7 +394,7 @@ function createDispatchNode(deps = {}) {
           currentNode: 'dispatch',
           pendingInterrupt: Boolean(pendingInterrupt)
         }
-      }, 'dispatch', 'running');
+      }, 'dispatch', 'running', events);
     };
 
     const checkpointBeforeSideEffect = (step) => {
@@ -404,8 +404,7 @@ function createDispatchNode(deps = {}) {
         step_id: step.id,
         tool_name: step.tool
       })];
-      appendRuntimeEvents(state, preEvents);
-      persistDispatchCheckpoint(true);
+      persistDispatchTransition(true, preEvents);
     };
 
     const checkpointAfterSideEffect = (envelope) => {
@@ -416,8 +415,7 @@ function createDispatchNode(deps = {}) {
         tool_name: envelope.tool_name,
         status: envelope.status
       })];
-      appendRuntimeEvents(state, postEvents);
-      persistDispatchCheckpoint(false);
+      persistDispatchTransition(false, postEvents);
     };
 
     const normalizeDispatchEnvelope = (envelope = {}) => {
@@ -533,8 +531,7 @@ function createDispatchNode(deps = {}) {
             step_id: step.id,
             tool_name: step.tool
           }));
-          appendRuntimeEvents(state, preEvents);
-          persistDispatchCheckpoint(true);
+          persistDispatchTransition(true, preEvents);
         }
         const batchResults = await executeBatch(runnableBatchItems, buildDispatchState(), {
           ...dispatchRuntimeOptions,
@@ -557,8 +554,15 @@ function createDispatchNode(deps = {}) {
         }
         const runnableBatchItems = resolvedBatchItems.filter((step) => !isRuntimeBindingUnresolved(step));
         if (runnableBatchItems.length === 0) continue;
-        for (const step of runnableBatchItems.filter((item) => isSideEffectPolicy(getPolicy(item.tool, item.inputs || {})))) {
-          checkpointBeforeSideEffect(step);
+        const sideEffectSteps = runnableBatchItems.filter((item) => isSideEffectPolicy(getPolicy(item.tool, item.inputs || {})));
+        if (sideEffectSteps.length > 0) {
+          const preEvents = sideEffectSteps.map((step) => createEvent('checkpoint', {
+            node: 'dispatch',
+            stage: 'before_side_effect',
+            step_id: step.id,
+            tool_name: step.tool
+          }));
+          persistDispatchTransition(true, preEvents);
         }
         const batchResults = await executeBatch(runnableBatchItems, buildDispatchState(), {
           ...dispatchRuntimeOptions,

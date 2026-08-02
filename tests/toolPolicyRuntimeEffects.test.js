@@ -221,17 +221,21 @@ module.exports = (async () => {
   ]);
   assert.strictEqual(concurrentWriteCalls, 2, 'write actions must not share inflight work');
 
-  async function runDispatch(inputs) {
+  async function runDispatch(inputs, options = {}) {
     const checkpointEvents = [];
     const persisted = [];
-    const step = createStep('dispatch_step', 'skill_stock_watchlist', inputs);
+    const transitions = [];
+    const stepCount = Math.max(1, Number(options.stepCount) || 1);
+    const steps = Array.from({ length: stepCount }, (_, index) => (
+      createStep(`dispatch_step_${index + 1}`, 'skill_stock_watchlist', inputs)
+    ));
     const dispatchNode = createDispatchNode({
       createEvent: (type, payload = {}) => ({ type, ...payload }),
       stableHash: (value) => JSON.stringify(value || {}),
       isCompletedSideEffectStep: () => false,
       findEvidenceEnvelope: () => null,
       isDirectChatRequest: () => false,
-      buildExecutionBatches: (steps) => [{ mode: 'serial', items: steps }],
+      buildExecutionBatches: (items) => [{ mode: options.batchMode || 'serial', items }],
       buildLiveMainConversationSnapshot: () => null,
       computeEffectiveAllowedTools: () => ['skill_stock_watchlist'],
       createMemoryCliTurnState: (value = {}) => value,
@@ -240,6 +244,14 @@ module.exports = (async () => {
       },
       appendRuntimeEvents(_state, events) {
         checkpointEvents.push(...events.filter((event) => event.type === 'checkpoint'));
+      },
+      saveTransition(state, node, status, events) {
+        transitions.push({
+          events,
+          node,
+          pendingInterrupt: Boolean(state.execution?.pendingInterrupt),
+          status
+        });
       },
       updatePlanStepsWithEnvelope(steps, envelope) {
         return steps.map((item) => item.id === envelope.step_id
@@ -274,24 +286,51 @@ module.exports = (async () => {
         allowedTools: ['skill_stock_watchlist'],
         allowTools: true
       },
-      plan: { steps: [step] },
+      plan: { steps },
       execution: { retryQueue: [], memoryCliTurn: {}, toolResults: [] },
       memory: { dirty: false },
       output: {}
     });
-    return { checkpointEvents, persisted };
+    return { checkpointEvents, persisted, transitions };
   }
 
   const readDispatch = await runDispatch({ action: 'list' });
   assert.deepStrictEqual(readDispatch.checkpointEvents, []);
   assert.deepStrictEqual(readDispatch.persisted, []);
+  assert.deepStrictEqual(readDispatch.transitions, []);
 
   const writeDispatch = await runDispatch({ action: 'add', ticker: 'AAA' });
   assert.deepStrictEqual(
-    writeDispatch.checkpointEvents.map((event) => event.stage),
+    writeDispatch.transitions.flatMap((transition) => transition.events.map((event) => event.stage)),
     ['before_side_effect', 'after_side_effect']
   );
-  assert.deepStrictEqual(writeDispatch.persisted, [true, false]);
+  assert.deepStrictEqual(
+    writeDispatch.transitions.map((transition) => transition.pendingInterrupt),
+    [true, false]
+  );
+  assert.ok(writeDispatch.transitions.every((transition) => transition.node === 'dispatch'));
+  assert.ok(writeDispatch.transitions.every((transition) => transition.status === 'running'));
+  assert.deepStrictEqual(writeDispatch.checkpointEvents, []);
+  assert.deepStrictEqual(writeDispatch.persisted, []);
+
+  const parallelWriteDispatch = await runDispatch(
+    { action: 'add', ticker: 'BBB' },
+    { batchMode: 'parallel', stepCount: 2 }
+  );
+  assert.strictEqual(parallelWriteDispatch.transitions.length, 3);
+  assert.deepStrictEqual(
+    parallelWriteDispatch.transitions[0].events.map((event) => event.stage),
+    ['before_side_effect', 'before_side_effect']
+  );
+  assert.strictEqual(parallelWriteDispatch.transitions[0].pendingInterrupt, true);
+  assert.deepStrictEqual(
+    parallelWriteDispatch.transitions.slice(1).map((transition) => transition.events[0].stage),
+    ['after_side_effect', 'after_side_effect']
+  );
+  assert.deepStrictEqual(
+    parallelWriteDispatch.transitions.slice(1).map((transition) => transition.pendingInterrupt),
+    [false, false]
+  );
 
   console.log('toolPolicyRuntimeEffects.test.js passed');
 })().catch((error) => {

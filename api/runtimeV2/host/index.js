@@ -140,6 +140,7 @@ const {
   learnSelfImprovement
 } = require('../../../utils/selfImprovementRuntime');
 const { createCheckpointStore } = require('../../../utils/langgraphV2Store');
+const { createRuntimePersistence } = require('./persistence');
 const { getPostReplyJobQueue } = require('../../../utils/postReplyJobQueue');
 const {
   createMemoryCliTurnState,
@@ -936,46 +937,18 @@ function createRuntime(options = {}) {
 
   // Tool-plan answers still converge to one final text. When the graph is
   // streaming, emit only that final text so callers never see draft + final.
-  function persistCheckpoint(state, nodeName, status = 'running') {
-    const threadId = String(state?.thread?.threadId || '').trim();
-    if (!threadId) return;
-    store.saveCheckpoint(threadId, {
-      status,
-      node: nodeName,
-      updatedAt: nowTs(),
-      state: snapshotState(state)
-    });
-  }
-
-  function appendRuntimeEvents(state, events = []) {
-    const normalized = normalizeArray(events).filter(Boolean);
-    if (normalized.length === 0) return;
-    const threadId = String(state?.thread?.threadId || '').trim();
-    const requestTrace = normalizeRequestTrace(state?.request?.requestTrace)
-      || normalizeRequestTrace(state?.request?.routeMeta?.requestTrace);
-    if (threadId) {
-      store.appendEvents(threadId, normalized);
-    }
-    if (requestTrace) {
-      for (const event of normalized) {
-        appendRequestTraceEvent(nextTracePhase(requestTrace, `runtime_v2_${String(event?.type || 'event').trim() || 'event'}`, {
-          tracePhase: `runtime_v2_${String(event?.type || 'event').trim() || 'event'}`,
-          stage: String(event?.type || 'runtime_v2_event').trim() || 'runtime_v2_event',
-          source: 'runtimeV2',
-          node: String(event?.node || state?.thread?.currentNode || '').trim(),
-          routePolicyKey: String(state?.request?.routePolicyKey || state?.request?.routeMeta?.routePolicyKey || '').trim(),
-          routeDebugKey: String(state?.request?.routeDebugKey || state?.request?.routeMeta?.routeDebugKey || '').trim(),
-          topRouteType: String(state?.request?.topRouteType || state?.request?.routeMeta?.topRouteType || '').trim(),
-          dispatchBranch: String(state?.request?.dispatchBranch || event?.dispatchBranch || '').trim(),
-          triggerBranch: String(event?.triggerBranch || '').trim(),
-          durationMs: Number.isFinite(Number(event?.durationMs)) ? Math.max(0, Math.floor(Number(event.durationMs))) : null,
-          finalErrorCode: String(event?.finalErrorCode || event?.errorCode || '').trim(),
-          error: String(event?.error || event?.rawErrorMessage || '').trim().slice(0, 400)
-        }));
-      }
-    }
-    emitEvents(normalized, state?.request || {});
-  }
+  const {
+    appendRuntimeEvents,
+    saveTransition
+  } = createRuntimePersistence({
+    appendRequestTraceEvent,
+    emitEvents,
+    nextTracePhase,
+    normalizeRequestTrace,
+    nowTs,
+    snapshotState,
+    store
+  });
 
   function withLatencyBreakdown(state, nodeName, meta = {}) {
     const nextState = {
@@ -998,8 +971,7 @@ function createRuntime(options = {}) {
     const nextState = withLatencyBreakdown(state, nodeName, {
       completedAt: nowTs()
     });
-    appendRuntimeEvents(nextState, events);
-    persistCheckpoint(nextState, nodeName, status);
+    saveTransition(nextState, nodeName, status, events);
     return nextState;
   }
 
@@ -1382,8 +1354,8 @@ function createRuntime(options = {}) {
     buildLiveMainConversationSnapshot,
     computeEffectiveAllowedTools,
     createMemoryCliTurnState,
-    persistCheckpoint,
     appendRuntimeEvents,
+    saveTransition,
     updatePlanStepsWithEnvelope,
     getPolicy,
     isSideEffectPolicy,
@@ -1547,6 +1519,7 @@ function getRuntime() {
 }
 
 function resetRuntime() {
+  if (runtimeSingleton) runtimeSingleton.store.close();
   runtimeSingleton = null;
   return getRuntime();
 }
