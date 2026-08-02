@@ -5,7 +5,9 @@ const {
   normalizeArxivGetArgs,
   normalizeArxivLatestArgs,
   normalizeArxivSearchArgs,
-  normalizeWeatherArgs
+  normalizeEarthquakeArgs,
+  normalizeWeatherArgs,
+  normalizeWeatherCloudArgs
 } = require('./skillArgs');
 const { createDynamicMcpArgNormalizer } = require('./dynamicMcp');
 const {
@@ -392,6 +394,14 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
   if (toolName === 'skill_weather') {
     return normalizeWeatherArgs(args);
+  }
+
+  if (toolName === 'skill_earthquake_latest') {
+    return normalizeEarthquakeArgs(args);
+  }
+
+  if (toolName === 'skill_weather_cloud') {
+    return normalizeWeatherCloudArgs(args);
   }
 
   if (toolName === 'skill_arxiv_search') {

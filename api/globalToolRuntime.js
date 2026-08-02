@@ -79,6 +79,15 @@ const GLOBAL_TOOL_REGISTRY = [
     readOnly: true
   },
   {
+    toolName: 'skill_earthquake_latest',
+    executorName: 'skill_earthquake_latest',
+    schemaName: 'skill_earthquake_latest',
+    maxCallsPerTurn: 1,
+    allowedInRoutes: ['chat', 'lookup', 'transform', 'plan', 'act', 'admin', 'direct_chat'],
+    resultFormatter: formatPlainEvidence,
+    readOnly: true
+  },
+  {
     toolName: 'skill_arxiv_search',
     executorName: 'skill_arxiv_search',
     schemaName: 'skill_arxiv_search',
@@ -256,6 +265,9 @@ function formatArgsSummary(toolName, args = {}) {
   }
   if (toolName === 'skill_weather') {
     return `location=${JSON.stringify(String(normalizedArgs.location || '').trim())}`;
+  }
+  if (toolName === 'skill_earthquake_latest') {
+    return `scope=${JSON.stringify(String(normalizedArgs.scope || 'global').trim())}, time_window=${JSON.stringify(String(normalizedArgs.time_window || 'day').trim())}, min_magnitude=${Number(normalizedArgs.min_magnitude ?? 4.5)}, limit=${Number(normalizedArgs.limit ?? 5)}`;
   }
   if (toolName === 'skill_arxiv_search') {
     return `query=${JSON.stringify(String(normalizedArgs.query || '').trim())}`;

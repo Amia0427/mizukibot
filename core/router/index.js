@@ -50,6 +50,10 @@ const {
   WEB_LOOKUP_ALLOWED_TOOLS,
   isExplicitWebSearchRequired
 } = require('../../utils/webSearchRequirement');
+const {
+  isEarthquakeDataQuery,
+  isWeatherCloudQuery
+} = require('../../utils/environmentDataQuery');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -958,8 +962,54 @@ function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null, 
   });
 }
 
+function matchEnvironmentDataLocalRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null }) {
+  if (imageUrl) return null;
+  const queryText = String(currentTurnText || cleanText || '').trim();
+  if (isWeatherCloudQuery(queryText)) {
+    return makeRoute({
+      confidence: 0.98,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: { risk: 'medium', toolNeed: ['image'], executionMode: 'staged', needsPlanning: false, needsMemory: false },
+      facets: { modality: 'text', sourceScope: 'live', domain: 'weather', outputKind: 'answer', freshness: 'latest' },
+      meta: {
+        reason: 'weather-cloud-query',
+        localRuleId: 'weather-cloud-query',
+        qqActionKey: 'qq_weather_cloud',
+        allowedTools: ['skill_weather_cloud'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'answer'
+      }
+    });
+  }
+  if (isEarthquakeDataQuery(queryText)) {
+    return makeRoute({
+      confidence: 0.97,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: { risk: 'low', toolNeed: ['web'], executionMode: 'staged', needsPlanning: false, needsMemory: false },
+      facets: { modality: 'text', sourceScope: 'live', domain: 'general', outputKind: 'answer', freshness: 'latest' },
+      meta: {
+        reason: 'earthquake-data-query',
+        localRuleId: 'earthquake-data-query',
+        allowedTools: ['skill_earthquake_latest'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'answer'
+      }
+    });
+  }
+  return null;
+}
+
 const LOCAL_ROUTE_RULE_GROUPS = Object.freeze([
   matchTerminalLocalRoute,
+  matchEnvironmentDataLocalRoute,
   matchActionLocalRoute,
   matchDirectLocalRoute
 ]);

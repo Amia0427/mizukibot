@@ -26,7 +26,8 @@ function resolveToolBucket(toolName = '') {
 
 function isWriteCapablePolicy(policy = {}) {
   const capability = String(policy?.capability || '').trim().toLowerCase();
-  return capability.includes('write');
+  const effect = String(policy?.effect || '').trim().toLowerCase();
+  return capability.includes('write') || (effect && effect !== 'none');
 }
 
 const TOOL_PLANNER_METADATA = Object.freeze({
@@ -92,6 +93,20 @@ const TOOL_PLANNER_METADATA = Object.freeze({
     preferWhen: ['weather requests', 'current conditions lookup'],
     avoidWhen: ['non-weather factual lookup'],
     preferredOver: ['getWeather', 'web_search']
+  },
+  skill_weather_cloud: {
+    plannerRole: 'weather_cloud_specialist',
+    overlapGroup: 'weather',
+    preferWhen: ['weather satellite image requests', 'infrared or water vapor cloud image requests'],
+    avoidWhen: ['current conditions or forecast requests'],
+    preferredOver: ['skill_weather', 'getWeather', 'web_search']
+  },
+  skill_earthquake_latest: {
+    plannerRole: 'earthquake_data_specialist',
+    overlapGroup: 'live_environment_data',
+    preferWhen: ['latest earthquake event queries', 'magnitude and time-window filters'],
+    avoidWhen: ['earthquake explanations or general science questions'],
+    preferredOver: ['web_search']
   },
   search_academic_paper: {
     plannerRole: 'generic_academic_search',

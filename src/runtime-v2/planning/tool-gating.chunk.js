@@ -24,6 +24,7 @@ const {
   isArxivRequest,
   isContextStatsRequest,
   isConversationalNoop,
+  isEarthquakeDataQuery,
   isExplicitUrlLookup,
   isFinanceAnalysisRequest,
   isFinanceDividendRequest,
@@ -34,6 +35,7 @@ const {
   isNotebookDocumentLookup,
   isNotebookListingRequest,
   isSubjectiveOpinionQuestion,
+  isWeatherCloudQuery,
   isWeatherRequest,
   normalizeArray,
   normalizeChatMode,
@@ -153,14 +155,18 @@ function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], optio
     return 'allow_safe_explicit_web_search';
   }
   if (allowed.includes('web_fetch') && routeHasReadableCardContext(route)) return 'allow_safe_card_fetch';
+  const cleanText = getPlannerRequestText(route);
+  if (isWeatherCloudQuery(cleanText) && allowed.length === 1 && allowed[0] === 'skill_weather_cloud') {
+    return 'allow_safe_explicit_weather_cloud';
+  }
   const unsafe = allowed.filter((toolName) => !isCompanionPlannerSafeReadTool(toolName));
   if (unsafe.length > 0) return `blocked_unsafe_tools:${unsafe.join(',')}`;
-  const cleanText = getPlannerRequestText(route);
   const domain = normalizeText(route?.facets?.domain);
   const sourceScope = normalizeText(route?.facets?.sourceScope);
   const responseIntent = normalizeResponseIntent(route?.meta?.responseIntent);
   if (domain === 'time' && allowed.includes('get_current_time')) return 'allow_safe_time';
   if (isContextStatsRequest(cleanText) && allowed.includes('get_context_stats')) return 'allow_safe_context_stats';
+  if (isEarthquakeDataQuery(cleanText) && allowed.includes('skill_earthquake_latest')) return 'allow_safe_earthquake';
   if (isWeatherRequest(cleanText, route) && allowed.some((toolName) => toolName === 'getWeather' || toolName === 'skill_weather')) return 'allow_safe_weather';
   if ((shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) && allowed.includes('memory_cli')) return 'allow_safe_memory_recall';
   if ((sourceScope === 'notebook' || responseIntent === 'summary') && allowed.some((toolName) => toolName === 'notebook_search' || toolName === 'notebook_list_docs' || toolName === 'memory_cli')) return 'allow_safe_notebook';
@@ -289,6 +295,14 @@ function resolveCanonicalPreferredTools(route = {}, available = {}) {
     return pickFirstAllowed('get_context_stats');
   }
 
+  if (isWeatherCloudQuery(cleanText)) {
+    return pickFirstAllowed('skill_weather_cloud');
+  }
+
+  if (isEarthquakeDataQuery(cleanText)) {
+    return pickFirstAllowed('skill_earthquake_latest');
+  }
+
   if (isWeatherRequest(cleanText, route)) {
     return pickFirstAllowed('skill_weather', 'getWeather');
   }
@@ -356,7 +370,9 @@ function choosePreferredToolSubset(route = {}, toolNames = [], toolCatalogByName
       || canonical.includes('notebook_list_docs')
       || canonical.includes('get_context_stats')
       || canonical.includes('get_current_time')
+      || canonical.includes('skill_earthquake_latest')
       || canonical.includes('skill_weather')
+      || canonical.includes('skill_weather_cloud')
     )
   ) {
     return canonical;

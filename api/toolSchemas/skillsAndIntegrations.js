@@ -385,6 +385,37 @@ const skillsAndIntegrationsToolSchemas = [
   {
     type: 'function',
     function: {
+      name: 'skill_earthquake_latest',
+      description: 'Query the latest USGS earthquake events with optional global or China scope filters',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          scope: { type: 'string', enum: ['global', 'china'], description: 'Geographic scope; defaults to global' },
+          time_window: { type: 'string', enum: ['hour', 'day', 'week', 'month'], description: 'Lookback window; defaults to day' },
+          min_magnitude: { type: 'number', minimum: 0, maximum: 10, description: 'Minimum magnitude; defaults to 4.5 globally or 2.5 in China' },
+          limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Maximum events; defaults to 5' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_weather_cloud',
+      description: 'Fetch and send the latest JMA Himawari full-disk weather satellite image to the current QQ chat',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          channel: { type: 'string', enum: ['infrared', 'visible', 'water_vapor'], description: 'Satellite channel; defaults to infrared' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'skill_weather',
       description: 'Query current weather for a location with wttr.in',
       parameters: {

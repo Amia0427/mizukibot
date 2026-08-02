@@ -9,6 +9,7 @@ const {
   isArxivRequest,
   isContextStatsRequest,
   isConversationalNoop,
+  isEarthquakeDataQuery,
   isFinanceAnalysisRequest,
   isFinanceDividendRequest,
   isFinancePortfolioRequest,
@@ -18,6 +19,7 @@ const {
   isNotebookDocumentLookup,
   isNotebookListingRequest,
   isSubjectiveOpinionQuestion,
+  isWeatherCloudQuery,
   isWeatherRequest,
   normalizeArray,
   normalizeResponseIntent,
@@ -32,6 +34,10 @@ const {
   buildToolCatalogByName,
   isWriteCapableTool
 } = require('./dynamic-plan.chunk');
+const {
+  deriveEarthquakeToolArgs,
+  deriveWeatherCloudToolArgs
+} = require('../../../utils/environmentDataQuery');
 
 function deriveToolArgs(toolName = '', route = {}) {
   const normalizedTool = normalizeText(toolName);
@@ -69,6 +75,12 @@ function deriveToolArgs(toolName = '', route = {}) {
   }
   if (normalizedTool === 'skill_weather') {
     return { location: requestText || cleanText };
+  }
+  if (normalizedTool === 'skill_weather_cloud') {
+    return deriveWeatherCloudToolArgs(requestText || cleanText);
+  }
+  if (normalizedTool === 'skill_earthquake_latest') {
+    return deriveEarthquakeToolArgs(requestText || cleanText);
   }
   if (normalizedTool === 'getWeather') {
     return { text: requestText || cleanText };
@@ -208,6 +220,8 @@ function pickMinimalToolAllowlist(route = {}, available = {}) {
     if (actionPreferred.length > 0) return [actionPreferred[0]];
   }
   if (normalizeText(route?.facets?.domain) === 'time' && allowed.includes('get_current_time')) return ['get_current_time'];
+  if (isWeatherCloudQuery(cleanText) && allowed.includes('skill_weather_cloud')) return ['skill_weather_cloud'];
+  if (isEarthquakeDataQuery(cleanText) && allowed.includes('skill_earthquake_latest')) return ['skill_earthquake_latest'];
   if (isWeatherRequest(cleanText, route)) {
     if (allowed.includes('skill_weather')) return ['skill_weather'];
     if (allowed.includes('getWeather')) return ['getWeather'];

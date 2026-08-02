@@ -50,7 +50,9 @@ const {
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
 const nativeArxiv = createLazyModuleProxy('nativeArxiv', () => require('../skills_native/arxiv'));
+const nativeEarthquake = createLazyModuleProxy('nativeEarthquake', () => require('../skills_native/earthquake'));
 const nativeWeather = createLazyModuleProxy('nativeWeather', () => require('../skills_native/weather'));
+const nativeWeatherCloud = createLazyModuleProxy('nativeWeatherCloud', () => require('../skills_native/weatherCloud'));
 const nativeSkillValidation = createLazyModuleProxy('nativeSkillValidation', () => require('../skills_native/skillValidation'));
 const nativeClawddocs = createLazyModuleProxy('nativeClawddocs', () => require('../skills_native/clawddocs'));
 const nativeSummarize = createLazyModuleProxy('nativeSummarize', () => require('../skills_native/summarize'));
@@ -671,8 +673,16 @@ const TOOL_EXECUTORS = {
     return nativeArxiv.latestArxiv(args);
   },
 
+  skill_earthquake_latest: async (args = {}) => {
+    return nativeEarthquake.queryLatestEarthquakes(args);
+  },
+
   skill_weather: async (args = {}) => {
     return nativeWeather.getWeatherSummary(args);
+  },
+
+  skill_weather_cloud: async (args = {}) => {
+    return nativeWeatherCloud.sendLatestWeatherCloud(args);
   },
 
   skill_youtube_transcript: async (args = {}) => {

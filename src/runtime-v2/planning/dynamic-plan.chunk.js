@@ -13,6 +13,7 @@ const {
   normalizeToolIntent,
   normalizeToolNames
 } = require('./runtime-core.chunk');
+const { getPolicy, hasPublicToolPolicy } = require('../../../utils/toolPolicy');
 
 function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   const personaModuleCatalog = normalizeArray(options.personaModuleCatalog);
@@ -181,7 +182,12 @@ function inferToolBucket(toolName = '') {
 
 function buildExplicitAllowedToolCatalog(toolNames = []) {
   return normalizeToolNames(toolNames).map((toolName) => {
-    const writeCapable = /schedule|publish|create|delete|cancel|append|write|update/i.test(toolName);
+    const policy = hasPublicToolPolicy(toolName) ? getPolicy(toolName) : null;
+    const capability = normalizeText(policy?.capability).toLowerCase();
+    const effect = normalizeText(policy?.effect).toLowerCase();
+    const writeCapable = policy
+      ? capability.includes('write') || (effect && effect !== 'none')
+      : /schedule|publish|create|delete|cancel|append|write|update/i.test(toolName);
     return {
       name: toolName,
       bucket: inferToolBucket(toolName),

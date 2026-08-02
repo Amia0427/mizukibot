@@ -78,6 +78,7 @@ assignPolicy(TOOL_POLICIES, [
   'skill_arxiv_search',
   'skill_arxiv_get',
   'skill_arxiv_latest',
+  'skill_earthquake_latest',
   'skill_weather',
   'skill_youtube_transcript',
   'skill_summarize',
@@ -93,6 +94,13 @@ assignPolicy(TOOL_POLICIES, [
   'skill_ppt_theme_list',
   'minecraft_status'
 ], createPolicy({ risk: 'medium', capability: 'network' }));
+
+TOOL_POLICIES.skill_weather_cloud = createPolicy({
+  risk: 'medium',
+  capability: 'network',
+  effect: 'external_send',
+  confirmation: 'none'
+});
 
 assignPolicy(TOOL_POLICIES, [
   'notebook_list_docs',

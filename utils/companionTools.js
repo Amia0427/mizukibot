@@ -8,7 +8,9 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'read_shared_link',
   'render_qq_visual',
   'getWeather',
+  'skill_earthquake_latest',
   'skill_weather',
+  'skill_weather_cloud',
   'notebook_search',
   'notebook_list_docs',
   'notebook_append_journal',
@@ -20,6 +22,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
 
 const COMPANION_PLANNER_SAFE_READ_TOOLS = Object.freeze([
   'getWeather',
+  'skill_earthquake_latest',
   'skill_weather',
   'get_current_time',
   'get_context_stats',

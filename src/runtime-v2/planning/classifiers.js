@@ -1,3 +1,8 @@
+const {
+  isEarthquakeDataQuery,
+  isWeatherCloudQuery
+} = require('../../../utils/environmentDataQuery');
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -182,6 +187,7 @@ module.exports = {
   isArxivLatestRequest,
   isArxivRequest,
   isContextStatsRequest,
+  isEarthquakeDataQuery,
   isExplicitUrlLookup,
   isFinanceAnalysisRequest,
   isFinanceDividendRequest,
@@ -192,6 +198,7 @@ module.exports = {
   isNotebookDocumentLookup,
   isNotebookListingRequest,
   isSubjectiveOpinionQuestion,
+  isWeatherCloudQuery,
   isWeatherRequest,
   prefersMemoryRecall,
   shouldKeepNotebookAnswerChatOnly
