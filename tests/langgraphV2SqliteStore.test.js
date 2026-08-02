@@ -85,6 +85,60 @@ module.exports = (() => {
       db.close();
     }
 
+    const transitionFile = path.join(tempRoot, 'transition.sqlite');
+    const transitionStore = createCheckpointStore({
+      storeFile: transitionFile,
+      checkpointDir,
+      eventDir
+    });
+    try {
+      transitionStore.saveTransition('thread-atomic', {
+        status: 'running',
+        node: 'dispatch',
+        updatedAt: 100,
+        state: { thread: { threadId: 'thread-atomic' }, version: 1 }
+      }, [
+        { type: 'checkpoint', sequence: -1, ts: 100 },
+        { type: 'node_end', sequence: 0, ts: 101 }
+      ]);
+      assert.strictEqual(transitionStore.loadCheckpoint('thread-atomic').state.version, 1);
+      assert.deepStrictEqual(
+        transitionStore.loadEvents('thread-atomic').map((event) => event.sequence),
+        [-1, 0]
+      );
+
+      const triggerDb = new Database(transitionFile);
+      try {
+        triggerDb.exec(`
+          CREATE TRIGGER reject_second_transition_event
+          BEFORE INSERT ON langgraph_v2_events
+          WHEN json_extract(NEW.event_json, '$.sequence') = 2
+          BEGIN
+            SELECT RAISE(ABORT, 'forced event failure');
+          END;
+        `);
+      } finally {
+        triggerDb.close();
+      }
+
+      assert.throws(() => transitionStore.saveTransition('thread-atomic', {
+        status: 'running',
+        node: 'draft_reply',
+        updatedAt: 200,
+        state: { thread: { threadId: 'thread-atomic' }, version: 2 }
+      }, [
+        { type: 'node_start', sequence: 1, ts: 200 },
+        { type: 'node_end', sequence: 2, ts: 201 }
+      ]), /forced event failure/);
+      assert.strictEqual(transitionStore.loadCheckpoint('thread-atomic').state.version, 1);
+      assert.deepStrictEqual(
+        transitionStore.loadEvents('thread-atomic').map((event) => event.sequence),
+        [-1, 0]
+      );
+    } finally {
+      transitionStore.close();
+    }
+
     console.log('langgraphV2SqliteStore.test.js passed');
     return true;
   } finally {

@@ -179,21 +179,45 @@ function createCheckpointStore(options = {}, dependencies = {}) {
     };
   }
 
-  function saveCheckpoint(threadId, payload = {}) {
-    const normalized = {
+  function normalizeCheckpoint(threadId, payload = {}) {
+    return {
       threadId: sanitizeThreadId(threadId),
       status: String(payload.status || 'running').trim() || 'running',
       node: String(payload.node || '').trim(),
       updatedAt: Number.isFinite(Number(payload.updatedAt)) ? Number(payload.updatedAt) : Date.now(),
       state: sanitizeForJson(compactStateForCheckpoint(payload.state || {}))
     };
-    database.saveCheckpoint({
-      threadId: normalized.threadId,
-      status: normalized.status,
-      node: normalized.node,
-      updatedAt: normalized.updatedAt,
-      stateJson: JSON.stringify(normalized.state)
-    });
+  }
+
+  function checkpointRow(checkpoint) {
+    return {
+      threadId: checkpoint.threadId,
+      status: checkpoint.status,
+      node: checkpoint.node,
+      updatedAt: checkpoint.updatedAt,
+      stateJson: JSON.stringify(checkpoint.state)
+    };
+  }
+
+  function normalizeEvents(threadId, events = []) {
+    const normalizedThreadId = sanitizeThreadId(threadId);
+    return (Array.isArray(events) ? events : [])
+      .map((item) => sanitizeForJson(item))
+      .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      .map((event) => ({
+        event,
+        row: {
+          threadId: normalizedThreadId,
+          timestamp: Number.isFinite(Number(event.ts)) ? Number(event.ts) : Date.now(),
+          eventType: String(event.type || '').trim(),
+          eventJson: JSON.stringify(event)
+        }
+      }));
+  }
+
+  function saveCheckpoint(threadId, payload = {}) {
+    const normalized = normalizeCheckpoint(threadId, payload);
+    database.saveCheckpoint(checkpointRow(normalized));
     return normalized;
   }
 
@@ -202,20 +226,23 @@ function createCheckpointStore(options = {}, dependencies = {}) {
   }
 
   function appendEvents(threadId, events = []) {
-    const nextEvents = Array.isArray(events)
-      ? events
-        .map((item) => sanitizeForJson(item))
-        .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
-      : [];
-    if (nextEvents.length === 0) return [];
-    const normalizedThreadId = sanitizeThreadId(threadId);
-    database.appendEvents(nextEvents.map((event) => ({
-      threadId: normalizedThreadId,
-      timestamp: Number.isFinite(Number(event.ts)) ? Number(event.ts) : Date.now(),
-      eventType: String(event.type || '').trim(),
-      eventJson: JSON.stringify(event)
-    })));
-    return nextEvents;
+    const normalized = normalizeEvents(threadId, events);
+    if (normalized.length === 0) return [];
+    database.appendEvents(normalized.map((item) => item.row));
+    return normalized.map((item) => item.event);
+  }
+
+  function saveTransition(threadId, checkpoint = {}, events = []) {
+    const normalizedCheckpoint = normalizeCheckpoint(threadId, checkpoint);
+    const normalizedEvents = normalizeEvents(threadId, events);
+    database.saveTransition(
+      checkpointRow(normalizedCheckpoint),
+      normalizedEvents.map((item) => item.row)
+    );
+    return {
+      checkpoint: normalizedCheckpoint,
+      events: normalizedEvents.map((item) => item.event)
+    };
   }
 
   function clear(threadId) {
@@ -235,6 +262,7 @@ function createCheckpointStore(options = {}, dependencies = {}) {
     loadEvents,
     appendEvents,
     saveCheckpoint,
+    saveTransition,
     storeFile
   };
   openStores.add(store);

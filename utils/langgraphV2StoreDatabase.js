@@ -133,6 +133,10 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
   const appendEvents = db.transaction((events) => {
     for (const event of events) statements.insertEvent.run(event);
   });
+  const saveTransition = db.transaction((checkpoint, events) => {
+    statements.upsertCheckpoint.run(checkpoint);
+    for (const event of events) statements.insertEvent.run(event);
+  });
   const clear = db.transaction((threadId) => {
     statements.deleteCheckpoint.run(threadId);
     statements.deleteEvents.run(threadId);
@@ -150,7 +154,8 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
     getCheckpoint: (threadId) => statements.getCheckpoint.get(threadId) || null,
     getEvents: (threadId) => statements.getEvents.all(threadId),
     isOpen: () => !closed && db.open,
-    saveCheckpoint: (checkpoint) => statements.upsertCheckpoint.run(checkpoint)
+    saveCheckpoint: (checkpoint) => statements.upsertCheckpoint.run(checkpoint),
+    saveTransition
   };
 }
 
