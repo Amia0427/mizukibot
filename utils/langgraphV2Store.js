@@ -167,16 +167,25 @@ function createCheckpointStore(options = {}, dependencies = {}) {
   const eventDir = String(options.eventDir || config.LANGGRAPH_V2_EVENT_DIR || '').trim();
   const database = createLangGraphV2Database(storeFile, dependencies);
 
+  function legacyFile(dir, threadId) {
+    return path.join(dir, `${sanitizeThreadId(threadId)}.json`);
+  }
+
   function loadCheckpoint(threadId) {
-    const row = database.getCheckpoint(sanitizeThreadId(threadId));
-    if (!row) return null;
-    return {
-      threadId: row.thread_id,
-      status: row.status,
-      node: row.node,
-      updatedAt: row.updated_at,
-      state: JSON.parse(row.state_json)
-    };
+    const normalizedThreadId = sanitizeThreadId(threadId);
+    const row = database.getCheckpoint(normalizedThreadId);
+    if (row) {
+      return {
+        threadId: row.thread_id,
+        status: row.status,
+        node: row.node,
+        updatedAt: row.updated_at,
+        state: JSON.parse(row.state_json)
+      };
+    }
+    if (database.hasLegacyTombstone(normalizedThreadId)) return null;
+    const legacy = safeReadJson(legacyFile(checkpointDir, normalizedThreadId), null);
+    return legacy && typeof legacy === 'object' && !Array.isArray(legacy) ? legacy : null;
   }
 
   function normalizeCheckpoint(threadId, payload = {}) {
@@ -222,7 +231,11 @@ function createCheckpointStore(options = {}, dependencies = {}) {
   }
 
   function loadEvents(threadId) {
-    return database.getEvents(sanitizeThreadId(threadId)).map((row) => JSON.parse(row.event_json));
+    const normalizedThreadId = sanitizeThreadId(threadId);
+    const current = database.getEvents(normalizedThreadId).map((row) => JSON.parse(row.event_json));
+    if (database.hasLegacyTombstone(normalizedThreadId)) return current;
+    const legacy = safeReadJson(legacyFile(eventDir, normalizedThreadId), []);
+    return Array.isArray(legacy) ? legacy.concat(current) : current;
   }
 
   function appendEvents(threadId, events = []) {
@@ -246,7 +259,7 @@ function createCheckpointStore(options = {}, dependencies = {}) {
   }
 
   function clear(threadId) {
-    database.clear(sanitizeThreadId(threadId));
+    database.clear(sanitizeThreadId(threadId), Date.now());
   }
 
   let store;

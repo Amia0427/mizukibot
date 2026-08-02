@@ -95,6 +95,11 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
       WHERE thread_id = ?
       ORDER BY id
     `),
+    hasLegacyTombstone: db.prepare(`
+      SELECT 1
+      FROM langgraph_v2_legacy_tombstones
+      WHERE thread_id = ?
+    `),
     insertEvent: db.prepare(`
       INSERT INTO langgraph_v2_events (
         thread_id,
@@ -107,6 +112,14 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
         @eventType,
         @eventJson
       )
+    `),
+    upsertLegacyTombstone: db.prepare(`
+      INSERT INTO langgraph_v2_legacy_tombstones (
+        thread_id,
+        cleared_at
+      ) VALUES (?, ?)
+      ON CONFLICT(thread_id) DO UPDATE SET
+        cleared_at = excluded.cleared_at
     `),
     upsertCheckpoint: db.prepare(`
       INSERT INTO langgraph_v2_checkpoints (
@@ -137,9 +150,10 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
     statements.upsertCheckpoint.run(checkpoint);
     for (const event of events) statements.insertEvent.run(event);
   });
-  const clear = db.transaction((threadId) => {
+  const clear = db.transaction((threadId, clearedAt) => {
     statements.deleteCheckpoint.run(threadId);
     statements.deleteEvents.run(threadId);
+    statements.upsertLegacyTombstone.run(threadId, clearedAt);
   });
 
   let closed = false;
@@ -153,6 +167,7 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
     },
     getCheckpoint: (threadId) => statements.getCheckpoint.get(threadId) || null,
     getEvents: (threadId) => statements.getEvents.all(threadId),
+    hasLegacyTombstone: (threadId) => Boolean(statements.hasLegacyTombstone.get(threadId)),
     isOpen: () => !closed && db.open,
     saveCheckpoint: (checkpoint) => statements.upsertCheckpoint.run(checkpoint),
     saveTransition

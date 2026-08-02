@@ -1,4 +1,5 @@
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -15,6 +16,10 @@ function restoreEnv(snapshot) {
     if (!(key in snapshot)) delete process.env[key];
   }
   Object.assign(process.env, snapshot);
+}
+
+function sha256(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
 module.exports = (() => {
@@ -137,6 +142,132 @@ module.exports = (() => {
       );
     } finally {
       transitionStore.close();
+    }
+
+    fs.mkdirSync(checkpointDir, { recursive: true });
+    fs.mkdirSync(eventDir, { recursive: true });
+    const legacyCheckpointFile = path.join(checkpointDir, 'legacy-target.json');
+    const legacyEventFile = path.join(eventDir, 'legacy-target.json');
+    const probeCheckpointFile = path.join(checkpointDir, 'legacy-probe.json');
+    fs.writeFileSync(legacyCheckpointFile, JSON.stringify({
+      threadId: 'legacy-target',
+      status: 'running',
+      node: 'prepare',
+      updatedAt: 300,
+      state: { version: 'legacy' }
+    }), 'utf8');
+    fs.writeFileSync(legacyEventFile, JSON.stringify([
+      { type: 'legacy_event', sequence: 1, ts: 300 }
+    ]), 'utf8');
+    fs.writeFileSync(probeCheckpointFile, '{broken', 'utf8');
+    const legacyBefore = [legacyCheckpointFile, legacyEventFile, probeCheckpointFile].map((file) => ({
+      file,
+      hash: sha256(file),
+      mtimeMs: fs.statSync(file).mtimeMs
+    }));
+
+    const legacyStoreFile = path.join(tempRoot, 'legacy-read.sqlite');
+    const legacyStore = createCheckpointStore({
+      storeFile: legacyStoreFile,
+      checkpointDir,
+      eventDir
+    });
+    try {
+      const inspectDb = new Database(legacyStoreFile);
+      try {
+        assert.strictEqual(inspectDb.prepare('SELECT COUNT(*) FROM langgraph_v2_checkpoints').pluck().get(), 0);
+        assert.strictEqual(inspectDb.prepare('SELECT COUNT(*) FROM langgraph_v2_events').pluck().get(), 0);
+        assert.strictEqual(inspectDb.prepare('SELECT COUNT(*) FROM langgraph_v2_quarantined_records').pluck().get(), 0);
+      } finally {
+        inspectDb.close();
+      }
+
+      assert.strictEqual(legacyStore.loadCheckpoint('legacy-target').state.version, 'legacy');
+      assert.deepStrictEqual(
+        legacyStore.loadEvents('legacy-target').map((event) => event.sequence),
+        [1]
+      );
+
+      const afterLazyReadDb = new Database(legacyStoreFile);
+      try {
+        assert.strictEqual(afterLazyReadDb.prepare('SELECT COUNT(*) FROM langgraph_v2_checkpoints').pluck().get(), 0);
+        assert.strictEqual(afterLazyReadDb.prepare('SELECT COUNT(*) FROM langgraph_v2_events').pluck().get(), 0);
+        assert.strictEqual(afterLazyReadDb.prepare('SELECT COUNT(*) FROM langgraph_v2_quarantined_records').pluck().get(), 0);
+      } finally {
+        afterLazyReadDb.close();
+      }
+
+      legacyStore.saveTransition('legacy-target', {
+        status: 'completed',
+        node: 'persist',
+        updatedAt: 400,
+        state: { version: 'sqlite' }
+      }, [
+        { type: 'sqlite_event', sequence: 2, ts: 400 }
+      ]);
+      assert.strictEqual(legacyStore.loadCheckpoint('legacy-target').state.version, 'sqlite');
+      assert.deepStrictEqual(
+        legacyStore.loadEvents('legacy-target').map((event) => event.sequence),
+        [1, 2]
+      );
+
+      const clearTriggerDb = new Database(legacyStoreFile);
+      try {
+        clearTriggerDb.exec(`
+          CREATE TRIGGER reject_legacy_tombstone
+          BEFORE INSERT ON langgraph_v2_legacy_tombstones
+          BEGIN
+            SELECT RAISE(ABORT, 'forced tombstone failure');
+          END;
+        `);
+      } finally {
+        clearTriggerDb.close();
+      }
+      assert.throws(() => legacyStore.clear('legacy-target'), /forced tombstone failure/);
+      assert.strictEqual(legacyStore.loadCheckpoint('legacy-target').state.version, 'sqlite');
+      assert.deepStrictEqual(
+        legacyStore.loadEvents('legacy-target').map((event) => event.sequence),
+        [1, 2]
+      );
+
+      const dropTriggerDb = new Database(legacyStoreFile);
+      try {
+        dropTriggerDb.exec('DROP TRIGGER reject_legacy_tombstone');
+      } finally {
+        dropTriggerDb.close();
+      }
+      legacyStore.clear('legacy-target');
+      assert.strictEqual(legacyStore.loadCheckpoint('legacy-target'), null);
+      assert.deepStrictEqual(legacyStore.loadEvents('legacy-target'), []);
+
+      legacyStore.saveTransition('legacy-target', {
+        status: 'running',
+        node: 'prepare',
+        updatedAt: 500,
+        state: { version: 'new-sqlite' }
+      }, [
+        { type: 'sqlite_event', sequence: 3, ts: 500 }
+      ]);
+      assert.strictEqual(legacyStore.loadCheckpoint('legacy-target').state.version, 'new-sqlite');
+      assert.deepStrictEqual(
+        legacyStore.loadEvents('legacy-target').map((event) => event.sequence),
+        [3]
+      );
+      const tombstoneDb = new Database(legacyStoreFile);
+      try {
+        assert.strictEqual(
+          tombstoneDb.prepare('SELECT COUNT(*) FROM langgraph_v2_legacy_tombstones WHERE thread_id = ?').pluck().get('legacy-target'),
+          1
+        );
+      } finally {
+        tombstoneDb.close();
+      }
+      for (const snapshot of legacyBefore) {
+        assert.strictEqual(sha256(snapshot.file), snapshot.hash);
+        assert.strictEqual(fs.statSync(snapshot.file).mtimeMs, snapshot.mtimeMs);
+      }
+    } finally {
+      legacyStore.close();
     }
 
     console.log('langgraphV2SqliteStore.test.js passed');
