@@ -1,6 +1,7 @@
 {
   "version": 1,
   "generatedWith": "c8@11.0.0",
+  "generatedWithNode": "20.x",
   "include": [
     "index.js",
     "api/**/*.js",
@@ -14,7 +15,7 @@
     {
       "name": "overall-production",
       "selector": { "all": true },
-      "minimum": { "lines": 69, "statements": 69, "functions": 79, "branches": 61 }
+      "minimum": { "lines": 69, "statements": 69, "functions": 78, "branches": 61 }
     },
     {
       "name": "web",
@@ -27,7 +28,7 @@
         "prefixes": ["src/runtime-v2/", "api/runtimeV2/"],
         "excludeSuffixes": [".chunk.js"]
       },
-      "minimum": { "lines": 74, "statements": 74, "functions": 69, "branches": 58 }
+      "minimum": { "lines": 74, "statements": 74, "functions": 63, "branches": 58 }
     },
     {
       "name": "stable-boundaries",

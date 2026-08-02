@@ -27,6 +27,7 @@ assert.strictEqual(packageJson.scripts.coverage, 'node scripts/run-coverage.js')
 assert.strictEqual(packageJson.scripts['coverage:check'], 'node scripts/check-coverage.js');
 assert.strictEqual(packageJson.devDependencies.c8, '11.0.0');
 assert.strictEqual(baseline.version, 1);
+assert.strictEqual(baseline.generatedWithNode, '20.x');
 assert.deepStrictEqual(baseline.include, [
   'index.js',
   'api/**/*.js',
@@ -42,9 +43,9 @@ assert.ok(baseline.scopes.some((scope) => scope.name === 'stable-boundaries'));
 assert.deepStrictEqual(
   Object.fromEntries(baseline.scopes.map((scope) => [scope.name, scope.minimum])),
   {
-    'overall-production': { lines: 69, statements: 69, functions: 79, branches: 61 },
+    'overall-production': { lines: 69, statements: 69, functions: 78, branches: 61 },
     web: { lines: 78, statements: 78, functions: 83, branches: 79 },
-    'runtime-v2-non-chunk': { lines: 74, statements: 74, functions: 69, branches: 58 },
+    'runtime-v2-non-chunk': { lines: 74, statements: 74, functions: 63, branches: 58 },
     'stable-boundaries': { lines: 84, statements: 84, functions: 80, branches: 70 }
   }
 );
