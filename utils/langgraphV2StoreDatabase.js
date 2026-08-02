@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
@@ -56,11 +57,89 @@ function ensureParentDirectory(file) {
   if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
 }
 
-function assertHealthy(db, check) {
-  const result = check(db);
-  if (!result.ok) {
-    throw createStoreError(`LangGraph V2 SQLite quick_check failed: ${result.messages.join('; ')}`);
+function checkpointSourceKey(threadId, rawPayload) {
+  const digest = crypto.createHash('sha256').update(String(rawPayload || '')).digest('hex');
+  return `checkpoint:${threadId}:${digest}`;
+}
+
+function isPayloadCheckFailure(messages) {
+  return messages.length > 0 && messages.every((message) => (
+    /^CHECK constraint failed in langgraph_v2_(checkpoints|events)$/u.test(String(message || ''))
+  ));
+}
+
+function isolateInvalidPayloadRows(db, quarantinedAt) {
+  const insertQuarantine = db.prepare(`
+    INSERT OR IGNORE INTO langgraph_v2_quarantined_records (
+      source_kind,
+      source_key,
+      thread_id,
+      raw_payload,
+      error,
+      quarantined_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const upsertTombstone = db.prepare(`
+    INSERT INTO langgraph_v2_legacy_tombstones (thread_id, cleared_at)
+    VALUES (?, ?)
+    ON CONFLICT(thread_id) DO UPDATE SET
+      cleared_at = excluded.cleared_at
+  `);
+  const deleteCheckpoint = db.prepare('DELETE FROM langgraph_v2_checkpoints WHERE thread_id = ?');
+  const deleteEvent = db.prepare('DELETE FROM langgraph_v2_events WHERE id = ?');
+  const invalidCheckpoints = db.prepare(`
+    SELECT thread_id, state_json
+    FROM langgraph_v2_checkpoints
+    WHERE CASE
+      WHEN json_valid(state_json) THEN json_type(state_json)
+      ELSE 'invalid'
+    END != 'object'
+  `).all();
+  const invalidEvents = db.prepare(`
+    SELECT id, thread_id, event_json
+    FROM langgraph_v2_events
+    WHERE CASE
+      WHEN json_valid(event_json) THEN json_type(event_json)
+      ELSE 'invalid'
+    END != 'object'
+  `).all();
+
+  db.transaction(() => {
+    for (const row of invalidCheckpoints) {
+      insertQuarantine.run(
+        'sqlite_checkpoint',
+        checkpointSourceKey(row.thread_id, row.state_json),
+        row.thread_id,
+        row.state_json,
+        'invalid checkpoint state_json',
+        quarantinedAt
+      );
+      upsertTombstone.run(row.thread_id, quarantinedAt);
+      deleteCheckpoint.run(row.thread_id);
+    }
+    for (const row of invalidEvents) {
+      insertQuarantine.run(
+        'sqlite_event',
+        `event:${row.id}`,
+        row.thread_id,
+        row.event_json,
+        'invalid event_json',
+        quarantinedAt
+      );
+      deleteEvent.run(row.id);
+    }
+  })();
+}
+
+function assertHealthy(db, check, allowPayloadIsolation = false) {
+  let result = check(db);
+  if (result.ok) return;
+  if (allowPayloadIsolation && isPayloadCheckFailure(result.messages)) {
+    isolateInvalidPayloadRows(db, Date.now());
+    result = check(db);
+    if (result.ok) return;
   }
+  throw createStoreError(`LangGraph V2 SQLite quick_check failed: ${result.messages.join('; ')}`);
 }
 
 function createLangGraphV2Database(storeFile, dependencies = {}) {
@@ -72,7 +151,7 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
   let db;
   try {
     db = openDatabase(dependencies.Database || Database, storeFile);
-    if (existed) assertHealthy(db, checkDatabase);
+    if (existed) assertHealthy(db, checkDatabase, true);
     db.exec(SCHEMA_SQL);
     if (!existed) assertHealthy(db, checkDatabase);
   } catch (cause) {
@@ -83,6 +162,7 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
 
   const statements = {
     deleteCheckpoint: db.prepare('DELETE FROM langgraph_v2_checkpoints WHERE thread_id = ?'),
+    deleteEvent: db.prepare('DELETE FROM langgraph_v2_events WHERE id = ?'),
     deleteEvents: db.prepare('DELETE FROM langgraph_v2_events WHERE thread_id = ?'),
     getCheckpoint: db.prepare(`
       SELECT thread_id, status, node, updated_at, state_json
@@ -111,6 +191,23 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
         @timestamp,
         @eventType,
         @eventJson
+      )
+    `),
+    insertQuarantine: db.prepare(`
+      INSERT OR IGNORE INTO langgraph_v2_quarantined_records (
+        source_kind,
+        source_key,
+        thread_id,
+        raw_payload,
+        error,
+        quarantined_at
+      ) VALUES (
+        @sourceKind,
+        @sourceKey,
+        @threadId,
+        @rawPayload,
+        @error,
+        @quarantinedAt
       )
     `),
     upsertLegacyTombstone: db.prepare(`
@@ -155,6 +252,29 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
     statements.deleteEvents.run(threadId);
     statements.upsertLegacyTombstone.run(threadId, clearedAt);
   });
+  const isolateCheckpoint = db.transaction((row, error, quarantinedAt) => {
+    statements.insertQuarantine.run({
+      sourceKind: 'sqlite_checkpoint',
+      sourceKey: checkpointSourceKey(row.thread_id, row.state_json),
+      threadId: row.thread_id,
+      rawPayload: row.state_json,
+      error,
+      quarantinedAt
+    });
+    statements.upsertLegacyTombstone.run(row.thread_id, quarantinedAt);
+    statements.deleteCheckpoint.run(row.thread_id);
+  });
+  const isolateEvent = db.transaction((row, error, quarantinedAt) => {
+    statements.insertQuarantine.run({
+      sourceKind: 'sqlite_event',
+      sourceKey: `event:${row.id}`,
+      threadId: row.thread_id,
+      rawPayload: row.event_json,
+      error,
+      quarantinedAt
+    });
+    statements.deleteEvent.run(row.id);
+  });
 
   let closed = false;
   return {
@@ -168,6 +288,9 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
     getCheckpoint: (threadId) => statements.getCheckpoint.get(threadId) || null,
     getEvents: (threadId) => statements.getEvents.all(threadId),
     hasLegacyTombstone: (threadId) => Boolean(statements.hasLegacyTombstone.get(threadId)),
+    insertQuarantine: (record) => statements.insertQuarantine.run(record),
+    isolateCheckpoint,
+    isolateEvent,
     isOpen: () => !closed && db.open,
     saveCheckpoint: (checkpoint) => statements.upsertCheckpoint.run(checkpoint),
     saveTransition

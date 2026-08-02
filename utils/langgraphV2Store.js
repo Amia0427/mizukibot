@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
@@ -171,21 +172,70 @@ function createCheckpointStore(options = {}, dependencies = {}) {
     return path.join(dir, `${sanitizeThreadId(threadId)}.json`);
   }
 
+  function readLegacy(filePath, threadId, sourceKind, isValid, fallback) {
+    let raw;
+    try {
+      raw = fs.readFileSync(filePath);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return fallback;
+      database.insertQuarantine({
+        sourceKind,
+        sourceKey: `${path.resolve(filePath)}:read:${error?.code || 'unknown'}`,
+        threadId,
+        rawPayload: null,
+        error: String(error?.message || error),
+        quarantinedAt: Date.now()
+      });
+      return fallback;
+    }
+
+    try {
+      const value = JSON.parse(raw.toString('utf8'));
+      if (!isValid(value)) throw new TypeError(`invalid ${sourceKind} payload shape`);
+      return value;
+    } catch (error) {
+      const digest = crypto.createHash('sha256').update(raw).digest('hex');
+      database.insertQuarantine({
+        sourceKind,
+        sourceKey: `${path.resolve(filePath)}:${digest}`,
+        threadId,
+        rawPayload: null,
+        error: String(error?.message || error),
+        quarantinedAt: Date.now()
+      });
+      return fallback;
+    }
+  }
+
   function loadCheckpoint(threadId) {
     const normalizedThreadId = sanitizeThreadId(threadId);
     const row = database.getCheckpoint(normalizedThreadId);
     if (row) {
-      return {
-        threadId: row.thread_id,
-        status: row.status,
-        node: row.node,
-        updatedAt: row.updated_at,
-        state: JSON.parse(row.state_json)
-      };
+      try {
+        const state = JSON.parse(row.state_json);
+        if (!state || typeof state !== 'object' || Array.isArray(state)) {
+          throw new TypeError('checkpoint state_json must contain an object');
+        }
+        return {
+          threadId: row.thread_id,
+          status: row.status,
+          node: row.node,
+          updatedAt: row.updated_at,
+          state
+        };
+      } catch (error) {
+        database.isolateCheckpoint(row, String(error?.message || error), Date.now());
+        return null;
+      }
     }
     if (database.hasLegacyTombstone(normalizedThreadId)) return null;
-    const legacy = safeReadJson(legacyFile(checkpointDir, normalizedThreadId), null);
-    return legacy && typeof legacy === 'object' && !Array.isArray(legacy) ? legacy : null;
+    return readLegacy(
+      legacyFile(checkpointDir, normalizedThreadId),
+      normalizedThreadId,
+      'legacy_checkpoint',
+      (value) => value && typeof value === 'object' && !Array.isArray(value),
+      null
+    );
   }
 
   function normalizeCheckpoint(threadId, payload = {}) {
@@ -232,10 +282,27 @@ function createCheckpointStore(options = {}, dependencies = {}) {
 
   function loadEvents(threadId) {
     const normalizedThreadId = sanitizeThreadId(threadId);
-    const current = database.getEvents(normalizedThreadId).map((row) => JSON.parse(row.event_json));
+    const current = [];
+    for (const row of database.getEvents(normalizedThreadId)) {
+      try {
+        const event = JSON.parse(row.event_json);
+        if (!event || typeof event !== 'object' || Array.isArray(event)) {
+          throw new TypeError('event_json must contain an object');
+        }
+        current.push(event);
+      } catch (error) {
+        database.isolateEvent(row, String(error?.message || error), Date.now());
+      }
+    }
     if (database.hasLegacyTombstone(normalizedThreadId)) return current;
-    const legacy = safeReadJson(legacyFile(eventDir, normalizedThreadId), []);
-    return Array.isArray(legacy) ? legacy.concat(current) : current;
+    const legacy = readLegacy(
+      legacyFile(eventDir, normalizedThreadId),
+      normalizedThreadId,
+      'legacy_events',
+      Array.isArray,
+      []
+    );
+    return legacy.concat(current);
   }
 
   function appendEvents(threadId, events = []) {
