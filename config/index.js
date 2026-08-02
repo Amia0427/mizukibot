@@ -953,6 +953,7 @@ module.exports = {
   LANGGRAPH_DEBUG: pickBool('LANGGRAPH_DEBUG', false),
   // Deprecated compatibility no-op. V2 runtime is always used.
   LANGGRAPH_RUNTIME_VERSION: pickNum('LANGGRAPH_RUNTIME_VERSION', 2),
+  LANGGRAPH_V2_STORE_FILE: pick('LANGGRAPH_V2_STORE_FILE', path.join(DATA_DIR, 'langgraph_v2.sqlite')),
   LANGGRAPH_V2_CHECKPOINT_DIR: pick('LANGGRAPH_V2_CHECKPOINT_DIR', path.join(DATA_DIR, 'langgraph_v2_checkpoints')),
   LANGGRAPH_V2_EVENT_DIR: pick('LANGGRAPH_V2_EVENT_DIR', path.join(DATA_DIR, 'langgraph_v2_events')),
   SELF_IMPROVEMENT_ENABLED: pickBool('SELF_IMPROVEMENT_ENABLED', true),

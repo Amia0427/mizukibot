@@ -51,6 +51,7 @@ function createInboundTimingLogger(logFilePath, enableDebugLog) {
 
 function createReplyTelemetryBridge(runtimeConfig = {}) {
   const store = createCheckpointStore({
+    storeFile: runtimeConfig.LANGGRAPH_V2_STORE_FILE,
     checkpointDir: runtimeConfig.LANGGRAPH_V2_CHECKPOINT_DIR,
     eventDir: runtimeConfig.LANGGRAPH_V2_EVENT_DIR
   });

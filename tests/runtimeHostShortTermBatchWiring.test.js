@@ -8,6 +8,7 @@ module.exports = (() => {
 
   createRuntime({
     storeOptions: {
+      storeFile: path.resolve(__dirname, '..', 'tmp', 'tests', 'runtime-host-wiring', 'langgraph_v2.sqlite'),
       checkpointDir: path.resolve(__dirname, '..', 'tmp', 'tests', 'runtime-host-wiring', 'checkpoints'),
       eventDir: path.resolve(__dirname, '..', 'tmp', 'tests', 'runtime-host-wiring', 'events')
     },
