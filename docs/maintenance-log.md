@@ -1,3 +1,11 @@
+## 运行维护 2026-08-02 14:23 +08:00
+
+- 实现提交 `cc8ca1f`：在本地意图识别、Planner、Runtime V2 和 QQ 回复链路中新增 `skill_earthquake_latest` 与 `skill_weather_cloud`。地震工具支持全球/中国、小时至月、震级和条数过滤；云图工具支持 JMA Himawari 红外、可见光和水汽全圆盘 JPEG，并将 `external_send` 副作用贯穿策略和 Planner，单轮只执行一次且发送失败不重试。
+- 数据源与降级：地震默认查询 USGS 最近 24 小时全球 M4.5+ 的 5 条事件，中国默认 M2.5+；云图读取 JMA 最新官方时次，仅在图片尚未同步的 404 场景回退前一时次一次。两项能力均为按需查询，不新增订阅、轮询、定时推送、API 密钥或备用抓取源。
+- 自动验收：环境数据适配器、路由、Planner 单工具计划、QQ 群聊/私聊伪发送、失败不重试、Schema/执行器/策略/Companion/全局预取和无外部子进程契约测试通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0，最终 `npm test` 在 179 秒内自然退出 0。
+- 真实只读探针：USGS 返回有效 M4.9 事件及 UTC/北京时间；JMA 最新红外图返回 `image/jpeg`，161909 字节，观测时间 `2026-08-02T06:10:00.000Z`。云图发送使用内存伪客户端且仅调用一次，没有向真实 QQ 会话发送图片。
+- 边界：未暂存或覆盖 `AGENT.md` 与并行 harness eval 文件，未推送远端；QQ 机器人地震与气象云图查询小目标已完成。
+
 ## 运行维护 2026-08-01 03:50 +08:00
 
 - 根因：能力 manifest 已能判定副作用，但 Runtime V2 direct、scheduler 与 legacy 仍各自调用 executor；`explicit/admin_explicit` 没有跨消息确认、一次性领取和崩溃后禁止重放协议，`retryable=false` 也未完整贯穿验证/repair。
