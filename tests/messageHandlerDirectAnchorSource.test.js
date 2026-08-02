@@ -159,6 +159,7 @@ module.exports = (async () => {
     console.log('messageHandlerDirectAnchorSource.test.js passed');
   } finally {
     console.log = originalConsoleLog;
+    require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     restoreEnv(snapshot);
     clearProjectCache();
     fs.rmSync(tempDataDir, { recursive: true, force: true });

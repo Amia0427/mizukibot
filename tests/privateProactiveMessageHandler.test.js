@@ -147,6 +147,7 @@ module.exports = (async () => {
 
     console.log('privateProactiveMessageHandler.test.js passed');
   } finally {
+    require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     restoreEnv(envSnapshot);
     clearProjectCache();
     fs.rmSync(tempDir, { recursive: true, force: true });

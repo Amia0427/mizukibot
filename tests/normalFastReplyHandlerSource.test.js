@@ -235,6 +235,7 @@ module.exports = (async () => {
 
     console.log('normalFastReplyHandlerSource.test.js passed');
   } finally {
+    require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     restoreEnv(snapshot);
     clearProjectCache();
     fs.rmSync(tempDataDir, { recursive: true, force: true });
