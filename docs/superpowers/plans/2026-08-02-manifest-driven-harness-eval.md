@@ -178,7 +178,7 @@ Run: `npm run eval:harness:nightly:verify`
 
 Expected: FAIL with both missing external result environment variables named; `artifacts/harness-eval/nightly-verify.json` must still record the failed suites.
 
-- [ ] **Step 4: Run repository acceptance**
+- [x] **Step 4: Run repository acceptance**
 
 Run: `npm run lint && npm run typecheck && npm run check:secrets:all && git diff --check`
 
@@ -188,6 +188,8 @@ Run: `npm test && npm run coverage`
 
 Expected: all tracked tests and coverage gates pass.
 
-- [ ] **Step 5: Commit implementation and append timestamped evidence**
+- [x] **Step 5: Commit implementation and append timestamped evidence**
 
 先提交代码、测试、计划和稳定开发文档，提交信息为 `feat: drive harness eval from manifest`。随后在 README、维护日志、Memory 治理文档和本计划追加简短 `2026-08-02` 时间戳、实现提交哈希与实际验收结果，再创建独立文档提交；不暂存 `AGENT.md`，不推送远端。
+
+**实际结果（2026-08-02 15:24 +08:00）：** 实现提交 `34ec277` 已完成。Node 20.20.2 的 `ci` profile 通过 3 个 suite（30/2/22 条 case）；`nightly:verify` 在缺少两个外部结果时按契约退出 1，并为两项分别写入 `external_input_missing`。Node 20 全量测试 116 秒、覆盖率 145.6 秒退出 0；覆盖率基线修正提交 `461a289` 将 V8 Function 统计校准到 Node 20，其他指标阈值不变。802 文件 lint、typecheck、全仓 secrets、diff check 与 Node 24 SQLite 探针均通过；`AGENT.md` 和 `prompts/admin.txt` 保护哈希未变化，未推送远端。

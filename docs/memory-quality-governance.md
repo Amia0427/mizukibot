@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-24 10:25 +08:00
+更新时间：2026-08-02 15:24 +08:00
+
+更新 2026-08-02 15:24 +08:00：提交 `34ec277` 将 Harness 升级为 `harness_eval_manifest_v2`，以同一契约驱动 routing stability、synthetic auto-gold、post-reply learning、live-model tasks 和 redacted replay。Node 20 下 `ci` profile 的 30/2/22 条确定性 case 全部通过；`nightly:verify` 在两个外部结果缺失时同时记录 `external_input_missing` 并退出 1。外部结果必须满足 producer 自报元数据、时效、最小样本量、data policy 和指标阈值，但当前仓库不负责执行真实模型、生成脱敏回放或认证 producer 身份。提交 `461a289` 同时将 Function 覆盖率基线固定到 Node 20 V8 统计口径，端到端覆盖率门禁通过。
 
 更新 2026-08-01 00:40 +08:00：建立版本化 Harness eval。`harness_eval_manifest_v1` 固定 memory routing stability 30 条与 post-reply learning 22 条 synthetic fixture，并校验数量、规范化摘要、唯一 ID、路径和递归隐私边界；CI 额外运行 synthetic auto-gold 真实召回，要求 Recall@5/MRR@5 不低于 0.5 且 wrong-hit、scope/lifecycle leakage、forbidden hit 为 0。Memory eval CLI 无显式 `--cases/--auto-gold/--build-cases` 时失败，不再静默依赖本地 `artifacts/`。
 

@@ -1,5 +1,12 @@
 # MizukiBot
 
+## Harness 评估 2026-08-02 15:24 +08:00
+
+- 实现提交 `34ec277` 将评估契约升级为 `harness_eval_manifest_v2`，统一声明 5 个 suite、`ci` / `nightly:verify` profile、runner、case schema、data policy、指标与阈值；顶层 runner 使用隔离子进程并生成严格 JSON 报告。
+- Node 20.20.2 实测 `ci` profile 通过 3 个确定性 suite，共覆盖 30 条 routing、2 条 synthetic auto-gold 与 22 条 post-reply case；`nightly:verify` 在缺少两个外部结果文件时按预期退出 1，并同时记录两个 `external_input_missing`。
+- Node 20 全量测试 116 秒、覆盖率 145.6 秒退出 0；覆盖率为 overall `72.10/78.51/62.16`、web `79.84/87.50/80.59`、Runtime V2 `77.69/63.29/63.97`、stable boundaries `86.00/80.38/72.74`（行/函数/分支）。提交 `461a289` 将 V8 Function 基线校准到项目唯一运行边界 Node 20，其他指标阈值未降低。
+- 外部 nightly 只验证 producer 自报元数据、时效、覆盖量和阈值，不执行真实模型、生成脱敏回放或认证 producer 身份；当前分支未推送。
+
 ## 环境数据查询 2026-08-02 14:17 +08:00
 
 - 地震查询接入 USGS FDSN GeoJSON：发送“最新地震”默认返回全球最近 24 小时 M4.5+ 的 5 条事件；“中国最近一周 4 级以上地震，给我 3 条”可指定中国范围、时间窗、最低震级和条数。

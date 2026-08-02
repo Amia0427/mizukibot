@@ -1,3 +1,12 @@
+## 运行维护 2026-08-02 15:24 +08:00
+
+- 根因：`harness_eval_manifest_v1` 只固定 fixture，三个本地评估仍分别解析控制台与硬编码阈值，也没有统一 profile/report 契约；真实模型与脱敏回放只有名称，没有可验证的输入元数据、时效和最小覆盖边界。
+- 实现：提交 `34ec277` 升级为 `harness_eval_manifest_v2`，统一 5 个 suite 的 runner、case schema、synthetic data policy、metrics 和 thresholds。顶层 runner 使用白名单环境、独立临时目录、超时/输出上限和原子报告；CI 始终上传 `artifacts/harness-eval/ci.json`，缺失报告视为失败。
+- Harness 验收：Node 20.20.2 下 `ci` profile 通过 3 个 suite，case 数为 routing 30、auto-gold 2、post-reply 22；`nightly:verify` 按预期退出 1，三个本地 suite 通过，`live-model-tasks` 与 `redacted-replay` 均记录 `external_input_missing`。外部结果只验证 producer 自报元数据、时效、覆盖量和阈值，不声称执行或认证 producer。
+- 仓库验收：Node 20 全量测试 116 秒退出 0，覆盖率 145.6 秒退出 0；四个 scope 为 overall `72.10/78.51/62.16`、web `79.84/87.50/80.59`、Runtime V2 `77.69/63.29/63.97`、stable boundaries `86.00/80.38/72.74`（行/函数/分支）。802 文件 lint、typecheck、全仓 secrets、diff check 及 Node 24 ABI 137 SQLite 探针通过。
+- 环境修正：Node 20 归档内 npm 缺少 `lib/commands/sbom.js`，验收显式使用完整系统 npm CLI；提交 `461a289` 将 Function 阈值按 Node 20 的 V8 区间统计校准为 overall 78%、Runtime V2 63%，lines/statements/branches 和其他 scope 阈值保持不变。主工作区 Node 24 依赖未替换。
+- 边界：未修改或暂存 `AGENT.md` 与 `prompts/admin.txt`，SHA-256 分别保持 `B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`、`2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；Harness manifest 驱动小目标已完成，未推送远端。
+
 ## 运行维护 2026-08-02 14:23 +08:00
 
 - 实现提交 `cc8ca1f`：在本地意图识别、Planner、Runtime V2 和 QQ 回复链路中新增 `skill_earthquake_latest` 与 `skill_weather_cloud`。地震工具支持全球/中国、小时至月、震级和条数过滤；云图工具支持 JMA Himawari 红外、可见光和水汽全圆盘 JPEG，并将 `external_send` 副作用贯穿策略和 Planner，单轮只执行一次且发送失败不重试。
