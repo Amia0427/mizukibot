@@ -2,7 +2,10 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { createLangGraphV2Database } = require('./langgraphV2StoreDatabase');
+const {
+  createLangGraphV2Database,
+  inspectLangGraphV2Database
+} = require('./langgraphV2StoreDatabase');
 
 const openStores = new Set();
 
@@ -353,6 +356,10 @@ function closeDb() {
   for (const store of [...openStores]) store.close();
 }
 
+function inspectCheckpointStore(storeFile, options = {}) {
+  return inspectLangGraphV2Database(storeFile, options);
+}
+
 // Thread ids must remain deterministic across retries and restarts so `auto`
 // resume can locate the latest incomplete checkpoint for the same turn.
 function resolveThreadId({
@@ -390,6 +397,7 @@ module.exports = {
   compactStableProfileForCheckpoint,
   closeDb,
   createCheckpointStore,
+  inspectCheckpointStore,
   resolveThreadId,
   safeReadJson,
   sanitizeForJson,

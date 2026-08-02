@@ -1,5 +1,6 @@
 const SQLITE_MODULES = [
   { name: 'toolAuthorization', modulePath: '../api/toolAuthorization' },
+  { name: 'langgraphV2Store', modulePath: './langgraphV2Store' },
   { name: 'profileJournalDb', modulePath: './profileJournalDb' },
   { name: 'worldbookDb', modulePath: './worldbookDb' },
   { name: 'localPromptRecall', modulePath: './localPromptRecall' }

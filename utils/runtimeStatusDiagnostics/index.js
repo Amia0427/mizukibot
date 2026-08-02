@@ -114,6 +114,7 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     safeStat
   });
   const langGraphV2Store = buildLangGraphV2StoreSummary({
+    storeFile: config.LANGGRAPH_V2_STORE_FILE,
     checkpointDir: config.LANGGRAPH_V2_CHECKPOINT_DIR,
     eventDir: config.LANGGRAPH_V2_EVENT_DIR,
     now,
@@ -192,14 +193,26 @@ function buildRuntimeStatusDiagnostic(options = {}) {
   if (backgroundTasks.staleActiveCount > 0) {
     addSignal(signals, 'warning', 'backgroundTasks', 'background_task_stale', 'active background tasks exceeded stale threshold', { count: backgroundTasks.staleActiveCount });
   }
-  if (langGraphV2Store.staleRunningCheckpointCount > 0) {
-    addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_checkpoint_stale', 'active LangGraph V2 checkpoints exceeded stale threshold', { count: langGraphV2Store.staleRunningCheckpointCount });
+  const staleLangGraphCheckpointCount = langGraphV2Store.staleRunningCheckpointCount
+    + langGraphV2Store.sqlite.staleRunningCheckpointCount;
+  if (staleLangGraphCheckpointCount > 0) {
+    addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_checkpoint_stale', 'active LangGraph V2 checkpoints exceeded stale threshold', { count: staleLangGraphCheckpointCount });
   }
   if (langGraphV2Store.invalidCheckpointCount > 0) {
     addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_checkpoint_invalid', 'LangGraph V2 checkpoint files could not be parsed', { count: langGraphV2Store.invalidCheckpointCount });
   }
   if (langGraphV2Store.invalidEventFileCount > 0) {
     addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_event_file_invalid', 'LangGraph V2 event files could not be parsed as event arrays', { count: langGraphV2Store.invalidEventFileCount });
+  }
+  if (langGraphV2Store.sqlite.status === 'corrupt') {
+    addSignal(signals, 'error', 'langGraphV2', 'langgraph_v2_store_corrupt', 'LangGraph V2 SQLite store failed integrity checks', {
+      error: langGraphV2Store.sqlite.error
+    });
+  }
+  if (langGraphV2Store.sqlite.quarantineCount > 0) {
+    addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_quarantined_records', 'LangGraph V2 store contains quarantined records', {
+      count: langGraphV2Store.sqlite.quarantineCount
+    });
   }
   if (memoryMaterializeLock.status === 'stale') {
     addSignal(signals, 'warning', 'locks', 'memory_materialize_lock_stale', 'memory materialize lock is stale', { pid: memoryMaterializeLock.pid });
@@ -258,7 +271,16 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         activeCheckpoints: langGraphV2Store.activeCheckpointCount,
         staleRunningCheckpoints: langGraphV2Store.staleRunningCheckpointCount,
         checkpointBytes: langGraphV2Store.totalCheckpointBytes,
-        eventBytes: langGraphV2Store.totalEventBytes
+        eventBytes: langGraphV2Store.totalEventBytes,
+        sqliteHealth: langGraphV2Store.sqlite.status,
+        sqliteCheckpoints: langGraphV2Store.sqlite.checkpointCount,
+        sqliteEvents: langGraphV2Store.sqlite.eventCount,
+        sqliteQuarantinedRecords: langGraphV2Store.sqlite.quarantineCount,
+        sqliteActiveCheckpoints: langGraphV2Store.sqlite.activeCheckpointCount,
+        sqliteStaleRunningCheckpoints: langGraphV2Store.sqlite.staleRunningCheckpointCount,
+        sqliteBytes: langGraphV2Store.sqlite.totalBytes,
+        legacyCheckpointFiles: langGraphV2Store.checkpointCount,
+        legacyEventFiles: langGraphV2Store.eventFileCount
       },
       journalHealth: {
         ...(journalHealth.totals || {}),
@@ -323,7 +345,7 @@ function buildRuntimeStatusText(report = {}) {
     `main: ${summary.mainProcess?.status || 'unknown'} pid=${summary.mainProcess?.lockPid || 0} processes=${summary.mainProcess?.processCount || 0}`,
     `post-reply: ${summary.postReplyWorker?.status || 'unknown'} pid=${summary.postReplyWorker?.pid || 0} processes=${summary.postReplyWorker?.processCount || 0} queue=queued:${postQueue.queued || 0} processing:${postQueue.processing || 0} failed:${postQueue.failed || 0} oldestQueuedMs=${summary.postReplyWorker?.oldestQueuedAgeMs || 0}`,
     `background-tasks: active=${summary.activeBackgroundTasks || 0} stale=${summary.staleBackgroundTasks || 0}`,
-    `langgraph-v2: checkpoints=${langGraphV2.checkpoints || 0} active=${langGraphV2.activeCheckpoints || 0} stale=${langGraphV2.staleRunningCheckpoints || 0} events=${langGraphV2.events || 0}`,
+    `langgraph-v2: sqlite=${langGraphV2.sqliteHealth || 'missing'} checkpoints=${langGraphV2.sqliteCheckpoints || 0} active=${langGraphV2.sqliteActiveCheckpoints || 0} stale=${langGraphV2.sqliteStaleRunningCheckpoints || 0} events=${langGraphV2.sqliteEvents || 0} quarantine=${langGraphV2.sqliteQuarantinedRecords || 0} legacyCheckpoints=${langGraphV2.legacyCheckpointFiles || 0} legacyEventFiles=${langGraphV2.legacyEventFiles || 0}`,
     `proactive-group-outbound: ${proactiveGroupOutbound.enabled === false ? 'disabled' : 'enabled'} env=${proactiveGroupOutbound.envKey || 'PROACTIVE_GROUP_OUTBOUND_ENABLED'}`,
     `private-proactive: ${privateProactive.enabled === false ? 'disabled' : 'enabled'} registered=${privateProactive.registered || 0} active=${privateProactive.active || 0} paused=${privateProactive.paused || 0} budget=${privateProactive.budget?.used || 0}/${privateProactive.budget?.limit || 0} nextScanAt=${privateProactive.nextScanAt || 0}`
   ];

@@ -32,6 +32,7 @@ module.exports = (() => {
   const postReplyDir = path.join(dataDir, 'post_reply_jobs');
   const langGraphCheckpointDir = path.join(dataDir, 'langgraph_v2_checkpoints');
   const langGraphEventDir = path.join(dataDir, 'langgraph_v2_events');
+  const langGraphStoreFile = path.join(dataDir, 'langgraph_v2.sqlite');
   const memoryLockFile = path.join(dataDir, 'memory-v3', 'projections', 'materialize.lock');
   const now = Date.parse('2026-05-03T00:00:00.000Z');
 
@@ -41,6 +42,7 @@ module.exports = (() => {
     process.env.POST_REPLY_QUEUE_DIR = postReplyDir;
     process.env.LANGGRAPH_V2_CHECKPOINT_DIR = langGraphCheckpointDir;
     process.env.LANGGRAPH_V2_EVENT_DIR = langGraphEventDir;
+    process.env.LANGGRAPH_V2_STORE_FILE = langGraphStoreFile;
     process.env.POST_REPLY_WORKER_ENABLED = 'true';
     process.env.POST_REPLY_WORKER_INLINE = 'false';
     process.env.POST_REPLY_WORKER_STALE_PROCESSING_MS = '300000';
@@ -126,6 +128,40 @@ module.exports = (() => {
       { type: 'node_start', node: 'prepare', ts: now - (46 * 60 * 1000) },
       { type: 'checkpoint', node: 'dispatch', ts: now - (45 * 60 * 1000) }
     ]);
+    const { createCheckpointStore } = require('../utils/langgraphV2Store');
+    const langGraphStore = createCheckpointStore({
+      storeFile: langGraphStoreFile,
+      checkpointDir: langGraphCheckpointDir,
+      eventDir: langGraphEventDir
+    });
+    langGraphStore.saveTransition('sqlite_stale', {
+      status: 'running',
+      node: 'dispatch',
+      updatedAt: now - (50 * 60 * 1000),
+      state: { thread: { threadId: 'sqlite_stale' } }
+    }, [
+      { type: 'checkpoint', node: 'dispatch', ts: now - (50 * 60 * 1000) }
+    ]);
+    langGraphStore.saveTransition('sqlite_done', {
+      status: 'completed',
+      node: 'persist',
+      updatedAt: now - (60 * 1000),
+      state: { thread: { threadId: 'sqlite_done' } }
+    }, [
+      { type: 'node_end', node: 'persist', ts: now - (60 * 1000) }
+    ]);
+    langGraphStore.close();
+    const Database = require('better-sqlite3');
+    const quarantineDb = new Database(langGraphStoreFile);
+    try {
+      quarantineDb.prepare(`
+        INSERT INTO langgraph_v2_quarantined_records (
+          source_kind, source_key, thread_id, raw_payload, error, quarantined_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `).run('legacy_events', 'diagnostic-fixture', 'fixture-thread', null, 'fixture', now - 1000);
+    } finally {
+      quarantineDb.close();
+    }
 
     const processes = [
       { pid: 111, ppid: 1, name: 'node.exe', commandLine: 'node index.js' },
@@ -160,6 +196,13 @@ module.exports = (() => {
     assert.strictEqual(report.summary.langGraphV2.staleRunningCheckpoints, 1);
     assert.ok(report.summary.langGraphV2.checkpointBytes > 0);
     assert.ok(report.summary.langGraphV2.eventBytes > 0);
+    assert.strictEqual(report.summary.langGraphV2.sqliteHealth, 'healthy');
+    assert.strictEqual(report.summary.langGraphV2.sqliteCheckpoints, 2);
+    assert.strictEqual(report.summary.langGraphV2.sqliteEvents, 2);
+    assert.strictEqual(report.summary.langGraphV2.sqliteQuarantinedRecords, 1);
+    assert.strictEqual(report.summary.langGraphV2.sqliteStaleRunningCheckpoints, 1);
+    assert.strictEqual(report.summary.langGraphV2.legacyCheckpointFiles, 2);
+    assert.strictEqual(report.summary.langGraphV2.legacyEventFiles, 1);
     assert.strictEqual(report.summary.journalHealth.summaryScheduler.tickEngineEnabled, false);
     assert.strictEqual(report.summary.journalHealth.summaryScheduler.standaloneEnabled, true);
     assert.strictEqual(report.summary.journalHealth.summaryScheduler.summaryDueDay, '2026-05-02');
@@ -188,6 +231,13 @@ module.exports = (() => {
     assert.strictEqual(report.components.langGraphV2Store.staleRunningCheckpoints[0].threadId, 'thread_stale');
     assert.strictEqual(report.components.langGraphV2Store.latestEventFiles[0].eventCount, 2);
     assert.deepStrictEqual(report.components.langGraphV2Store.invalidEventFiles, []);
+    assert.strictEqual(report.components.langGraphV2Store.sqlite.status, 'healthy');
+    assert.deepStrictEqual(report.components.langGraphV2Store.sqlite.quickCheckMessages, ['ok']);
+    assert.strictEqual(report.components.langGraphV2Store.sqlite.countsByCheckpointStatus.running, 1);
+    assert.strictEqual(report.components.langGraphV2Store.sqlite.countsByCheckpointStatus.completed, 1);
+    assert.strictEqual(report.components.langGraphV2Store.sqlite.quarantineCount, 1);
+    assert.ok(buildRuntimeStatusText(report).includes('sqlite=healthy'));
+    assert.ok(buildRuntimeStatusText(report).includes('quarantine=1'));
     assert.strictEqual(report.components.subagents, undefined);
     assert.ok(Array.isArray(report.components.lockFiles));
     assert.ok(report.components.lockFiles.some((item) => item.name === 'memoryMaterializeLock'));
@@ -197,6 +247,7 @@ module.exports = (() => {
     assert.ok(signalCodes.includes('post_reply_processing_stale'));
     assert.ok(signalCodes.includes('memory_materialize_lock_stale'));
     assert.ok(signalCodes.includes('langgraph_v2_checkpoint_stale'));
+    assert.ok(signalCodes.includes('langgraph_v2_quarantined_records'));
     assert.ok(!signalCodes.includes('post_reply_due_queued_without_worker'));
 
     writeJson(path.join(langGraphEventDir, 'thread_invalid.json'), {
@@ -212,6 +263,25 @@ module.exports = (() => {
     assert.strictEqual(invalidEventReport.components.langGraphV2Store.invalidEventFileCount, 1);
     assert.strictEqual(invalidEventReport.components.langGraphV2Store.invalidEventFiles[0].file, 'thread_invalid.json');
     assert.ok(invalidEventReport.signals.some((item) => item.code === 'langgraph_v2_event_file_invalid'));
+
+    const corruptStoreFile = path.join(dataDir, 'langgraph_v2-corrupt.sqlite');
+    fs.writeFileSync(corruptStoreFile, 'not a sqlite database', 'utf8');
+    process.env.LANGGRAPH_V2_STORE_FILE = corruptStoreFile;
+    clearProjectCache();
+    const { buildRuntimeStatusDiagnostic: buildCorruptStoreDiagnostic } = require('../utils/runtimeStatusDiagnostics');
+    const corruptStoreReport = buildCorruptStoreDiagnostic({
+      projectRoot: tempDir,
+      now: () => now,
+      listProcesses: () => processes,
+      isProcessAlive: (pid) => alive.has(Number(pid)),
+      langGraphV2CheckpointStaleMs: 30 * 60 * 1000
+    });
+    assert.strictEqual(corruptStoreReport.components.langGraphV2Store.sqlite.status, 'corrupt');
+    assert.ok(corruptStoreReport.signals.some((item) => (
+      item.code === 'langgraph_v2_store_corrupt' && item.level === 'error'
+    )));
+    process.env.LANGGRAPH_V2_STORE_FILE = langGraphStoreFile;
+    clearProjectCache();
 
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(report)));
 

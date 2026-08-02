@@ -3,6 +3,10 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
+
+const CONCURRENCY_WORKER_FLAG = 'MIZUKI_LANGGRAPH_V2_CONCURRENCY_WORKER';
+const CONCURRENCY_WRITES = 30;
 
 function clearProjectCache() {
   const projectRoot = path.resolve(__dirname, '..') + path.sep;
@@ -22,7 +26,56 @@ function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-module.exports = (() => {
+function runConcurrencyWorker() {
+  const { createCheckpointStore } = require('../utils/langgraphV2Store');
+  const workerId = process.env.LANGGRAPH_V2_WORKER_ID;
+  const store = createCheckpointStore({
+    storeFile: process.env.LANGGRAPH_V2_STORE_FILE
+  });
+  try {
+    for (let index = 0; index < CONCURRENCY_WRITES; index += 1) {
+      store.saveTransition(`concurrent-${workerId}`, {
+        status: 'running',
+        node: 'dispatch',
+        updatedAt: index,
+        state: { workerId, index }
+      }, [
+        { type: 'worker_event', workerId, index, ts: index }
+      ]);
+    }
+  } finally {
+    store.close();
+  }
+}
+
+function spawnConcurrencyWorker(workerId, storeFile) {
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    const child = spawn(process.execPath, ['--unhandled-rejections=strict', __filename], {
+      cwd: path.resolve(__dirname, '..'),
+      env: {
+        ...process.env,
+        API_KEY: process.env.API_KEY || 'test-key',
+        DATA_DIR: path.dirname(storeFile),
+        LANGGRAPH_V2_STORE_FILE: storeFile,
+        LANGGRAPH_V2_WORKER_ID: workerId,
+        [CONCURRENCY_WORKER_FLAG]: '1'
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`LangGraph V2 worker ${workerId} exited ${code}: ${stderr}`));
+    });
+  });
+}
+
+async function runTest() {
   const env = { ...process.env };
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-langgraph-v2-store-'));
   const dataDir = path.join(tempRoot, 'data');
@@ -509,11 +562,58 @@ module.exports = (() => {
     );
     assert.strictEqual(sha256(syntheticCorruptFile), syntheticCorruptHash);
 
+    const concurrencyFile = path.join(tempRoot, 'concurrency.sqlite');
+    const workerIds = ['a', 'b', 'c', 'd'];
+    await Promise.all(workerIds.map((workerId) => (
+      spawnConcurrencyWorker(workerId, concurrencyFile)
+    )));
+    const concurrencyStore = createCheckpointStore({
+      storeFile: concurrencyFile,
+      checkpointDir,
+      eventDir
+    });
+    try {
+      const allEventKeys = new Set();
+      for (const workerId of workerIds) {
+        const checkpoint = concurrencyStore.loadCheckpoint(`concurrent-${workerId}`);
+        assert.strictEqual(checkpoint.state.index, CONCURRENCY_WRITES - 1);
+        const events = concurrencyStore.loadEvents(`concurrent-${workerId}`);
+        assert.strictEqual(events.length, CONCURRENCY_WRITES);
+        for (const event of events) allEventKeys.add(`${event.workerId}:${event.index}`);
+      }
+      assert.strictEqual(allEventKeys.size, workerIds.length * CONCURRENCY_WRITES);
+      const concurrencyHealthDb = new Database(concurrencyFile);
+      try {
+        assert.strictEqual(
+          concurrencyHealthDb.prepare('SELECT COUNT(*) FROM langgraph_v2_events').pluck().get(),
+          workerIds.length * CONCURRENCY_WRITES
+        );
+        assert.deepStrictEqual(concurrencyHealthDb.pragma('quick_check'), [{ quick_check: 'ok' }]);
+      } finally {
+        concurrencyHealthDb.close();
+      }
+    } finally {
+      concurrencyStore.close();
+    }
+
     console.log('langgraphV2SqliteStore.test.js passed');
-    return true;
   } finally {
     restoreEnv(env);
     clearProjectCache();
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
-})();
+}
+
+if (process.env[CONCURRENCY_WORKER_FLAG] === '1') {
+  try {
+    runConcurrencyWorker();
+  } catch (error) {
+    console.error(error);
+    process.exitCode = 1;
+  }
+} else {
+  module.exports = runTest().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

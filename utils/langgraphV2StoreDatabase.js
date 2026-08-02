@@ -297,7 +297,116 @@ function createLangGraphV2Database(storeFile, dependencies = {}) {
   };
 }
 
+function databaseBytes(storeFile) {
+  return [storeFile, `${storeFile}-wal`, `${storeFile}-shm`].reduce((total, file) => {
+    try {
+      return total + fs.statSync(file).size;
+    } catch (error) {
+      if (error?.code === 'ENOENT') return total;
+      throw error;
+    }
+  }, 0);
+}
+
+function inspectLangGraphV2Database(storeFile, options = {}, dependencies = {}) {
+  const normalizedStoreFile = path.resolve(storeFile);
+  const base = {
+    storeFile: normalizedStoreFile,
+    exists: fs.existsSync(normalizedStoreFile),
+    status: 'missing',
+    healthy: null,
+    quickCheckMessages: [],
+    checkpointCount: 0,
+    eventCount: 0,
+    quarantineCount: 0,
+    activeCheckpointCount: 0,
+    staleRunningCheckpointCount: 0,
+    staleRunningCheckpoints: [],
+    countsByCheckpointStatus: {},
+    totalBytes: 0,
+    error: ''
+  };
+  if (!base.exists) return base;
+
+  const openDatabase = dependencies.openSqliteDatabase || openSqliteDatabase;
+  const checkDatabase = dependencies.runQuickCheck || runQuickCheck;
+  let db;
+  try {
+    db = openDatabase(dependencies.Database || Database, normalizedStoreFile, {
+      readonly: true,
+      fileMustExist: true
+    });
+    const check = checkDatabase(db);
+    if (!check.ok) {
+      return {
+        ...base,
+        status: 'corrupt',
+        healthy: false,
+        quickCheckMessages: check.messages,
+        totalBytes: databaseBytes(normalizedStoreFile),
+        error: check.messages.join('; ')
+      };
+    }
+
+    const now = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+    const staleCheckpointMs = Math.max(0, Number(options.staleCheckpointMs) || 0);
+    const activeStatuses = ['running', 'queued', 'reviewing'];
+    const countsByCheckpointStatus = Object.fromEntries(db.prepare(`
+      SELECT status, COUNT(*) AS count
+      FROM langgraph_v2_checkpoints
+      GROUP BY status
+      ORDER BY status
+    `).all().map((row) => [row.status, row.count]));
+    const staleRunningCheckpoints = db.prepare(`
+      SELECT
+        thread_id AS threadId,
+        status,
+        node,
+        updated_at AS updatedAt
+      FROM langgraph_v2_checkpoints
+      WHERE status IN (?, ?, ?)
+        AND updated_at < ?
+      ORDER BY updated_at
+      LIMIT 20
+    `).all(...activeStatuses, now - staleCheckpointMs).map((row) => ({
+      ...row,
+      ageMs: Math.max(0, now - row.updatedAt)
+    }));
+    const activeCheckpointCount = db.prepare(`
+      SELECT COUNT(*)
+      FROM langgraph_v2_checkpoints
+      WHERE status IN (?, ?, ?)
+    `).pluck().get(...activeStatuses);
+
+    return {
+      ...base,
+      status: 'healthy',
+      healthy: true,
+      quickCheckMessages: check.messages,
+      checkpointCount: db.prepare('SELECT COUNT(*) FROM langgraph_v2_checkpoints').pluck().get(),
+      eventCount: db.prepare('SELECT COUNT(*) FROM langgraph_v2_events').pluck().get(),
+      quarantineCount: db.prepare('SELECT COUNT(*) FROM langgraph_v2_quarantined_records').pluck().get(),
+      activeCheckpointCount,
+      staleRunningCheckpointCount: staleRunningCheckpoints.length,
+      staleRunningCheckpoints,
+      countsByCheckpointStatus,
+      totalBytes: databaseBytes(normalizedStoreFile)
+    };
+  } catch (error) {
+    return {
+      ...base,
+      status: 'corrupt',
+      healthy: false,
+      totalBytes: databaseBytes(normalizedStoreFile),
+      error: String(error?.message || error)
+    };
+  } finally {
+    if (db?.open) db.close();
+  }
+}
+
 module.exports = {
   createLangGraphV2Database,
-  createStoreError
+  createStoreError,
+  inspectLangGraphV2Database
 };
