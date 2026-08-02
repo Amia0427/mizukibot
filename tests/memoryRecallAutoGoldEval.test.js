@@ -3,6 +3,14 @@ const os = require('os');
 const path = require('path');
 const assert = require('assert');
 const { spawnSync } = require('child_process');
+const {
+  SUITE_RESULT_SCHEMA_VERSION,
+  completeHarnessSuite,
+  getHarnessSuiteContext
+} = require('../scripts/harness-eval-contract');
+
+const SUITE_ID = 'memory-recall-auto-gold';
+const { suite } = getHarnessSuiteContext(SUITE_ID);
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-memory-recall-auto-gold-'));
 process.env.DATA_DIR = tempRoot;
@@ -147,13 +155,7 @@ module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((resul
   assert.notStrictEqual(result.recallAt8, null);
   assert.notStrictEqual(result.mrrAt5, null);
   assert.notStrictEqual(result.mrrAt8, null);
-  assert.ok(result.recallAt5 >= 0.5);
-  assert.ok(result.mrrAt5 >= 0.5);
   assert.notStrictEqual(result.promptInjectionRate, null);
-  assert.strictEqual(result.wrongHitRate, 0);
-  assert.strictEqual(result.leakage, 0);
-  assert.strictEqual(result.lifecycleLeakage, 0);
-  assert.strictEqual(result.forbiddenHits, 0);
   assert.notStrictEqual(result.answerRelevance, null);
   assert.notStrictEqual(result.faithfulness, null);
   assert.ok(result.bySource.preference || result.bySource.memory || result.byFacet.preference);
@@ -161,6 +163,22 @@ module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((resul
   assert.strictEqual(typeof result.categoryMismatches, 'number');
   assert.strictEqual(typeof result.recentRecallMisses, 'number');
   assert.ok(result.latency.stages.totalMs.p50Ms >= 0);
+  completeHarnessSuite(SUITE_ID, {
+    schemaVersion: SUITE_RESULT_SCHEMA_VERSION,
+    suiteId: SUITE_ID,
+    caseSchemaVersion: suite.caseSchemaVersion,
+    dataPolicy: suite.dataPolicy,
+    caseCount: result.cases,
+    completedCaseCount: result.cases,
+    metrics: {
+      recallAt5: result.recallAt5,
+      mrrAt5: result.mrrAt5,
+      wrongHitRate: result.wrongHitRate,
+      leakage: result.leakage,
+      lifecycleLeakage: result.lifecycleLeakage,
+      forbiddenHits: result.forbiddenHits
+    }
+  });
   console.log('memoryRecallAutoGoldEval.test.js passed');
 }).catch((error) => {
   console.error(error);

@@ -1,6 +1,6 @@
 # 测试与质量门禁
 
-更新：2026-08-01 03:50 +08:00
+更新：2026-08-02 14:29 +08:00
 
 本项目没有统一测试框架包装所有用例。`tests/*.test.js` 大多是直接使用 Node `assert` 的可执行 CommonJS 脚本，仓库用 `scripts/run-tests.js` 负责发现、隔离、并发、超时和结果汇总。
 
@@ -196,11 +196,19 @@ npm run coverage:check
 
 ```bash
 npm run eval:harness:ci
+npm run eval:harness:nightly:verify
 ```
 
-`tests/fixtures/harness-eval-manifest.json` 固定 suite schema、case 数量和规范化 SHA-256。`scripts/check-harness-eval-fixtures.js` 会拒绝空集、重复 ID、越界路径和非 synthetic 数据；真实对话导出仍只能留在被忽略的 `artifacts/`，不能混入 CI fixture。
+`tests/fixtures/harness-eval-manifest.json` 是 profile、runner、case schema、data policy、指标和阈值的唯一执行契约。`scripts/check-harness-eval-fixtures.js` 会拒绝空集、重复 ID、越界路径、未知 schema/runner、缺失阈值和非 synthetic 数据；`scripts/run-harness-eval.js` 按 profile 隔离执行 suite，并把统一报告写入 `artifacts/harness-eval/`。
 
-该命令依次验证 memory routing stability、synthetic auto-gold 真实召回指标和 post-reply learning。routing suite 只证明是否应召回及 facet 分类，Recall/MRR、wrong-hit、scope/lifecycle leakage 由 auto-gold suite 单独证明，二者不能互相替代。
+`eval:harness:ci` 依次验证 memory routing stability、synthetic auto-gold 真实召回指标和 post-reply learning，生成 `artifacts/harness-eval/ci.json`。routing suite 只证明是否应召回及 facet 分类，Recall/MRR、wrong-hit、scope/lifecycle leakage 由 auto-gold suite 单独证明，二者不能互相替代。CI 无论门禁是否通过都会上传该报告，缺失报告本身也是失败。
+
+`eval:harness:nightly:verify` 在 CI 三项基础上，额外要求：
+
+- `HARNESS_EVAL_LIVE_MODEL_RESULT_FILE`：至少 20 条 synthetic live-model task 结果；
+- `HARNESS_EVAL_REDACTED_REPLAY_RESULT_FILE`：至少 50 条 redacted replay 结果。
+
+外部结果必须使用统一 schema，包含未过期的 producer 自报元数据、完整 case 数和零隐私违规等 manifest 阈值。该命令只验证结果格式、元数据、时效、覆盖量和指标，不会调用真实模型、生成脱敏回放或认证 producer 身份；实际 producer、密钥、固定 case set 和签名协议尚未接入，不能把 `nightly:verify` 通过解释为端到端 nightly 已部署。
 
 Memory recall CLI 必须显式选择输入：
 
