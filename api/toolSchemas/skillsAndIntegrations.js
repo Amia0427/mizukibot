@@ -403,12 +403,13 @@ const skillsAndIntegrationsToolSchemas = [
     type: 'function',
     function: {
       name: 'skill_weather_cloud',
-      description: 'Fetch and send the latest JMA Himawari full-disk weather satellite image to the current QQ chat',
+      description: 'Fetch and send the latest NSMC FY-4B weather satellite image to the current QQ chat',
       parameters: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          channel: { type: 'string', enum: ['infrared', 'visible', 'water_vapor'], description: 'Satellite channel; defaults to infrared' }
+          channel: { type: 'string', enum: ['infrared', 'visible', 'water_vapor'], description: 'Satellite channel; defaults to infrared' },
+          area: { type: 'string', enum: ['china', 'full_disk'], description: 'Image area; defaults to china' }
         }
       }
     }
@@ -417,16 +418,15 @@ const skillsAndIntegrationsToolSchemas = [
     type: 'function',
     function: {
       name: 'skill_weather',
-      description: 'Query current weather for a location with wttr.in',
+      description: 'Query current conditions and a four-day forecast for a Chinese location with AMap Weather',
       parameters: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           location: { type: 'string', description: 'Location name' },
           city: { type: 'string', description: 'Alias of location' },
-          text: { type: 'string', description: 'Alias of location' },
-          format: { type: 'string', description: 'wttr.in format string' }
-        },
-        required: ['location']
+          text: { type: 'string', description: 'Alias of location' }
+        }
       }
     }
   },

@@ -2,7 +2,6 @@
 function normalizeWeatherArgs(args = {}) {
   const next = {};
   const location = String(args.location ?? args.city ?? args.text ?? '').trim();
-  if (!location) throw new Error('skill_weather requires location');
   if (location.length > 120) throw new Error('skill_weather location too long');
   if (/[\r\n<>`]/.test(location)) throw new Error('skill_weather location contains unsafe characters');
   next.location = location;
@@ -40,7 +39,11 @@ function normalizeWeatherCloudArgs(args = {}) {
   if (!new Set(['infrared', 'visible', 'water_vapor']).has(channel)) {
     throw new Error('skill_weather_cloud channel must be infrared, visible, or water_vapor');
   }
-  return { channel };
+  const area = String(args.area || 'china').trim().toLowerCase();
+  if (!new Set(['china', 'full_disk']).has(area)) {
+    throw new Error('skill_weather_cloud area must be china or full_disk');
+  }
+  return { channel, area };
 }
 
 function normalizeArxivList(raw) {

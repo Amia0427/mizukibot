@@ -206,7 +206,7 @@ const TOOL_EXECUTORS = {
 
   getWeather: async (args = {}) => {
     const text = args.text ?? args.city ?? '';
-    return tools1.getWeather(text);
+    return nativeWeather.getWeatherSummary({ location: text });
   },
 
   search_nearby_places: async (args = {}) => {

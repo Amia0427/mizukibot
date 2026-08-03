@@ -36,7 +36,8 @@ const {
 } = require('./dynamic-plan.chunk');
 const {
   deriveEarthquakeToolArgs,
-  deriveWeatherCloudToolArgs
+  deriveWeatherCloudToolArgs,
+  deriveWeatherToolArgs
 } = require('../../../utils/environmentDataQuery');
 
 function deriveToolArgs(toolName = '', route = {}) {
@@ -74,7 +75,7 @@ function deriveToolArgs(toolName = '', route = {}) {
     return { userId, query: requestText || searchSeed, top_k: 5 };
   }
   if (normalizedTool === 'skill_weather') {
-    return { location: requestText || cleanText };
+    return deriveWeatherToolArgs(requestText || cleanText);
   }
   if (normalizedTool === 'skill_weather_cloud') {
     return deriveWeatherCloudToolArgs(requestText || cleanText);

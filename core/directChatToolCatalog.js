@@ -90,14 +90,14 @@ const TOOL_PLANNER_METADATA = Object.freeze({
   skill_weather: {
     plannerRole: 'weather_specialist',
     overlapGroup: 'weather',
-    preferWhen: ['weather requests', 'current conditions lookup'],
+    preferWhen: ['weather requests', 'current conditions or four-day forecast lookup'],
     avoidWhen: ['non-weather factual lookup'],
     preferredOver: ['getWeather', 'web_search']
   },
   skill_weather_cloud: {
     plannerRole: 'weather_cloud_specialist',
     overlapGroup: 'weather',
-    preferWhen: ['weather satellite image requests', 'infrared or water vapor cloud image requests'],
+    preferWhen: ['China-region or full-disk satellite image requests', 'infrared, visible, or water vapor cloud image requests'],
     avoidWhen: ['current conditions or forecast requests'],
     preferredOver: ['skill_weather', 'getWeather', 'web_search']
   },

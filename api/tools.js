@@ -106,61 +106,6 @@ async function getLyrics(question) {
   }
 }
 
-function normalizeCityText(text) {
-  return String(text || '')
-    .replace(/天气|查一下|今天|明天|帮我查/g, '')
-    .trim();
-}
-
-async function getWeather(text) {
-  let city = normalizeCityText(text);
-  if (!city) city = '重庆';
-
-  const AMAP_KEY = config.AMAP_KEY;
-  if (!AMAP_KEY) {
-    return '天气功能还没配置 AMAP_KEY，请先在 .env 中配置后再使用。';
-  }
-
-  try {
-    const geoRes = await withRetry(
-      () => http.get(`https://restapi.amap.com/v3/geocode/geo?address=${encodeURIComponent(city)}&key=${AMAP_KEY}`, {
-        timeout: 8000
-      }),
-      1
-    );
-
-    const geocode = geoRes.data?.geocodes?.[0];
-    if (!geocode) {
-      return `地图里没有找到“${city}”，可以换个更完整的地名再试试。`;
-    }
-
-    const adcode = geocode.adcode;
-
-    const weatherRes = await withRetry(
-      () => http.get(`https://restapi.amap.com/v3/weather/weatherInfo?city=${adcode}&key=${AMAP_KEY}`, {
-        timeout: 8000
-      }),
-      1
-    );
-
-    const info = weatherRes.data?.lives?.[0];
-    if (!info) {
-      return '暂时拿不到天气详情，请稍后再试。';
-    }
-
-    return [
-      `${city} 当前天气：${info.weather}`,
-      `温度：${info.temperature}℃`,
-      `风向：${info.winddirection}`,
-      `风力：${info.windpower} 级`,
-      `更新时间：${info.reporttime || '未知'}`
-    ].join('\n');
-  } catch (error) {
-    console.error('getWeather error:', error.code || error.message);
-    return '天气查询失败，网络或服务可能暂时不稳定。';
-  }
-}
-
 async function search_nearby_places(keywords, city) {
   const AMAP_KEY = config.AMAP_KEY;
   if (!AMAP_KEY) {
@@ -850,7 +795,6 @@ async function get_bilibili_hot() {
 
 module.exports = {
   getLyrics,
-  getWeather,
   search_nearby_places,
   search_academic_paper,
   query_arcaea_info,

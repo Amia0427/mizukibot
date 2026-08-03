@@ -541,7 +541,7 @@ module.exports = (async () => {
 
   assert.deepStrictEqual(weatherCorrection.allowedToolNames, ['skill_weather']);
   assert.strictEqual(weatherCorrection.steps[0].tool, 'skill_weather');
-  assert.strictEqual(weatherCorrection.steps[0].args.location, '北京今天天气怎么样');
+  assert.strictEqual(weatherCorrection.steps[0].args.location, '北京');
 
   const financeQuoteCorrection = await planRequestV2({
     question: '查 NVDA 实时股价',

@@ -12,6 +12,7 @@ const planning = require('../src/runtime-v2/planning');
 const {
   deriveEarthquakeToolArgs,
   deriveWeatherCloudToolArgs,
+  deriveWeatherToolArgs,
   isEarthquakeDataQuery,
   isWeatherCloudQuery
 } = require('../utils/environmentDataQuery');
@@ -67,7 +68,8 @@ assert.notDeepStrictEqual(detect('地震是如何形成的').meta.allowedTools, 
 
 const cloudRoute = detect('给我看看最新水汽云图');
 assert.strictEqual(isWeatherCloudQuery('最新卫星云图'), true);
-assert.deepStrictEqual(deriveWeatherCloudToolArgs('给我看看最新水汽云图'), { channel: 'water_vapor' });
+assert.deepStrictEqual(deriveWeatherCloudToolArgs('给我看看最新水汽云图'), { channel: 'water_vapor', area: 'china' });
+assert.deepStrictEqual(deriveWeatherCloudToolArgs('亚太全圆盘水汽云图'), { channel: 'water_vapor', area: 'full_disk' });
 assert.deepStrictEqual(cloudRoute.meta.allowedTools, ['skill_weather_cloud']);
 assert.strictEqual(cloudRoute.meta.qqActionKey, 'qq_weather_cloud');
 assert.strictEqual(cloudRoute.intent.risk, 'medium');
@@ -79,9 +81,11 @@ assert.deepStrictEqual(
   planning.pickMinimalToolAllowlist(cloudRoute, { allowedToolNames: ['skill_weather', 'skill_weather_cloud'] }),
   ['skill_weather_cloud']
 );
-assert.deepStrictEqual(planning.deriveToolArgs('skill_weather_cloud', cloudRoute), { channel: 'water_vapor' });
+assert.deepStrictEqual(planning.deriveToolArgs('skill_weather_cloud', cloudRoute), { channel: 'water_vapor', area: 'china' });
 
 const weatherRoute = detect('上海今天天气怎么样');
+assert.deepStrictEqual(deriveWeatherToolArgs('上海今天天气怎么样'), { location: '上海' });
+assert.deepStrictEqual(planning.deriveToolArgs('skill_weather', weatherRoute), { location: '上海' });
 assert.notDeepStrictEqual(weatherRoute.meta.allowedTools, ['skill_weather_cloud']);
 assert.deepStrictEqual(
   planning.pickMinimalToolAllowlist(weatherRoute, { allowedToolNames: ['skill_weather', 'skill_weather_cloud'] }),
@@ -133,7 +137,7 @@ assert.deepStrictEqual(enforceToolPolicy('skill_earthquake_latest', { scope: 'ch
   min_magnitude: 2.5,
   limit: 5
 });
-assert.deepStrictEqual(enforceToolPolicy('skill_weather_cloud', {}), { channel: 'infrared' });
+assert.deepStrictEqual(enforceToolPolicy('skill_weather_cloud', {}), { channel: 'infrared', area: 'china' });
 assert.throws(
   () => enforceToolPolicy('skill_earthquake_latest', { time_window: 'year' }),
   /time_window/
@@ -141,6 +145,10 @@ assert.throws(
 assert.throws(
   () => enforceToolPolicy('skill_weather_cloud', { channel: 'true_color' }),
   /channel/
+);
+assert.throws(
+  () => enforceToolPolicy('skill_weather_cloud', { area: 'global' }),
+  /area/
 );
 
 module.exports = (async () => {

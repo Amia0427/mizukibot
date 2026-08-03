@@ -2,6 +2,21 @@ function normalizeText(value = '') {
   return String(value || '').trim();
 }
 
+function extractWeatherLocation(text = '') {
+  return normalizeText(text)
+    .replace(/(?:帮我|麻烦)?(?:查一下|查查|查询|看看|看一下)/g, ' ')
+    .replace(/(?:今天|今日|明天|后天|未来(?:四|4)天|近(?:四|4)天|最近(?:四|4)天)/g, ' ')
+    .replace(/(?:的)?(?:天气预报|天气|气温|温度|湿度|风力|风况|会不会下雨|会下雨吗|下雨吗|怎么样|如何|情况)/g, ' ')
+    .replace(/\b(?:weather|forecast|today|tomorrow|in)\b/gi, ' ')
+    .replace(/[，。！？、,.!?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function deriveWeatherToolArgs(text = '') {
+  return { location: extractWeatherLocation(text) };
+}
+
 function isWeatherCloudQuery(text = '') {
   return /(卫星云图|气象云图|红外云图|水汽云图|可见光云图|云图|weather satellite|satellite (?:image|cloud))/i.test(normalizeText(text));
 }
@@ -40,14 +55,17 @@ function deriveEarthquakeToolArgs(text = '') {
 
 function deriveWeatherCloudToolArgs(text = '') {
   const normalized = normalizeText(text);
-  if (/(水汽|water\s*vapou?r)/i.test(normalized)) return { channel: 'water_vapor' };
-  if (/(可见光|visible)/i.test(normalized)) return { channel: 'visible' };
-  return { channel: 'infrared' };
+  const area = /(全圆盘|亚太|full\s*disk)/i.test(normalized) ? 'full_disk' : 'china';
+  if (/(水汽|water\s*vapou?r)/i.test(normalized)) return { channel: 'water_vapor', area };
+  if (/(可见光|真彩|visible|true\s*colou?r)/i.test(normalized)) return { channel: 'visible', area };
+  return { channel: 'infrared', area };
 }
 
 module.exports = {
   deriveEarthquakeToolArgs,
+  deriveWeatherToolArgs,
   deriveWeatherCloudToolArgs,
+  extractWeatherLocation,
   isEarthquakeDataQuery,
   isWeatherCloudQuery
 };
