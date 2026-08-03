@@ -3,12 +3,8 @@ function createShortTermRestartRecallHelpers(deps = {}) {
     config,
     ensureShortTermMemoryState,
     getShortTermCompressionSettings,
-    getUserImpression,
-    getUserMemories,
-    getUserProfile,
-    getUserSummary,
+    queryMemory,
     resolveShortTermSessionKey,
-    retrieveRelevantMemories,
     trimTextByTokenBudget
   } = deps;
 
@@ -30,24 +26,21 @@ function createShortTermRestartRecallHelpers(deps = {}) {
     return lines.join(' | ');
   }
 
-  function buildRestartRecallSummary(userId, question = '', userInfo = {}, options = {}) {
+  async function buildRestartRecallSummary(userId, question = '', userInfo = {}, options = {}) {
     const key = String(userId || '').trim();
     if (!key) return { summary: '', hitCount: 0 };
 
     const settings = getShortTermCompressionSettings(userInfo, { userId: key });
-    const profile = getUserProfile(key) || {};
-    const summary = String(getUserSummary(key) || '').trim();
-    const impression = String(getUserImpression(key) || '').trim();
-    const factText = String(getUserMemories(key) || '').trim();
-    const hits = retrieveRelevantMemories(
-      key,
-      String(question || '').trim(),
-      Number(options.topK || config.MEMORY_RAG_TOP_K || 8),
-      {
-        scopeType: 'personal',
-        trackAccess: false
-      }
-    );
+    const recalled = await queryMemory({
+      userId: key,
+      query: String(question || '').trim(),
+      facet: 'continuity',
+      topK: Number(options.topK || config.MEMORY_RAG_TOP_K || 8),
+      sessionKey: options.sessionKey
+    });
+    const hits = Array.isArray(recalled.results) ? recalled.results : [];
+    const summary = String(recalled.persona?.summary || '').trim();
+    const impression = String(recalled.persona?.impression || '').trim();
 
     const sections = [];
     const relevantHitTexts = hits
@@ -66,24 +59,6 @@ function createShortTermRestartRecallHelpers(deps = {}) {
     if (impression) {
       sections.push(`[KnownImpression] ${trimTextByTokenBudget(impression, 90, 'tail')}`);
     }
-
-    const identities = joinProfileValues(profile.identities, 4);
-    if (identities) sections.push(`[Identity] ${identities}`);
-
-    const likes = joinProfileValues(profile.likes, 4);
-    if (likes) sections.push(`[Likes] ${likes}`);
-
-    const dislikes = joinProfileValues(profile.dislikes, 3);
-    if (dislikes) sections.push(`[Dislikes] ${dislikes}`);
-
-    const goals = joinProfileValues(profile.goals, 4);
-    if (goals) sections.push(`[Goals] ${goals}`);
-
-    const recentTopics = joinProfileValues(profile.recent_topics, 4);
-    if (recentTopics) sections.push(`[RecentTopics] ${recentTopics}`);
-
-    const facts = compactFactTextForRecall(factText === '目前没有特别记忆。' ? '' : factText, 4);
-    if (facts) sections.push(`[KnownFacts] ${facts}`);
 
     const summaryText = trimTextByTokenBudget(
       sections.join('\n'),
@@ -113,7 +88,7 @@ function createShortTermRestartRecallHelpers(deps = {}) {
     return true;
   }
 
-  function rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question = '', userInfo = {}, deps = {}) {
+  async function rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question = '', userInfo = {}, deps = {}) {
     const uid = String(userId || '').trim();
     const sessionKey = String(deps.sessionKey || resolveShortTermSessionKey(uid, deps.routeMeta) || '').trim();
     if (!shouldAttemptRestartRecall(uid, { ...deps, sessionKey })) {
@@ -121,7 +96,7 @@ function createShortTermRestartRecallHelpers(deps = {}) {
     }
 
     const state = ensureShortTermMemoryState(sessionKey, deps.shortTermMemory);
-    const reconstructed = buildRestartRecallSummary(uid, question, userInfo, deps);
+    const reconstructed = await buildRestartRecallSummary(uid, question, userInfo, deps);
     const summaryText = String(reconstructed.summary || '').trim();
     if (!summaryText) {
       if (config.ENABLE_DEBUG_LOG) {

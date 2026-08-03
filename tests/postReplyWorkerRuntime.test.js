@@ -45,7 +45,7 @@ module.exports = (async () => {
     const memory = require('../utils/memory');
     const taskMemory = require('../utils/taskMemory');
     const groupMemory = require('../utils/groupMemory');
-    const vectorMemory = require('../utils/vectorMemory');
+    const memoryRepository = require('../utils/memory-v3');
 
     const calls = [];
     const originalLearnSomethingNew = memoryExtraction.learnSomethingNew;
@@ -59,8 +59,7 @@ module.exports = (async () => {
     const originalAddTaskMemoryWithVectorBackfill = taskMemory.addTaskMemoryWithVectorBackfill;
     const originalAddGroupMemory = groupMemory.addGroupMemory;
     const originalAddGroupMemoryWithVectorBackfill = groupMemory.addGroupMemoryWithVectorBackfill;
-    const originalAddMemoryItemsBatch = vectorMemory.addMemoryItemsBatch;
-    const originalAddMemoryItemsBatchWithVectorBackfill = vectorMemory.addMemoryItemsBatchWithVectorBackfill;
+    const originalWriteMemoryBatch = memoryRepository.writeMemoryBatch;
 
     memoryExtraction.learnSomethingNew = async (...args) => {
       calls.push({ type: 'memory', userText: args[1], botReply: args[2], options: args[3] || {} });
@@ -111,12 +110,8 @@ module.exports = (async () => {
       calls.push({ type: 'group_vector', args });
       return { ids: [`group-write-${calls.filter((item) => item.type === 'group_vector').length}`], accepted: [{}], rejected: [] };
     };
-    vectorMemory.addMemoryItemsBatch = (...args) => {
-      calls.push({ type: 'vector', args });
-      return [];
-    };
-    vectorMemory.addMemoryItemsBatchWithVectorBackfill = async (...args) => {
-      calls.push({ type: 'vector_backfill', args });
+    memoryRepository.writeMemoryBatch = async (...args) => {
+      calls.push({ type: 'memory_batch', args });
       return { ids: ['style-write-id', 'jargon-write-id'], accepted: [{}, {}], rejected: [] };
     };
 
@@ -419,7 +414,7 @@ module.exports = (async () => {
     assert.ok(calls.some((item) => item.type === 'affinity'), 'enrich phase should apply affinity');
     assert.ok(calls.some((item) => item.type === 'task_vector'), 'enrich phase should store task memory with vector backfill');
     assert.ok(calls.some((item) => item.type === 'group_vector'), 'enrich phase should store group memory with vector backfill');
-    assert.ok(calls.some((item) => item.type === 'vector_backfill'), 'enrich phase should store style/jargon vectors with backfill');
+    assert.ok(calls.some((item) => item.type === 'memory_batch'), 'enrich phase should store style/jargon signals through memory v3');
     assert.ok(calls.some((item) => item.type === 'self_store'), 'enrich phase should store self-improvement items');
     assert.ok(calls.some((item) => item.type === 'segment'), 'enrich phase should trigger threshold segmentation');
     const { readPostReplyJobTrace } = require('../utils/postReplyWorker/jobTrace');
@@ -1074,8 +1069,7 @@ module.exports = (async () => {
     taskMemory.addTaskMemoryWithVectorBackfill = originalAddTaskMemoryWithVectorBackfill;
     groupMemory.addGroupMemory = originalAddGroupMemory;
     groupMemory.addGroupMemoryWithVectorBackfill = originalAddGroupMemoryWithVectorBackfill;
-    vectorMemory.addMemoryItemsBatch = originalAddMemoryItemsBatch;
-    vectorMemory.addMemoryItemsBatchWithVectorBackfill = originalAddMemoryItemsBatchWithVectorBackfill;
+    memoryRepository.writeMemoryBatch = originalWriteMemoryBatch;
 
     console.log('postReplyWorkerRuntime.test.js passed');
   } finally {

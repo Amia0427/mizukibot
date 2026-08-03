@@ -1,7 +1,7 @@
 const config = require('../../config');
 const {
   retrieveUnifiedMemories
-} = require('../vectorMemory');
+} = require('../memory-v3/projectionCompat');
 const {
   getAccessibleGroupIdsForUser
 } = require('../memoryScopeIndex');

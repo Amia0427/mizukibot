@@ -471,46 +471,39 @@ module.exports = (async () => {
   assert.ok(volatileItem.meta.quality);
   assert.ok(volatileItem.meta.quality.reasons.includes('volatile_or_hypothetical'));
 
-  const vectorMemory = require('../utils/vectorMemory');
-  const originalGetMemoryItems = vectorMemory.getMemoryItems;
-  const originalGetMemoryItemsByFilter = vectorMemory.getMemoryItemsByFilter;
+  const { getMemoryItemsByFilter } = require('../utils/vectorMemory');
   let scopedLookupCount = 0;
-  vectorMemory.getMemoryItems = (userId) => {
-    if (!userId) throw new Error('full memory scan should not run in write pipeline');
-    return originalGetMemoryItems(userId);
+  const scopedOptions = {
+    materialize: false,
+    disableWriteRerank: true,
+    existingItemsProvider: (_candidate, filters) => {
+      scopedLookupCount += 1;
+      assert.ok(filters.userId || filters.groupId, 'write pipeline lookup should be scoped');
+      return getMemoryItemsByFilter(filters);
+    }
   };
-  vectorMemory.getMemoryItemsByFilter = (filters = {}) => {
-    scopedLookupCount += 1;
-    assert.ok(filters.userId || filters.groupId, 'write pipeline lookup should be scoped');
-    return originalGetMemoryItemsByFilter(filters);
-  };
-  try {
-    const scopedBaseline = await addMemoryItemsBatchWithVectorBackfill([{
-      userId: 'u_pipeline_scoped_lookup',
-      type: 'fact',
-      text: 'scoped lookup baseline',
-      source: 'test',
-      sourceKind: 'extractor',
-      confidence: 0.95,
-      status: 'active'
-    }], { materialize: false, disableWriteRerank: true });
-    assert.strictEqual(scopedBaseline.ids.length, 1, 'scoped lookup baseline should persist');
+  const scopedBaseline = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_scoped_lookup',
+    type: 'fact',
+    text: 'scoped lookup baseline',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active'
+  }], scopedOptions);
+  assert.strictEqual(scopedBaseline.ids.length, 1, 'scoped lookup baseline should persist');
 
-    const scopedDuplicate = await addMemoryItemsBatchWithVectorBackfill([{
-      userId: 'u_pipeline_scoped_lookup',
-      type: 'fact',
-      text: 'scoped lookup baseline',
-      source: 'test',
-      sourceKind: 'extractor',
-      confidence: 0.95,
-      status: 'active'
-    }], { materialize: false, disableWriteRerank: true });
-    assert.strictEqual(scopedDuplicate.ids.length, 0, 'scoped duplicate should still be rejected');
-    assert.ok(scopedLookupCount > 0, 'write pipeline should use scoped filter lookups');
-  } finally {
-    vectorMemory.getMemoryItems = originalGetMemoryItems;
-    vectorMemory.getMemoryItemsByFilter = originalGetMemoryItemsByFilter;
-  }
+  const scopedDuplicate = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_scoped_lookup',
+    type: 'fact',
+    text: 'scoped lookup baseline',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active'
+  }], scopedOptions);
+  assert.strictEqual(scopedDuplicate.ids.length, 0, 'scoped duplicate should still be rejected');
+  assert.ok(scopedLookupCount > 0, 'write pipeline should use scoped filter lookups');
 
   console.log('memoryWritePipeline.test.js passed');
 })();

@@ -188,27 +188,12 @@ function listMemoryItemsForPipeline(candidate = {}, options = {}) {
     const items = options.existingItemsProvider(candidate, buildMemoryLookupFilters(candidate));
     return Array.isArray(items) ? items : [];
   }
-  if (config.MEMORY_STORAGE_MODE !== 'legacy_compat') {
-    try {
-      const { loadMemoryNodesForUser } = require('../memory-v3/storage');
-      const scope = normalizeScope(candidate);
-      return loadMemoryNodesForUser(scope.userId, {
-        groupIds: scope.groupId ? [scope.groupId] : []
-      });
-    } catch (_) {
-      return [];
-    }
-  }
   try {
-    const vectorMemory = require('../vectorMemory');
-    const filters = buildMemoryLookupFilters(candidate);
-    if (typeof vectorMemory.getMemoryItemsByFilter === 'function' && (filters.userId || filters.groupId)) {
-      return vectorMemory.getMemoryItemsByFilter(filters);
-    }
-    if (filters.userId && typeof vectorMemory.getMemoryItems === 'function') {
-      return vectorMemory.getMemoryItems(filters.userId);
-    }
-    return [];
+    const { loadMemoryNodesForUser } = require('../memory-v3/storage');
+    const scope = normalizeScope(candidate);
+    return loadMemoryNodesForUser(scope.userId, {
+      groupIds: scope.groupId ? [scope.groupId] : []
+    });
   } catch (_) {
     return [];
   }

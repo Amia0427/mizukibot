@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../../config');
-const { rebuildMemoryIndex } = require('../vectorMemory');
+const { materializeMemoryViews } = require('../memory-v3');
 const { loadProjection, runMemoryMigration, saveProjection } = require('../memoryProjection');
 const selfImprovementRuntime = require('../selfImprovementRuntime');
 const {
@@ -17,6 +17,13 @@ const { createMemoryGovernanceStore } = require('./store');
 
 const ITEMS_FILE = path.join(config.DATA_DIR, 'memory_items.json');
 const SNAPSHOT_DIR = path.join(config.DATA_DIR, 'memory_snapshots');
+
+function rebuildMemoryIndex() {
+  return materializeMemoryViews({
+    force: true,
+    source: 'legacy_memory_governance_compat'
+  });
+}
 
 const {
   canonicalizeText,

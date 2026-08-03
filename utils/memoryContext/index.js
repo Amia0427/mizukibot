@@ -11,7 +11,7 @@ const {
   retrieveUnifiedMemoriesAsync,
   getCoreMemories,
   getMemoryStats
-} = require('../vectorMemory');
+} = require('../memory-v3/projectionCompat');
 const { getDailyJournalRetrievalBundle } = require('../dailyJournal');
 const { formatGroupMemories } = require('../groupMemory');
 const { formatTaskMemories } = require('../taskMemory');

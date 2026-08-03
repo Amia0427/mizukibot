@@ -4,8 +4,7 @@ const {
   estimateMessagesTokens,
   trimTextByTokenBudget
 } = require('../contextBudget');
-const { getUserMemories, getUserProfile, getUserSummary, getUserImpression } = require('../memory');
-const { retrieveRelevantMemories } = require('../vectorMemory');
+const { queryMemory } = require('../memory-v3');
 const { getRecentSessionContextSummaries } = require('../sessionContextSummaryStore');
 const {
   getShortTermCompressionSettings,
@@ -80,12 +79,8 @@ const { rehydrateShortTermMemoryAfterRestartIfNeeded } = createShortTermRestartR
   config,
   ensureShortTermMemoryState,
   getShortTermCompressionSettings,
-  getUserImpression,
-  getUserMemories,
-  getUserProfile,
-  getUserSummary,
+  queryMemory,
   resolveShortTermSessionKey,
-  retrieveRelevantMemories,
   trimTextByTokenBudget
 });
 

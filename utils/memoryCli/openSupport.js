@@ -1,9 +1,8 @@
 const config = require('../../config');
 const {
   getMemoryItems,
-  getMemoryItemsByFilter,
-  touchAccessStats
-} = require('../vectorMemory');
+  getMemoryItemsByFilter
+} = require('../memory-v3/projectionCompat');
 const {
   getAccessibleGroupIdsForUser,
   getMemoryScopeForUser
@@ -84,12 +83,6 @@ function openMemoryItemById(userId, source, id) {
     return true;
   });
   if (!found) return null;
-  const ownerId = (source === 'group' || source === 'jargon')
-    ? String(found.userId || '').trim()
-    : userId;
-  if (config.MEMORY_CLI_TRACK_OPEN_ACCESS && ownerId) {
-    touchAccessStats(ownerId, [found.id]);
-  }
   return {
     source,
     id: found.id,

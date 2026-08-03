@@ -97,7 +97,9 @@ function getTaskMemoryBridge() {
   if (cachedTaskMemoryBridge !== undefined) return cachedTaskMemoryBridge;
   try {
     const mod = require('./taskMemory');
-    cachedTaskMemoryBridge = typeof mod?.addTaskMemory === 'function' ? mod.addTaskMemory : null;
+    cachedTaskMemoryBridge = typeof mod?.addTaskMemoryWithVectorBackfill === 'function'
+      ? mod.addTaskMemoryWithVectorBackfill
+      : null;
   } catch (error) {
     cachedTaskMemoryBridge = null;
     if (error?.code !== 'MODULE_NOT_FOUND') throw error;
@@ -114,9 +116,9 @@ function maybeBridgeTaskMemory(event = {}) {
     || ((normalized.kind === 'error' || normalized.kind === 'correction') && normalized.status === PROMOTED_STATUS && actionable);
   if (!shouldBridge) return null;
   if (!normalized.userId || !actionable) return null;
-  const addTaskMemory = getTaskMemoryBridge();
-  if (typeof addTaskMemory !== 'function') return null;
-  return addTaskMemory(normalized.userId, {
+  const addTaskMemoryWithVectorBackfill = getTaskMemoryBridge();
+  if (typeof addTaskMemoryWithVectorBackfill !== 'function') return null;
+  void addTaskMemoryWithVectorBackfill(normalized.userId, {
     taskType: normalized.taskType || normalized.patternKey || normalized.kind,
     trigger: normalized.summary,
     strategy: normalized.kind === 'strategy' ? actionable : '',
@@ -129,7 +131,10 @@ function maybeBridgeTaskMemory(event = {}) {
     toolName: normalized.toolName,
     sessionId: normalized.sessionId,
     channelId: normalized.channelId
+  }).catch((error) => {
+    console.error('[self-improvement] task memory bridge failed:', error?.message || error);
   });
+  return true;
 }
 
 function appendEvent(input = {}) {

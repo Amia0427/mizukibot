@@ -38,37 +38,42 @@ function stableCandidateId(candidate = {}, context = {}) {
 
 function normalizeCandidate(candidate = {}, context = {}) {
   const meta = candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {};
-  const type = normalizeText(candidate.type || candidate.memoryKind || meta.memoryKind || 'fact').toLowerCase() || 'fact';
-  const scopeType = normalizeText(candidate.scopeType || meta.scopeType || context.scopeType || 'personal').toLowerCase() || 'personal';
-  const sourceKind = normalizeText(candidate.sourceKind || meta.sourceKind || candidate.source || context.sourceKind || 'extractor').toLowerCase() || 'extractor';
-  const status = normalizeText(candidate.status || meta.status || (sourceKind === 'explicit' ? 'active' : '')).toLowerCase();
+  const pendingEvent = meta.pendingMemoryV3Event && typeof meta.pendingMemoryV3Event === 'object'
+    ? meta.pendingMemoryV3Event
+    : {};
+  const pendingPayload = pendingEvent.payload && typeof pendingEvent.payload === 'object' ? pendingEvent.payload : {};
+  const type = normalizeText(pendingPayload.type || pendingEvent.memoryKind || candidate.type || candidate.memoryKind || meta.memoryKind || 'fact').toLowerCase() || 'fact';
+  const scopeType = normalizeText(pendingEvent.scopeType || candidate.scopeType || meta.scopeType || context.scopeType || 'personal').toLowerCase() || 'personal';
+  const sourceKind = normalizeText(pendingEvent.sourceKind || candidate.sourceKind || meta.sourceKind || candidate.source || context.sourceKind || 'extractor').toLowerCase() || 'extractor';
+  const status = normalizeText(pendingEvent.status || candidate.status || meta.status || (sourceKind === 'explicit' ? 'active' : '')).toLowerCase();
   const normalized = {
     ...candidate,
     id: normalizeText(candidate.id) || stableCandidateId(candidate, context),
-    userId: normalizeText(candidate.userId || context.userId),
-    sessionKey: normalizeText(candidate.sessionKey || context.sessionKey),
-    groupId: normalizeText(candidate.groupId || meta.groupId || context.groupId),
-    channelId: normalizeText(candidate.channelId || meta.channelId || context.channelId),
-    sessionId: normalizeText(candidate.sessionId || meta.sessionId || context.sessionId),
-    routePolicyKey: normalizeText(candidate.routePolicyKey || meta.routePolicyKey || context.routePolicyKey),
-    topRouteType: normalizeText(candidate.topRouteType || meta.topRouteType || context.topRouteType),
+    userId: normalizeText(pendingEvent.userId || candidate.userId || context.userId),
+    sessionKey: normalizeText(pendingEvent.sessionKey || candidate.sessionKey || context.sessionKey),
+    groupId: normalizeText(pendingEvent.groupId || candidate.groupId || meta.groupId || context.groupId),
+    channelId: normalizeText(pendingEvent.channelId || candidate.channelId || meta.channelId || context.channelId),
+    sessionId: normalizeText(pendingEvent.sessionId || candidate.sessionId || meta.sessionId || context.sessionId),
+    routePolicyKey: normalizeText(pendingEvent.routePolicyKey || candidate.routePolicyKey || meta.routePolicyKey || context.routePolicyKey),
+    topRouteType: normalizeText(pendingEvent.topRouteType || candidate.topRouteType || meta.topRouteType || context.topRouteType),
     scopeType,
-    source: normalizeText(candidate.source || meta.source || context.source || 'memory_v3_repository'),
+    source: normalizeText(pendingEvent.source || candidate.source || meta.source || context.source || 'memory_v3_repository'),
     sourceKind,
     status,
     type,
-    memoryKind: normalizeText(candidate.memoryKind || meta.memoryKind || type).toLowerCase() || type,
-    fieldKey: normalizeText(candidate.fieldKey || meta.fieldKey || candidate.semanticSlot || type).toLowerCase() || type,
-    semanticSlot: normalizeText(candidate.semanticSlot || meta.semanticSlot || meta.fieldKey || candidate.fieldKey || type).toLowerCase() || type,
-    canonicalKey: normalizeText(candidate.canonicalKey || candidate.canonicalText || canonicalizeText(candidate.text)).toLowerCase(),
-    text: normalizeText(candidate.text || candidate.value || candidate.content),
-    confidence: Number(candidate.confidence ?? meta.confidence ?? context.confidence ?? 0.8),
-    importance: Number(candidate.importance ?? meta.importance ?? candidate.weight ?? 0) || 0,
-    evidenceCount: Math.max(0, Number(candidate.evidenceCount ?? meta.evidenceCount ?? 0) || 0),
+    memoryKind: normalizeText(pendingEvent.memoryKind || pendingPayload.memoryKind || candidate.memoryKind || meta.memoryKind || type).toLowerCase() || type,
+    fieldKey: normalizeText(pendingPayload.fieldKey || candidate.fieldKey || meta.fieldKey || candidate.semanticSlot || type).toLowerCase() || type,
+    semanticSlot: normalizeText(pendingEvent.semanticSlot || candidate.semanticSlot || meta.semanticSlot || meta.fieldKey || candidate.fieldKey || type).toLowerCase() || type,
+    canonicalKey: normalizeText(pendingEvent.canonicalKey || candidate.canonicalKey || candidate.canonicalText || canonicalizeText(pendingEvent.text || candidate.text)).toLowerCase(),
+    text: normalizeText(pendingEvent.text || candidate.text || candidate.value || candidate.content),
+    confidence: Number(pendingEvent.confidence ?? candidate.confidence ?? meta.confidence ?? context.confidence ?? 0.8),
+    importance: Number(pendingEvent.importance ?? candidate.importance ?? meta.importance ?? candidate.weight ?? 0) || 0,
+    evidenceCount: Math.max(0, Number(pendingEvent.evidenceCount ?? candidate.evidenceCount ?? meta.evidenceCount ?? 0) || 0),
     meta: {
       ...meta,
-      fieldKey: normalizeText(meta.fieldKey || candidate.fieldKey || candidate.semanticSlot || type).toLowerCase() || type,
-      memoryKind: normalizeText(meta.memoryKind || candidate.memoryKind || type).toLowerCase() || type,
+      pendingMemoryV3Event: undefined,
+      fieldKey: normalizeText(pendingPayload.fieldKey || meta.fieldKey || candidate.fieldKey || candidate.semanticSlot || type).toLowerCase() || type,
+      memoryKind: normalizeText(pendingPayload.memoryKind || meta.memoryKind || candidate.memoryKind || type).toLowerCase() || type,
       sourceKind,
       scopeType
     }

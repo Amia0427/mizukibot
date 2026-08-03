@@ -35,6 +35,7 @@ const {
   ensureShardStateHydrated,
   getCoveredRollupLevels,
   getMemoryItems,
+  getMemoryItemsByFilter,
   getShardIndexStore,
   getShardItemsStore,
   isEpisodeMemory,
@@ -568,7 +569,10 @@ function persistNormalizedMemoryItems(normalizedItems = []) {
       const result = commitMemoryWrites(
         normalizedItems,
         (accepted) => persistNormalizedMemoryItemsDirect(accepted),
-        { minConfidence: config.MEMORY_EXTRACT_MIN_CONFIDENCE }
+        {
+          existingItemsProvider: (_candidate, filters) => getMemoryItemsByFilter(filters),
+          minConfidence: config.MEMORY_EXTRACT_MIN_CONFIDENCE
+        }
       );
       return result.ids;
     } finally {
@@ -597,6 +601,7 @@ async function prepareEnhancedMemoryWrites(normalizedItems = [], options = {}) {
     if (!candidate) continue;
     if (pipelineEnabled) {
       const validation = validateMemoryWrite(candidate, {
+        existingItemsProvider: (_candidate, filters) => getMemoryItemsByFilter(filters),
         minConfidence: config.MEMORY_EXTRACT_MIN_CONFIDENCE,
         ...options
       });

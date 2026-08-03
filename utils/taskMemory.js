@@ -1,10 +1,6 @@
 const config = require('../config');
-const {
-  addMemoryItem,
-  addMemoryItemsBatchWithVectorBackfill,
-  retrieveRelevantMemories,
-  retrieveRelevantMemoriesAsync
-} = require('./vectorMemory');
+const { queryMemory, writeMemoryBatch } = require('./memory-v3');
+const { retrieveRelevantMemories } = require('./memory-v3/projectionCompat');
 
 function sanitizeText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim();
@@ -100,41 +96,17 @@ function buildTaskMemoryCandidate(userId, task = {}) {
   };
 }
 
-function addTaskMemory(userId, task = {}) {
+async function addTaskMemory(userId, task = {}) {
   const candidate = buildTaskMemoryCandidate(userId, task);
   if (!candidate) return null;
-  return addMemoryItem(
-    candidate.userId,
-    candidate.text,
-    candidate.type,
-    {
-      ...candidate.meta,
-      scopeType: candidate.scopeType,
-      taskType: candidate.taskType,
-      routePolicyKey: candidate.routePolicyKey,
-      topRouteType: candidate.topRouteType,
-      agentName: candidate.agentName,
-      toolName: candidate.toolName,
-      sessionId: candidate.sessionId,
-      channelId: candidate.channelId,
-      status: candidate.status,
-      sourceKind: candidate.sourceKind,
-      sourceSessionId: candidate.sourceSessionId,
-      turnId: candidate.turnId,
-      turnIds: candidate.turnIds,
-      evidence: candidate.evidence,
-      participants: candidate.participants,
-      entities: candidate.entities,
-      relations: candidate.relations
-    },
-    candidate.weight
-  );
+  const result = await writeMemoryBatch([candidate], { phase: 'task_memory_write' });
+  return result.ids[0] || null;
 }
 
 async function addTaskMemoryWithVectorBackfill(userId, task = {}, options = {}) {
   const candidate = buildTaskMemoryCandidate(userId, task);
   if (!candidate) return { ids: [], accepted: [], rejected: [] };
-  return addMemoryItemsBatchWithVectorBackfill([candidate], {
+  return writeMemoryBatch([candidate], {
     ...options,
     phase: 'task_memory_write'
   });
@@ -152,10 +124,13 @@ function retrieveRelevantTaskMemories(userId, query, topK = config.TASK_MEMORY_T
 async function retrieveRelevantTaskMemoriesAsync(userId, query, topK = config.TASK_MEMORY_TOP_K || 3, options = {}) {
   if (!config.TASK_MEMORY_ENABLED) return [];
 
-  return retrieveRelevantMemoriesAsync(userId, query, topK, {
+  const result = await queryMemory({
     ...options,
-    scopeType: 'task'
+    userId,
+    query,
+    topK
   });
+  return result.results.filter((item) => ['task', 'working'].includes(String(item.scopeType || '')));
 }
 
 function formatTaskMemories(hits = [], options = {}) {
