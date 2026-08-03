@@ -182,7 +182,23 @@ function buildMemoryLookupFilters(candidate = {}) {
   };
 }
 
-function listMemoryItemsForPipeline(candidate = {}) {
+function listMemoryItemsForPipeline(candidate = {}, options = {}) {
+  if (Array.isArray(options.existingItems)) return options.existingItems;
+  if (typeof options.existingItemsProvider === 'function') {
+    const items = options.existingItemsProvider(candidate, buildMemoryLookupFilters(candidate));
+    return Array.isArray(items) ? items : [];
+  }
+  if (config.MEMORY_STORAGE_MODE !== 'legacy_compat') {
+    try {
+      const { loadMemoryNodesForUser } = require('../memory-v3/storage');
+      const scope = normalizeScope(candidate);
+      return loadMemoryNodesForUser(scope.userId, {
+        groupIds: scope.groupId ? [scope.groupId] : []
+      });
+    } catch (_) {
+      return [];
+    }
+  }
   try {
     const vectorMemory = require('../vectorMemory');
     const filters = buildMemoryLookupFilters(candidate);
@@ -198,11 +214,11 @@ function listMemoryItemsForPipeline(candidate = {}) {
   }
 }
 
-function findExistingMemory(candidate = {}) {
+function findExistingMemory(candidate = {}, options = {}) {
   const fp = fingerprintText(candidateText(candidate));
   if (!fp) return null;
   const type = normalizeType(candidate.type || candidate.memoryKind);
-  const items = listMemoryItemsForPipeline(candidate);
+  const items = listMemoryItemsForPipeline(candidate, options);
   return items.find((item) => {
     if (!item || String(item.status || 'active') === 'archived') return false;
     if (normalizeType(item.type || item.memoryKind) !== type) return false;
@@ -212,10 +228,10 @@ function findExistingMemory(candidate = {}) {
   }) || null;
 }
 
-function findConflict(candidate = {}) {
+function findConflict(candidate = {}, options = {}) {
   const conflictKey = normalizeText(candidate.conflictKey || candidate.meta?.conflictKey || '');
   if (!conflictKey) return null;
-  return listMemoryItemsForPipeline(candidate).find((item) => {
+  return listMemoryItemsForPipeline(candidate, options).find((item) => {
     if (!item || String(item.status || 'active') === 'archived') return false;
     if (!sameScope(candidate, item)) return false;
     return normalizeText(item.conflictKey || item.meta?.conflictKey || '') === conflictKey
@@ -251,10 +267,10 @@ function validateMemoryWrite(candidate = {}, options = {}) {
     minConfidence
   });
   if (qualityDecision.rejected) return qualityDecision.rejected;
-  const duplicate = findExistingMemory(candidate);
+  const duplicate = options.skipDuplicateCheck === true ? null : findExistingMemory(candidate, options);
   if (duplicate) return { ok: false, reason: 'duplicate', duplicateId: duplicate.id };
   const forceCandidateOnly = shouldForceCandidateOnly(candidate);
-  const conflict = findConflict(candidate);
+  const conflict = findConflict(candidate, options);
   if (conflict) return qualityGate.buildConflictCandidate(candidate, conflict, qualityDecision);
   if (forceCandidateOnly) return qualityGate.buildProfileCandidateOnly(candidate, qualityDecision);
   return qualityGate.buildQualityCandidate(candidate, qualityDecision)

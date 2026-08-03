@@ -1,5 +1,5 @@
 const config = require('../../config');
-const { shouldUseRemoteEmbedding, requestEmbedding } = require('../vectorMemory');
+const { shouldUseRemoteEmbedding, requestEmbedding } = require('../memoryEmbedding');
 const {
   normalizeText,
   canonicalizeText,

@@ -149,8 +149,7 @@ const EXPECTED_EXTERNAL_LEAF_EDGES = [
 ].sort();
 
 const EMBEDDING_DEPENDENCIES = [
-  '../../../config',
-  '../../../utils/memoryEmbeddingClient',
+  '../../../utils/memoryEmbedding',
   '../../../utils/memorySemanticIndex'
 ].sort();
 
@@ -702,6 +701,7 @@ module.exports = (() => {
       ...Object.keys(IMPLEMENTATION_FUNCTION_COUNTS).map((file) => `../src/memory/vector/${file}`),
       '../utils/memorySemanticIndex',
       '../utils/memoryEmbeddingClient',
+      '../utils/memoryEmbedding',
       ...MUST_STAY_LAZY
     ];
     testedModules.forEach(clearModule);

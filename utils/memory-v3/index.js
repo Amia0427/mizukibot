@@ -1,9 +1,15 @@
 const { appendMemoryEvent, normalizeMemoryEvent, loadMemoryEvents } = require('./events');
 const { materializeMemoryViews, materializeMemoryViewsAsync } = require('./materializer');
-const { queryMemory } = require('./query');
+const {
+  queryMemory,
+  writeMemoryBatch
+} = require('./repository');
+const {
+  applyStrictArchiveRun,
+  restoreArchiveRun
+} = require('./archiveRuns');
 const { assembleMemoryPacket } = require('./packet');
 const { restoreSessionState } = require('./session');
-const { migrateLegacyMemoryToV3 } = require('./migration');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
 const { runProfileMemoryMaintenance } = require('./profileMaintenance');
 const {
@@ -47,6 +53,10 @@ const {
   uriForDoc
 } = require('./uriResolver');
 
+function migrateLegacyMemoryToV3(...args) {
+  return require('./migration').migrateLegacyMemoryToV3(...args);
+}
+
 module.exports = {
   appendMemoryEvent,
   normalizeMemoryEvent,
@@ -54,6 +64,9 @@ module.exports = {
   materializeMemoryViews,
   materializeMemoryViewsAsync,
   queryMemory,
+  writeMemoryBatch,
+  applyStrictArchiveRun,
+  restoreArchiveRun,
   assembleMemoryPacket,
   restoreSessionState,
   migrateLegacyMemoryToV3,

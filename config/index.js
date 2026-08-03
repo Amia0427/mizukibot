@@ -22,6 +22,7 @@ const { buildPlannerRuntimeConfig } = require('./plannerRuntime');
 const { buildMemosRuntimeConfig } = require('./memosRuntime');
 const { buildOpenVikingRuntimeConfig } = require('./openVikingRuntime');
 const { buildPostReplyWatchdogRuntimeConfig } = require('./postReplyRuntime');
+const { resolveMemoryStorageMode } = require('./memoryStorageRuntime');
 const {
   buildMainReplyContextRuntimeConfig,
   buildSessionContextRuntimeConfig
@@ -1116,6 +1117,7 @@ module.exports = {
   AUX_MODEL_API_KEY: pick('AUX_MODEL_API_KEY', ''),
   AUX_MODEL: pick('AUX_MODEL', ''),
   MEMORY_V3_ENABLED: pickBool('MEMORY_V3_ENABLED', true),
+  MEMORY_STORAGE_MODE: resolveMemoryStorageMode(pick('MEMORY_STORAGE_MODE', 'legacy_compat')),
   MEMORY_V3_DIR: pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')),
   MEMORY_V3_EVENTS_DIR: pick('MEMORY_V3_EVENTS_DIR', path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'events')),
   MEMORY_V3_PROJECTIONS_DIR: pick('MEMORY_V3_PROJECTIONS_DIR', path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections')),
@@ -1148,6 +1150,7 @@ module.exports = {
     path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections', 'materialize.lock')
   ),
   MEMORY_V3_MATERIALIZE_LOCK_STALE_MS: pickNum('MEMORY_V3_MATERIALIZE_LOCK_STALE_MS', 10 * 60 * 1000),
+  MEMORY_GOVERNANCE_RUNS_DIR: pick('MEMORY_GOVERNANCE_RUNS_DIR', path.join(DATA_DIR, 'memory-governance', 'runs')),
   MEMORY_V3_CANDIDATE_CONFIRMATIONS_REQUIRED: pickNum('MEMORY_V3_CANDIDATE_CONFIRMATIONS_REQUIRED', 2),
   MEMORY_V3_RRF_K: pickNum('MEMORY_V3_RRF_K', 50),
   MEMORY_V3_TOP_K: pickNum('MEMORY_V3_TOP_K', 8),
