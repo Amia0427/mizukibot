@@ -6,7 +6,7 @@ const path = require('path');
 const { createTempPromptsDir } = require('./promptTestHelpers');
 
 function clearProjectCache() {
-  const projectRoot = 'D:\\waifu\\';
+  const projectRoot = path.resolve(__dirname, '..') + path.sep;
   for (const key of Object.keys(require.cache)) {
     if (key.startsWith(projectRoot)) delete require.cache[key];
   }
