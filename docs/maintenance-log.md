@@ -1,3 +1,12 @@
+## 运行维护 2026-08-04 10:56 +08:00
+
+- 根因：长期记忆业务读写同时依赖 Memory V3 与旧 JSON/shard vector store，embedding 能力也被旧 store 持有；直接删除旧文件会破坏默认兼容路径，且历史治理缺少稳定身份、可审计清单和完整恢复协议。
+- 实现：提交 `68a5903` 建立 Memory V3 仓储、共享 embedding 和 `strict-v1` 可逆归档；提交 `62fac86` 迁移记忆提取、post-reply enrich、群/任务记忆、短期重启召回、Memory CLI、Prompt 上下文与 style/jargon 消费者；提交 `b2ffed0` 增加稳定增量迁移、预检计划、8 分钟截止回滚、LanceDB full reconcile、旧文件 manifest 归档/恢复和 `legacy_compat|v3_shadow|v3_only` 模式。提交 `d682fe3` 修复独立工作树测试路径与 Windows ACL 模块路径兼容。
+- 治理边界：`strict-v1` 只归档确定性重复败者、有效 `supersededBy`、Prompt/系统/工具指令污染、误存的助手自述/拒绝/失败回复，以及空值/占位/无效 scope；低置信、年龄、玩笑、短期性、图片描述或主观评分不会单独触发归档。事件保留 `runId/policyVersion/reason/previousStatus/sourceId/evidenceHash`，恢复只追加 `memory_confirmed`，不删除事件。
+- 自动验收：使用 `MIZUKIBOT_ENV_FILE=D:\waifu\.env` 与工作树 `PROMPTS_DIR`，`npm test`、`npm run coverage`、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 全部退出 0；覆盖率为行 72.27%、函数 80.04%、分支 61.83%。V3-only 缺失旧文件启动、旧文件零写、shadow 只统计、迁移幂等、治理恢复和消费者静态边界均有回归测试。
+- 未执行真实维护窗口：本地 `.env` 仍未切换，未暂停或重启主进程/worker，未导入真实历史、归档旧文件或修改 LanceDB。迁移 `runId=N/A`、归档 manifest hash `N/A`、维护耗时 `N/A`；若计划停在 `applying`，必须显式运行 `node scripts/migrate-memory-v3.js --rollback-run <runId|plan.json>`，不得直接重试 apply。
+- 边界：未删除任何文件，未触碰主工作树的 `.belt/`、`AGENT.md` 或其他代理改动，未推送远端。Memory V3/LanceDB 代码收敛小目标已完成，真实数据切换仍等待独立维护窗口。
+
 ## 运行维护 2026-08-02 15:24 +08:00
 
 - 根因：`harness_eval_manifest_v1` 只固定 fixture，三个本地评估仍分别解析控制台与硬编码阈值，也没有统一 profile/report 契约；真实模型与脱敏回放只有名称，没有可验证的输入元数据、时效和最小覆盖边界。

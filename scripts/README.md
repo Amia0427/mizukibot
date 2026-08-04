@@ -63,7 +63,7 @@
 
 ## Migration / Maintenance
 
-- `migrate-memory-v3.js`
+- `migrate-memory-v3.js`：Memory V3 物化与存储收敛入口。默认只强制物化；旧数据增量导入使用 `--import-legacy`，禁止 `--force` 和 `--force-import-legacy`。收敛流程先运行 `node scripts/migrate-memory-v3.js --converge --dry-run` 生成带源文件 SHA-256、稳定迁移身份、预计事件数和 LanceDB 耗时的计划；维护窗口内用 `--apply-plan <runId|plan.json>` 应用，失败或停在 `applying` 时必须用 `--rollback-run <runId|plan.json>` 恢复。生成计划不会暂停进程、移动旧文件或修改 `.env`。
 - `import-memory-file.js`：导入 `.md/.txt` 到 Memory V3；更新 2026-05-23 11:04 +08:00：Markdown 按标题切块，写入前走版本化 update，重复导入不扩大 active chunk 数
 - 更新 2026-05-23 11:20 +08:00：Memory V3 维护脚本诊断时可结合 `tests/memoryV3GenericConflictResolution.test.js`、`tests/memoryV3RecentRecallFastPath.test.js` 验证冲突 loser 隐藏和近期召回快路径。
 - `check-native-migration.js`
