@@ -1,6 +1,5 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../../config');
@@ -87,6 +86,20 @@ function latestEventsByNodeId(events = []) {
     if (id) latest.set(id, event);
   }
   return latest;
+}
+
+function countArchiveEventsForRun(events = [], runId = '', entries = []) {
+  const evidenceBySourceId = new Map((Array.isArray(entries) ? entries : []).map((entry) => [
+    normalizeText(entry.sourceId),
+    normalizeText(entry.evidenceHash)
+  ]));
+  return (Array.isArray(events) ? events : []).filter((event) => {
+    const sourceId = normalizeText(event?.payload?.sourceId || event?.id);
+    return event?.type === 'memory_archived'
+      && event.payload?.runId === runId
+      && event.payload?.policyVersion === STRICT_ARCHIVE_POLICY_VERSION
+      && evidenceBySourceId.get(sourceId) === normalizeText(event.payload?.evidenceHash);
+  }).length;
 }
 
 function buildStrictArchiveEvent(entry = {}, context = {}) {
@@ -200,10 +213,44 @@ function saveManifest(filePath, manifest = {}) {
   return next;
 }
 
+function readManifest(filePath) {
+  const manifest = safeReadJson(filePath, null);
+  if (!manifest) return null;
+  const expectedHash = normalizeText(manifest.manifestHash);
+  const value = { ...manifest };
+  delete value.manifestHash;
+  if (!expectedHash || hashJson(value) !== expectedHash) {
+    throw new Error('Memory governance manifest hash mismatch');
+  }
+  return manifest;
+}
+
 async function applyStrictArchiveRun(options = {}) {
   const nodes = Array.isArray(options.nodes) ? options.nodes : loadMemoryNodes();
   const inputHash = buildStrictArchiveInputHash(nodes);
   const runId = normalizeRunId(options.runId || createRunId(inputHash, options.now));
+  const manifestFile = manifestPathForRun(runId);
+  const existingManifest = options.dryRun === true ? null : readManifest(manifestFile);
+  if (existingManifest) {
+    if (existingManifest.inputHash !== inputHash) {
+      throw new Error(`Memory governance run already exists with different input: ${runId}`);
+    }
+    if (existingManifest.status !== 'applying') {
+      return {
+        ok: existingManifest.status !== 'failed',
+        dryRun: false,
+        runId,
+        policyVersion: STRICT_ARCHIVE_POLICY_VERSION,
+        inputHash,
+        manifestPath: manifestFile,
+        manifestHash: existingManifest.manifestHash,
+        archived: [],
+        appendedEvents: 0,
+        alreadyApplied: true,
+        materialized: { ok: true, skipped: true, reason: 'run_already_applied' }
+      };
+    }
+  }
   const decisions = classifyStrictArchiveCandidates(nodes);
   const dryRun = options.dryRun === true;
   const existingEvents = dryRun ? [] : loadMemoryEvents();
@@ -235,10 +282,32 @@ async function applyStrictArchiveRun(options = {}) {
   }
 
   const startedAt = Number(options.now || Date.now()) || Date.now();
+  ensureDir(path.dirname(manifestFile));
+  let manifest = existingManifest || saveManifest(manifestFile, {
+    version: 1,
+    runId,
+    policyVersion: STRICT_ARCHIVE_POLICY_VERSION,
+    inputHash,
+    status: 'applying',
+    createdAt: new Date(startedAt).toISOString(),
+    appendedEvents: 0,
+    alreadyApplied: decisions.length > 0 && pending.length === 0,
+    entries: pending.map((decision) => ({
+      sourceId: decision.sourceId,
+      reason: decision.reason,
+      previousStatus: decision.previousStatus,
+      evidenceHash: decision.evidenceHash,
+      snapshot: snapshotNode(decision.node)
+    })),
+    materialized: null,
+    restoreHistory: []
+  });
+  const previouslyAppendedEvents = countArchiveEventsForRun(existingEvents, runId, manifest.entries);
+  const appendEvent = options.appendEvent || appendMemoryEvent;
   const archived = [];
   for (let index = 0; index < pending.length; index += 1) {
     const decision = pending[index];
-    const event = await appendMemoryEvent(buildStrictArchiveEvent(decision, {
+    const event = await appendEvent(buildStrictArchiveEvent(decision, {
       runId,
       ts: startedAt + index,
       source: options.source
@@ -259,32 +328,18 @@ async function applyStrictArchiveRun(options = {}) {
         source: 'strict_archive_run'
       })
     : { ok: true, skipped: true, reason: archived.length > 0 ? 'disabled' : 'no_events' };
-  const manifestFile = manifestPathForRun(runId);
-  ensureDir(path.dirname(manifestFile));
-  const manifest = saveManifest(manifestFile, {
-    version: 1,
-    runId,
-    policyVersion: STRICT_ARCHIVE_POLICY_VERSION,
-    inputHash,
-    createdAt: new Date(startedAt).toISOString(),
-    appendedEvents: archived.length,
+  const materializedOk = materialized?.ok !== false && materialized?.deferred !== true;
+  manifest = saveManifest(manifestFile, {
+    ...manifest,
+    status: materializedOk ? 'applied' : 'failed',
+    completedAt: new Date().toISOString(),
+    appendedEvents: previouslyAppendedEvents + archived.length,
     alreadyApplied: decisions.length > 0 && archived.length === 0,
-    entries: archived.map((item) => {
-      const decision = pending.find((candidate) => candidate.sourceId === item.sourceId);
-      return {
-        sourceId: item.sourceId,
-        reason: item.reason,
-        previousStatus: item.previousStatus,
-        evidenceHash: item.evidenceHash,
-        snapshot: snapshotNode(decision?.node || {})
-      };
-    }),
-    materialized: materialized?.stats || null,
-    restoreHistory: []
+    materialized: materialized?.stats || null
   });
 
   return {
-    ok: materialized?.ok !== false,
+    ok: materializedOk,
     dryRun: false,
     runId,
     policyVersion: STRICT_ARCHIVE_POLICY_VERSION,
@@ -301,7 +356,7 @@ async function applyStrictArchiveRun(options = {}) {
 async function restoreArchiveRun(runId = '', options = {}) {
   const normalizedRunId = normalizeRunId(runId);
   const manifestFile = manifestPathForRun(normalizedRunId);
-  const manifest = safeReadJson(manifestFile, null);
+  const manifest = readManifest(manifestFile);
   if (!manifest || manifest.runId !== normalizedRunId || manifest.policyVersion !== STRICT_ARCHIVE_POLICY_VERSION) {
     return { ok: false, reason: 'run_not_found', runId: normalizedRunId, restored: [] };
   }
@@ -333,6 +388,7 @@ async function restoreArchiveRun(runId = '', options = {}) {
   });
   const savedManifest = saveManifest(manifestFile, {
     ...manifest,
+    status: 'restored',
     restoreHistory,
     lastRestoredAt: new Date(startedAt).toISOString(),
     lastRestoredEvents: restored.length

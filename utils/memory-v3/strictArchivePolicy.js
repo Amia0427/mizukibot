@@ -101,7 +101,7 @@ function compareDuplicateWinners(left = {}, right = {}) {
 function findDuplicateLosers(nodes = []) {
   const groups = new Map();
   for (const node of Array.isArray(nodes) ? nodes : []) {
-    if (!node || !isActiveNode(node)) continue;
+    if (!node) continue;
     const key = duplicateGroupKey(node);
     if (!key) continue;
     if (!groups.has(key)) groups.set(key, []);
@@ -177,8 +177,12 @@ function buildDecision(node = {}, reason = '', evidence = {}) {
   };
 }
 
-function classifyStrictArchiveCandidates(nodes = []) {
-  const activeNodes = (Array.isArray(nodes) ? nodes : []).filter((node) => node && isActiveNode(node));
+function classifyStrictArchiveCandidates(nodes = [], options = {}) {
+  const activeNodes = (Array.isArray(nodes) ? nodes : []).filter((node) => {
+    if (!node) return false;
+    return isActiveNode(node)
+      || (options.includeCandidates === true && normalizeStatus(node) === 'candidate');
+  });
   const byId = new Map(activeNodes.map((node) => [normalizeText(node.id || node.nodeId), node]));
   const duplicateLosers = findDuplicateLosers(activeNodes);
   const decisions = [];

@@ -1,5 +1,6 @@
 'use strict';
 
+const config = require('../../config');
 const { isMemoryNotRecallable } = require('./recallFilter');
 const {
   canonicalizeText,
@@ -8,6 +9,10 @@ const {
   tokenize
 } = require('./helpers');
 const { loadMemoryNodes } = require('./storage');
+
+function isLegacyPrimary() {
+  return config.MEMORY_V3_ENABLED === false || config.MEMORY_STORAGE_MODE === 'legacy_compat';
+}
 
 function nodeId(node = {}) {
   return normalizeText(node.id || node.nodeId);
@@ -115,6 +120,9 @@ function retrieveRelevantMemories(userId, query, topK = 8, options = {}) {
 }
 
 function retrieveUnifiedMemories(userId, query, topK = 8, options = {}) {
+  if (isLegacyPrimary()) {
+    return require('./legacyCompat').retrieveLegacyMemories(userId, query, topK, options);
+  }
   const groupIds = normalizeGroupIds(options);
   const nodes = visibleNodes().filter((node) => {
     const scopeType = normalizeText(node.scopeType || 'personal').toLowerCase() || 'personal';
@@ -136,6 +144,9 @@ function retrieveUnifiedMemories(userId, query, topK = 8, options = {}) {
 }
 
 async function retrieveUnifiedMemoriesAsync(userId, query, topK = 8, options = {}) {
+  if (isLegacyPrimary()) {
+    return require('./legacyCompat').retrieveLegacyMemoriesAsync(userId, query, topK, options);
+  }
   const { queryMemory } = require('./repository');
   const result = await queryMemory({
     ...options,

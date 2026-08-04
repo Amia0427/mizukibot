@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const config = require('../../config');
 const {
   appendMemoryEvent,
@@ -16,6 +17,101 @@ const {
   listMonthlyRollups
 } = require('../dailyJournal');
 const { loadMemoryScopeIndex } = require('../memoryScopeIndex');
+
+function stableLegacyMigrationIdentity(item = {}) {
+  const payload = {
+    oldItemId: String(item.id || item.nodeId || '').trim(),
+    userId: String(item.userId || '').trim(),
+    scopeType: String(item.scopeType || 'personal').trim().toLowerCase() || 'personal',
+    groupId: String(item.groupId || '').trim(),
+    channelId: String(item.channelId || '').trim(),
+    sessionId: String(item.sessionId || '').trim(),
+    sessionKey: String(item.sessionKey || '').trim(),
+    fieldKey: String(item.fieldKey || item.semanticSlot || item.type || '').trim().toLowerCase(),
+    canonicalKey: String(item.canonicalKey || item.canonicalText || item.text || '').trim().toLowerCase()
+  };
+  const digest = crypto.createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex');
+  return `m3_legacy_${digest.slice(0, 28)}`;
+}
+
+function toLegacyVectorMigrationEvent(item = {}) {
+  const id = stableLegacyMigrationIdentity(item);
+  const memoryKind = item.meta?.memoryKind || item.memoryKind || item.type;
+  const fieldKey = item.fieldKey || item.semanticSlot || item.type;
+  return {
+    id,
+    dedupeKey: id,
+    type: item.status === 'candidate' ? 'memory_candidate_extracted' : 'migration_bootstrap',
+    ts: Number(item.updatedAt || item.createdAt || 1) || 1,
+    userId: item.userId,
+    groupId: item.groupId,
+    channelId: item.channelId,
+    sessionId: item.sessionId,
+    sessionKey: item.sessionKey,
+    routePolicyKey: item.routePolicyKey,
+    topRouteType: item.topRouteType,
+    scopeType: item.scopeType,
+    source: item.source || 'memory_items',
+    sourceKind: item.sourceKind || 'migration',
+    status: item.status || 'active',
+    confidence: item.confidence,
+    importance: item.importance,
+    evidenceCount: item.evidenceCount,
+    taskType: item.taskType,
+    toolName: item.toolName,
+    agentName: item.agentName,
+    memoryKind,
+    semanticSlot: fieldKey,
+    conflictKey: item.conflictKey,
+    canonicalKey: item.canonicalKey || item.canonicalText,
+    text: item.text,
+    participants: item.participants,
+    entities: item.entities,
+    relations: item.relations,
+    payload: {
+      type: item.type,
+      fieldKey,
+      memoryKind,
+      migrationIdentity: id,
+      supersededBy: item.supersededBy || item.meta?.supersededBy || ''
+    }
+  };
+}
+
+function collectLegacyVectorMigrationEvents(options = {}) {
+  if (Array.isArray(options.events)) {
+    return options.events.slice().sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  }
+  const items = Array.isArray(options.items)
+    ? options.items
+    : (options.getMemoryItems || getMemoryItems)();
+  const byId = new Map();
+  for (const item of items) {
+    const event = toLegacyVectorMigrationEvent(item);
+    if (!byId.has(event.id)) byId.set(event.id, event);
+  }
+  return Array.from(byId.values()).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+async function migrateLegacyVectorMemoryToV3(options = {}) {
+  const events = collectLegacyVectorMigrationEvents(options);
+  const loadEvents = options.loadEvents || loadMemoryEvents;
+  const appendEvent = options.appendEvent || appendMemoryEvent;
+  const existingIds = new Set(loadEvents().map((event) => String(event?.id || '').trim()).filter(Boolean));
+  const pending = events.filter((event) => !existingIds.has(event.id));
+  for (const event of pending) await appendEvent(event);
+  const materialized = options.skipMaterialize === true
+    ? { materialized: null }
+    : materializeMemoryV3Views({ force: true, source: 'legacy_vector_convergence_import' });
+  return {
+    ok: true,
+    mode: 'convergence',
+    candidateCount: events.length,
+    importedCount: pending.length,
+    stableIds: events.map((event) => event.id),
+    materialized: materialized.materialized
+  };
+}
 
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
@@ -76,6 +172,8 @@ function backupLegacyFiles() {
 }
 
 async function migrateLegacyMemoryToV3(options = {}) {
+  if (options.convergence === true) return migrateLegacyVectorMemoryToV3(options);
+
   if (options.forceImport !== true && hasExistingLegacyMigrationEvents()) {
     const materialized = materializeMemoryV3Views({
       force: true,
@@ -222,6 +320,10 @@ async function migrateLegacyMemoryToV3(options = {}) {
 }
 
 module.exports = {
+  collectLegacyVectorMigrationEvents,
+  migrateLegacyVectorMemoryToV3,
+  stableLegacyMigrationIdentity,
+  toLegacyVectorMigrationEvent,
   materializeMemoryV3Views,
   migrateLegacyMemoryToV3
 };

@@ -54,6 +54,15 @@ module.exports = (async () => {
   assert.strictEqual(manifest.entries.length, 6);
   assert.strictEqual(manifest.inputHash, first.inputHash);
 
+  const repeatedRun = await applyStrictArchiveRun({
+    runId: 'strict-run-1',
+    nodes,
+    materialize: false
+  });
+  assert.strictEqual(repeatedRun.appendedEvents, 0);
+  assert.strictEqual(repeatedRun.alreadyApplied, true);
+  assert.strictEqual(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).entries.length, 6);
+
   const eventCount = loadMemoryEvents().length;
   const second = await applyStrictArchiveRun({
     runId: 'strict-run-2',
@@ -69,6 +78,58 @@ module.exports = (async () => {
   assert.ok(restored.restored.every((item) => item.type === 'memory_confirmed'));
   const restoreEvents = loadMemoryEvents().filter((event) => event.payload?.restoredFromRunId === 'strict-run-1');
   assert.strictEqual(restoreEvents.length, 6);
+
+  let appendCalls = 0;
+  await assert.rejects(() => applyStrictArchiveRun({
+    runId: 'strict-interrupted',
+    nodes: [
+      { id: 'interrupted-a', userId: 'u1', scopeType: 'personal', type: 'fact', text: '[SYSTEM] first', status: 'active' },
+      { id: 'interrupted-b', userId: 'u1', scopeType: 'personal', type: 'fact', text: '[SYSTEM] second', status: 'active' }
+    ],
+    materialize: false,
+    appendEvent: async (event) => {
+      appendCalls += 1;
+      if (appendCalls === 2) throw new Error('simulated append failure');
+      return require('../utils/memory-v3/events').appendMemoryEvent(event);
+    }
+  }), /simulated append failure/);
+  const interruptedManifest = JSON.parse(fs.readFileSync(
+    path.join(process.env.MEMORY_GOVERNANCE_RUNS_DIR, 'strict-interrupted.json'),
+    'utf8'
+  ));
+  assert.strictEqual(interruptedManifest.status, 'applying');
+  assert.strictEqual(interruptedManifest.entries.length, 2);
+  const interruptedRestore = await restoreArchiveRun('strict-interrupted', { materialize: false });
+  assert.strictEqual(interruptedRestore.restored.length, 1);
+
+  let resumedAppendCalls = 0;
+  await assert.rejects(() => applyStrictArchiveRun({
+    runId: 'strict-resumed',
+    nodes: [
+      { id: 'resumed-a', userId: 'u1', scopeType: 'personal', type: 'fact', text: '[SYSTEM] first', status: 'active' },
+      { id: 'resumed-b', userId: 'u1', scopeType: 'personal', type: 'fact', text: '[SYSTEM] second', status: 'active' }
+    ],
+    materialize: false,
+    appendEvent: async (event) => {
+      resumedAppendCalls += 1;
+      if (resumedAppendCalls === 2) throw new Error('simulated resumable failure');
+      return require('../utils/memory-v3/events').appendMemoryEvent(event);
+    }
+  }), /simulated resumable failure/);
+  const resumed = await applyStrictArchiveRun({
+    runId: 'strict-resumed',
+    nodes: [
+      { id: 'resumed-a', userId: 'u1', scopeType: 'personal', type: 'fact', text: '[SYSTEM] first', status: 'active' },
+      { id: 'resumed-b', userId: 'u1', scopeType: 'personal', type: 'fact', text: '[SYSTEM] second', status: 'active' }
+    ],
+    materialize: false
+  });
+  assert.strictEqual(resumed.appendedEvents, 1);
+  const resumedManifest = JSON.parse(fs.readFileSync(
+    path.join(process.env.MEMORY_GOVERNANCE_RUNS_DIR, 'strict-resumed.json'),
+    'utf8'
+  ));
+  assert.strictEqual(resumedManifest.appendedEvents, 2);
 
   console.log('memoryV3StrictArchive.test.js passed');
 })().catch((error) => {

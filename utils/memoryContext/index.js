@@ -339,7 +339,7 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     activeRawMaxEntries: options.activeRawMaxEntries || 8,
     disableLegacyFactFallback: options.disableLegacyFactFallback || recapQuery
   };
-  if (config.MEMORY_V3_ENABLED) {
+  if (config.MEMORY_V3_ENABLED && config.MEMORY_STORAGE_MODE !== 'legacy_compat') {
     return buildMemoryContextV3Payload({
       userId,
       question,

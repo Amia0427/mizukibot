@@ -20,6 +20,8 @@ const allowed = new Set([
   'src/memory/vector/write.chunk.js',
   'src/memory/vector/archive-write-helpers.chunk.js',
   'utils/vectorMemory.js',
+  'utils/memory-v3/legacyCompat.js',
+  'utils/memory-v3/legacyShadow.js',
   'utils/memory-v3/migration.js',
   'utils/memoryProjection/migration.js'
 ]);
@@ -51,5 +53,9 @@ const violations = roots
   .sort();
 
 assert.deepStrictEqual(violations, [], `legacy vector store consumers remain:\n${violations.join('\n')}`);
+
+const shadowSource = fs.readFileSync(path.join(root, 'utils', 'memory-v3', 'legacyShadow.js'), 'utf8');
+assert.ok(shadowSource.includes('retrieveUnifiedMemoriesAsync'));
+assert.ok(!/\b(?:add|save|write|rebuild|remember)Memory/i.test(shadowSource));
 
 console.log('memoryV3ConsumerBoundary.test.js passed');

@@ -9,15 +9,17 @@ const {
 } = require('../memoryWritePipeline');
 const { appendMemoryEvent } = require('./events');
 const { canonicalizeText, normalizeText } = require('./helpers');
-const { materializeMemoryViews } = require('./materializer');
 const { queryMemory: queryMemoryV3 } = require('./query');
 const { loadMemoryNodes } = require('./storage');
-const { resolveMemoryStorageMode } = require('./storageMode');
+const {
+  isLegacyMemoryWritable,
+  isLegacyMemoryShadowEnabled,
+  resolveMemoryStorageMode
+} = require('./storageMode');
 const {
   classifyStrictArchiveCandidates,
   createStrictArchiveDecision
 } = require('./strictArchivePolicy');
-const { buildStrictArchiveEvent } = require('./archiveRuns');
 const { appendVersionedMemoryUpdate } = require('./versionedUpdate');
 
 function stableCandidateId(candidate = {}, context = {}) {
@@ -69,6 +71,10 @@ function normalizeCandidate(candidate = {}, context = {}) {
     confidence: Number(pendingEvent.confidence ?? candidate.confidence ?? meta.confidence ?? context.confidence ?? 0.8),
     importance: Number(pendingEvent.importance ?? candidate.importance ?? meta.importance ?? candidate.weight ?? 0) || 0,
     evidenceCount: Math.max(0, Number(pendingEvent.evidenceCount ?? candidate.evidenceCount ?? meta.evidenceCount ?? 0) || 0),
+    payload: {
+      ...(candidate.payload && typeof candidate.payload === 'object' ? candidate.payload : {}),
+      ...pendingPayload
+    },
     meta: {
       ...meta,
       pendingMemoryV3Event: undefined,
@@ -87,6 +93,7 @@ function toVersionedEvent(candidate = {}, context = {}) {
     ? 'memory_confirmed'
     : 'memory_candidate_extracted';
   const meta = candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {};
+  const payload = candidate.payload && typeof candidate.payload === 'object' ? candidate.payload : {};
   return {
     id: normalizeText(candidate.id),
     type: eventType,
@@ -117,6 +124,7 @@ function toVersionedEvent(candidate = {}, context = {}) {
     relations: Array.isArray(candidate.relations) ? candidate.relations : [],
     text: normalizeText(candidate.text),
     payload: {
+      ...payload,
       type: normalizeText(candidate.type || candidate.memoryKind || 'fact').toLowerCase() || 'fact',
       fieldKey: normalizeText(candidate.fieldKey || candidate.semanticSlot || candidate.type || 'fact').toLowerCase() || 'fact',
       memoryKind: normalizeText(candidate.memoryKind || candidate.type || 'fact').toLowerCase() || 'fact',
@@ -150,6 +158,7 @@ function duplicateDecisionForCandidate(candidate = {}, duplicateId = '') {
 
 async function archivePendingCandidate(decision = {}, context = {}) {
   const runId = normalizeText(context.runId || context.jobId || `write-${decision.sourceId}`);
+  const { buildStrictArchiveEvent } = require('./archiveRuns');
   const event = await appendMemoryEvent(buildStrictArchiveEvent({
     ...decision,
     previousStatus: 'pending'
@@ -169,6 +178,7 @@ async function archivePendingCandidate(decision = {}, context = {}) {
 }
 
 async function writeMemoryBatch(candidates = [], context = {}) {
+  const mode = resolveMemoryStorageMode(context.storageMode || config.MEMORY_STORAGE_MODE);
   const proposed = proposeMemoryWrites({
     candidates: (Array.isArray(candidates) ? candidates : []).map((candidate) => normalizeCandidate(candidate, context)),
     confidence: context.confidence
@@ -181,7 +191,7 @@ async function writeMemoryBatch(candidates = [], context = {}) {
   const combinedDecisions = classifyStrictArchiveCandidates([
     ...existingNodes,
     ...batchGuard.accepted
-  ]);
+  ], { includeCandidates: true });
   const incomingSet = new Set(batchGuard.accepted);
   const incomingDecisions = new Map(
     combinedDecisions
@@ -251,26 +261,45 @@ async function writeMemoryBatch(candidates = [], context = {}) {
 
   const eventCount = accepted.length + archived.length;
   const materialized = eventCount > 0 && context.materialize !== false
-    ? materializeMemoryViews({
+    ? require('./materializer').materializeMemoryViews({
         force: true,
         scheduleEmbeddingBackfill: context.scheduleEmbeddingBackfill !== false,
         source: context.phase || 'memory_v3_repository_write'
       })
     : { ok: true, skipped: true, reason: eventCount > 0 ? 'disabled' : 'no_events' };
+  const legacyMirror = accepted.length > 0 && isLegacyMemoryWritable(mode)
+    ? await require('./legacyCompat').mirrorLegacyMemories(accepted)
+    : { ok: true, skipped: true, reason: accepted.length > 0 ? 'storage_mode' : 'no_items', ids: [] };
 
   return {
-    ok: materialized?.ok !== false,
-    mode: resolveMemoryStorageMode(context.storageMode || config.MEMORY_STORAGE_MODE),
+    ok: materialized?.ok !== false && legacyMirror.ok !== false,
+    mode,
     ids: accepted.map((item) => item.id),
     accepted,
     archived,
     rejected,
-    materialized
+    materialized,
+    legacyMirror
   };
 }
 
 async function queryMemory(request = {}) {
-  return queryMemoryV3(request);
+  const mode = resolveMemoryStorageMode(config.MEMORY_STORAGE_MODE);
+  const result = await queryMemoryV3(request);
+  if (!isLegacyMemoryShadowEnabled(mode)) {
+    return { ...result, storageMode: mode };
+  }
+
+  const { queryLegacyShadow } = require('./legacyShadow');
+  const storageShadow = await queryLegacyShadow(request, result.results);
+  return {
+    ...result,
+    storageMode: mode,
+    diagnostics: {
+      ...(result.diagnostics && typeof result.diagnostics === 'object' ? result.diagnostics : {}),
+      storageShadow
+    }
+  };
 }
 
 module.exports = {

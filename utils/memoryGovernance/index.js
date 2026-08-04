@@ -2,7 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../../config');
 const { materializeMemoryViews } = require('../memory-v3');
-const { loadProjection, runMemoryMigration, saveProjection } = require('../memoryProjection');
+const { loadProjection, runMemoryMigration: runLegacyMemoryMigration, saveProjection } = require('../memoryProjection');
+const {
+  assertLegacyMemoryReadable,
+  assertLegacyMemoryWritable
+} = require('../memory-v3/storageMode');
 const selfImprovementRuntime = require('../selfImprovementRuntime');
 const {
   DEFAULTS,
@@ -34,21 +38,33 @@ const {
   defaults: DEFAULTS,
   nowTs
 });
-const {
-  createSnapshot,
-  ensureSnapshotDir,
-  listSnapshots,
-  loadLibrary,
-  resolveSnapshotPath,
-  safeReadJson,
-  saveLibrary
-} = createMemoryGovernanceStore({
+const legacyStore = createMemoryGovernanceStore({
   itemsFile: ITEMS_FILE,
   snapshotDir: SNAPSHOT_DIR
 });
+
+function loadLibrary() {
+  assertLegacyMemoryReadable(config.MEMORY_STORAGE_MODE);
+  return legacyStore.loadLibrary();
+}
+
+function saveLibrary(library) {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
+  return legacyStore.saveLibrary(library);
+}
+
+function createSnapshot(label) {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
+  return legacyStore.createSnapshot(label);
+}
+
+function listSnapshots(limit) {
+  assertLegacyMemoryReadable(config.MEMORY_STORAGE_MODE);
+  return legacyStore.listSnapshots(limit);
+}
 const {
   listConflictGroups,
-  resolveConflictGroup
+  resolveConflictGroup: resolveLegacyConflictGroup
 } = createMemoryGovernanceConflictHandlers({
   loadLibrary,
   normalizeText,
@@ -59,6 +75,7 @@ const {
 });
 
 function rebuildMemoryArtifacts() {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
   const library = loadLibrary();
   rebuildMemoryIndex(library);
   const projection = saveProjection();
@@ -94,6 +111,7 @@ function previewGovernance(options = {}) {
 }
 
 function applyGovernance(options = {}) {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
   const library = loadLibrary();
   const plan = buildGovernancePlan(library.items, options);
   if (plan.plans.length === 0) {
@@ -161,7 +179,7 @@ function applyGovernance(options = {}) {
   };
 }
 
-const { rollbackPostReplyLearning } = createPostReplyLearningRollback({
+const { rollbackPostReplyLearning: rollbackLegacyPostReplyLearning } = createPostReplyLearningRollback({
   createSnapshot,
   loadLibrary,
   normalizeStringArray,
@@ -224,6 +242,7 @@ function getGovernanceStats(userId = '') {
 }
 
 function updateMemoryItem(id, patch = {}) {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
   const targetId = String(id || '').trim();
   if (!targetId) throw new Error('id is required');
 
@@ -272,11 +291,11 @@ function archiveMemoryItem(id, reason = 'manual_archive') {
 }
 
 function rollbackSnapshot(snapshotFile) {
-  ensureSnapshotDir();
-  const resolved = resolveSnapshotPath(snapshotFile);
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
+  const resolved = legacyStore.resolveSnapshotPath(snapshotFile);
 
   if (!fs.existsSync(resolved.fullPath)) throw new Error('snapshot file not found');
-  const data = safeReadJson(resolved.fullPath, null);
+  const data = legacyStore.safeReadJson(resolved.fullPath, null);
   if (!data || !Array.isArray(data.items)) throw new Error('invalid snapshot data');
 
   createSnapshot('before_rollback');
@@ -289,6 +308,21 @@ function rollbackSnapshot(snapshotFile) {
     restored: resolved.name,
     total: data.items.length
   };
+}
+
+function resolveConflictGroup(conflictKey, winnerId) {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
+  return resolveLegacyConflictGroup(conflictKey, winnerId);
+}
+
+function rollbackPostReplyLearning(options = {}) {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
+  return rollbackLegacyPostReplyLearning(options);
+}
+
+function runMemoryMigration() {
+  assertLegacyMemoryWritable(config.MEMORY_STORAGE_MODE);
+  return runLegacyMemoryMigration();
 }
 
 module.exports = {

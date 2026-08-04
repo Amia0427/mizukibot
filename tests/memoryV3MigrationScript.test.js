@@ -46,6 +46,7 @@ const { loadMemoryEvents } = require('../utils/memory-v3/events');
 const { materializeMemoryV3Views } = require('../utils/memory-v3/migration');
 const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
 const { loadMemoryNodes, loadEpisodeProjection } = require('../utils/memory-v3/storage');
+const { parseArgs, runCli } = require('../scripts/migrate-memory-v3');
 
 module.exports = (async () => {
   const materializedOnly = materializeMemoryV3Views();
@@ -82,6 +83,56 @@ module.exports = (async () => {
   assert.strictEqual(profileProjection.version, 2);
   assert.ok(profileProjection.users.u_migrate.weakProfile.recent_topics.includes('喜欢咖啡'));
   assert.ok(profileProjection.users.u_migrate.relation_stage.includes('普通朋友'));
+
+  const convergenceItem = {
+    id: 'legacy_item_1',
+    userId: 'u_migrate',
+    scopeType: 'personal',
+    type: 'fact',
+    text: '稳定迁移身份测试',
+    canonicalText: '稳定迁移身份测试',
+    status: 'active',
+    updatedAt: 100
+  };
+  const beforeConvergence = loadMemoryEvents().length;
+  const firstConvergence = await migrateLegacyMemoryToV3({
+    convergence: true,
+    items: [convergenceItem],
+    skipMaterialize: true
+  });
+  assert.strictEqual(firstConvergence.importedCount, 1);
+  assert.strictEqual(loadMemoryEvents().length, beforeConvergence + 1);
+  const repeatedConvergence = await migrateLegacyMemoryToV3({
+    convergence: true,
+    items: [convergenceItem],
+    skipMaterialize: true
+  });
+  assert.strictEqual(repeatedConvergence.importedCount, 0);
+  assert.strictEqual(loadMemoryEvents().length, beforeConvergence + 1);
+
+  assert.strictEqual(parseArgs(['--converge', '--dry-run']).converge, true);
+  assert.strictEqual(parseArgs(['--apply-plan', 'run.json']).applyPlan, 'run.json');
+  assert.strictEqual(parseArgs(['--rollback-run', 'run-1']).rollbackRun, 'run-1');
+  assert.throws(() => parseArgs(['--converge']), /requires --dry-run/);
+  assert.throws(() => parseArgs(['--converge', '--dry-run', '--force']), /cannot be combined/);
+  assert.throws(() => parseArgs(['--force-import-legacy']), /not supported/);
+
+  const dryRun = await runCli(['--converge', '--dry-run'], {
+    evaluateConvergencePreflight: async () => ({ evaluated: true, recallGatePassed: true, scopeLeakPassed: true }),
+    buildConvergencePlan: ({ preflight }) => ({ runId: 'cli-plan', preflight }),
+    saveConvergencePlan: (plan) => ({ ...plan, saved: true })
+  });
+  assert.strictEqual(dryRun.saved, true);
+  assert.strictEqual(dryRun.preflight.recallGatePassed, true);
+  const appliedPlan = await runCli(['--apply-plan', 'cli-plan'], {
+    applyConvergencePlan: async (input) => ({ ok: true, input })
+  });
+  assert.strictEqual(appliedPlan.input, 'cli-plan');
+  const rolledBackPlan = await runCli(['--rollback-run', 'cli-plan'], {
+    rollbackConvergenceRun: async (input) => ({ ok: true, input })
+  });
+  assert.strictEqual(rolledBackPlan.input, 'cli-plan');
+
   console.log('memoryV3MigrationScript.test.js passed');
 })().catch((error) => {
   console.error(error);
