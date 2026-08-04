@@ -1,12 +1,14 @@
 # MizukiBot
 
-## Memory V3 与 LanceDB 存储收敛实现 2026-08-04 10:56 +08:00
+## Memory V3 与 LanceDB 存储收敛实现 2026-08-04 12:05 +08:00
 
 - 提交 `68a5903` 建立 `writeMemoryBatch/queryMemory/applyStrictArchiveRun/restoreArchiveRun` 仓储边界与共享 embedding；提交 `62fac86` 将记忆提取、enrich、群/任务记忆、短期重启召回、Memory CLI、Prompt 上下文和 style/jargon 消费者迁到该边界。
 - 提交 `b2ffed0` 增加 `legacy_compat`、`v3_shadow`、`v3_only` 三种存储模式，以及可校验源文件哈希、稳定迁移身份、`strict-v1` 可逆归档、LanceDB reconcile、旧文件 manifest 归档和显式回滚的收敛工具；`applying` 中断后必须执行 `--rollback-run`。
-- 默认模式仍为 `legacy_compat`；本地 `.env` 未切换，真实历史数据迁移、旧文件移动、主进程/worker 停启均未执行。迁移 `runId=N/A`、归档 manifest hash `N/A`、维护窗口耗时 `N/A`。
-- 验收：`npm test`、`npm run coverage`、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 全部退出 0；覆盖率为行 72.27%、函数 80.04%、分支 61.83%。提交 `d682fe3` 同步消除独立工作树测试的硬编码路径。
-- 本轮只完成代码、测试与文档收敛，不删除历史数据、不修改本地运行数据、不推送远端；真实维护窗口必须先通过 dry-run 与运行态门禁。
+- 提交 `1a59274` 修正 auto-gold 群作用域负例；提交 `49ac6dd` 让已位于 rerank tail 的目标日期日记仍获得一次且仅一次硬优先级，消除 LanceDB 日期召回退化。
+- 真实 dry-run `converge-20260804T040343` 已通过：plan hash `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591`，源文件 hash `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`，迁移候选 24,411、`strict-v1` 候选 2,535、预计 LanceDB 行 26,676、预计重建 28.75 秒。
+- 真实门禁：baseline/candidate Recall@8 与 MRR@8 均为 0.925，scope/lifecycle/forbidden 均为 0；LanceDB missing/orphan/stale 均为 0，projection freshness 正常，`storage-overlap recommendedAction=none`。失败计划 `converge-20260804T034114`、`converge-20260804T034857` 已被召回门禁阻断，不得 apply。
+- 自动验收：`1a59274` 后完整测试 138.4 秒通过，覆盖率门禁为行 72.28%、函数 80.04%、分支 61.83%；`49ac6dd` 后五项 Memory/日期回归、lint、typecheck 通过。最新全量复跑中的 Memory 测试通过，但被既有外网用例的 Web Search/YouTube DNS 与超时阻断，未记为全量通过。
+- 默认模式仍为 `legacy_compat`；部署目录 `D:\waifu` 尚未集成此分支，所以未切换 `.env`、未导入历史、未归档旧文件、未停启主进程/worker、未修改 LanceDB，也未推送远端。实际归档 manifest hash 与维护窗口耗时仍为 `N/A`。
 
 ## Harness 评估 2026-08-02 15:24 +08:00
 

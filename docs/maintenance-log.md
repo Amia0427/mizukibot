@@ -1,3 +1,11 @@
+## 运行维护 2026-08-04 12:05 +08:00
+
+- 真实预检：在独立工作树中显式使用 `DATA_DIR=D:\waifu\data` 和 `MEMORY_LANCEDB_DIR=D:\waifu\data\lancedb_user_bucket`。`converge-20260804T040343` 的 plan hash 为 `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591`，源文件 hash 为 `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`；迁移候选 24,411，`strict-v1` 候选 2,535，预计 LanceDB 行 26,676，预计重建 28.75 秒。
+- 门禁修复：提交 `1a59274` 排除不能作为跨用户负例的群记忆；提交 `49ac6dd` 修复目标日期日记已存在于 rerank tail 时未获硬优先级的问题。失败计划 `converge-20260804T034114` 和 `converge-20260804T034857` 的 candidate Recall@8/MRR@8 为 `0.900/0.8875`，均按门禁停止；修复后 baseline/candidate 均为 `0.925/0.925`，scope/lifecycle/forbidden 为 0。
+- 存储验收：真实 LanceDB memory/worldbook `readyButNotSynced=0`、`staleTableRows=0`，storage-overlap missing/orphan/unexpected 均为 0，projection stale=false，`recommendedAction=none`。
+- 自动验收：完整测试在 `1a59274` 后 138.4 秒通过，覆盖率门禁为行 72.28%、函数 80.04%、分支 61.83%；`49ac6dd` 后五项 Memory/日期回归、lint、typecheck 通过。随后完整复跑中的 Memory 测试继续通过，但既有 `environmentDataRouting` 与 `nativeWatchlistYoutube` 受外部 Web Search/YouTube DNS 和超时阻断，因此未记为全量通过。
+- 未执行真实维护窗口：部署目录 `D:\waifu` 尚未集成本分支，默认仍为 `legacy_compat`；未暂停或重启主进程/worker，未导入事件、归档旧文件、修改 `.env` 或重建 LanceDB。实际归档 manifest hash、维护窗口耗时仍为 `N/A`。
+
 ## 运行维护 2026-08-04 10:56 +08:00
 
 - 根因：长期记忆业务读写同时依赖 Memory V3 与旧 JSON/shard vector store，embedding 能力也被旧 store 持有；直接删除旧文件会破坏默认兼容路径，且历史治理缺少稳定身份、可审计清单和完整恢复协议。

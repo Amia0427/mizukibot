@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 20、CommonJS、NDJSON 事件日志、JSON 投影、SQLite Profile Journal、LanceDB、项目自带测试运行器。
 
-**状态（2026-08-04 10:56 +08:00）：** 仓储、消费者、收敛工具和自动门禁已完成并提交；真实本地维护迁移（Task 9）尚未执行。当前默认仍为 `legacy_compat`，未移动旧文件或修改 `.env`。
+**状态（2026-08-04 12:05 +08:00）：** 仓储、消费者、收敛工具、自动门禁和真实 dry-run 已完成；真实本地 apply（Task 9 后五步）尚未执行。当前默认仍为 `legacy_compat`，未移动旧文件或修改 `.env`。
 
 ---
 
@@ -152,14 +152,14 @@
 
 ### Task 9: 本地维护迁移
 
-**状态：未执行。** 该任务会修改本地运行数据并停启进程，只能在单独维护窗口中执行。
+**状态：dry-run 已完成，apply 未执行。** 后续步骤会修改本地运行数据并停启进程，只能在部署目录集成本分支后的单独维护窗口中执行。
 
 **Files:**
 - Modify: `.env`（仅本地，不提交敏感内容）
 - Create: `data/memory-governance/runs/<runId>.json`
 - Create: `data/archive/memory-vector-legacy-<UTC>/manifest.json`
 
-- [ ] 生成 dry-run 计划并记录源哈希、事件数、预计耗时；门禁失败则停止。
+- [x] 生成 dry-run 计划并记录源哈希、事件数、预计耗时；最终通过计划为 `converge-20260804T040343`。
 - [ ] 暂停 post-reply worker，等待 processing=0，并记录维护窗口开始时间。
 - [ ] 执行最后增量导入、strict-v1 全历史归档、一次物化、embedding 补齐和 LanceDB full reconcile。
 - [ ] 8 分钟未通过门禁立即执行 rollback；整个写入暂停不得超过 10 分钟。
@@ -189,3 +189,13 @@
 - 覆盖率：Lines 72.27%、Branches 61.83%、Functions 80.04%。
 - 真实维护数据：migration `runId=N/A`、legacy archive manifest hash `N/A`、维护窗口耗时 `N/A`；未执行 Task 9，未修改 `.env`、运行数据或进程状态。
 - 回滚约束：计划状态为 `applying` 时，只允许显式执行 `--rollback-run <runId|plan.json>`，不得直接重新应用。
+
+## 补充验收 2026-08-04 12:05 +08:00
+
+- 修复提交：`1a59274` 排除群记忆 cross-user 假负例；`49ac6dd` 对 rerank tail 中已有的目标日期日记幂等施加硬优先级。
+- 最终 dry-run：`runId=converge-20260804T040343`，plan hash `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591`，source hash `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`，planned legacy manifest hash `d81ac2e5478a442feffa99fafb12eab9dc56c4aa5b7b12291622035142b31690`。
+- 计划规模：迁移候选 24,411、待追加 24,411、当前/未来 node 4,800/29,211、归档候选 2,535、预计 active LanceDB 行 26,676、预计重建 28.75 秒。
+- 召回门禁：baseline/candidate Recall@8 与 MRR@8 均为 0.925；leakage、lifecycle leakage、forbidden hit 均为 0。失败计划 `converge-20260804T034114`、`converge-20260804T034857` 均保持 `planned` 且不可 apply。
+- 存储门禁：memory/worldbook `readyButNotSynced=0`、`staleTableRows=0`，missing/orphan/unexpected 为 0，projection stale=false，`recommendedAction=none`。
+- 运行边界：部署目录仍运行旧代码，未执行 import/archive/reconcile、未修改 `.env`、未停止进程。实际归档 manifest hash 与维护耗时仍为 `N/A`。
+- 自动验收：五项 Memory/日期回归、lint、typecheck 通过；最新全量测试中的 Memory 用例通过，但两个既有外网用例受 DNS/超时阻断，因此不把本轮全量测试记为通过。

@@ -1,6 +1,6 @@
 # 记忆与提示词
 
-本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-08-04 10:56 +08:00。
+本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-08-04 12:05 +08:00。
 
 最重要的原则是：Memory V3 事件日志是长期记忆业务真值，Profile Journal 是可重建结构化读模型，LanceDB 是在线向量索引。短期会话、Daily Journal、图片索引和 LangGraph 状态仍有独立职责；任意一层成功都不能替代端到端召回与注入验收。
 
@@ -151,7 +151,7 @@ scope 至少要带 user；群记忆还受 readable group ids 约束。改变过�
 2. LanceDB read 开启且 embedding 可用时执行向量搜索，再把向量行解析回当前可见候选。
 3. 本地构造 lexical/BM25 pool，同时保留日期和 recent fallback 候选。
 4. 多组候选存在时通过 RRF 融合。
-5. 做冲突消解，确保目标日期日记不会被普通相关性吞掉。
+5. 做冲突消解，并对已在 head/tail 中或后补的目标日期日记幂等施加硬优先级，确保它不会被普通相关性吞掉。
 6. 对有限 head 执行 rerank，tail 保留原顺序。
 7. 对 journal/long-term 重复项做语义折叠，并按来源和 facet diversify。
 
@@ -338,6 +338,8 @@ MemOS、OpenViking 和本地 Memory V3 可能命中同一事实。Runtime contex
 ## 数据检查与诊断
 
 Memory V3 默认根目录、事件目录、治理 run、四类 projection、node JSONL 和 embedding cache 都由 `config/index.js` 的 `MEMORY_V3_*` 配置解析；存储行为由 `MEMORY_STORAGE_MODE` 解析。不要在脚本或测试中硬编码默认 data 路径。Daily Journal 同样以配置的目录和时区为准。
+
+独立工作树读取部署数据时，`.env` 中相对 `MEMORY_LANCEDB_DIR` 会相对工作树解析。真实 convergence 预检必须同时显式设置部署 `DATA_DIR` 和绝对 `MEMORY_LANCEDB_DIR`，并核对计划中的 `legacyArchive.dataDir`、诊断中的 `lancedbDir` 后才可接受结果。
 
 优先使用现有只读诊断：
 

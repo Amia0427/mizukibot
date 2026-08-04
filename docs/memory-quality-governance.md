@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-08-04 10:56 +08:00
+更新时间：2026-08-04 12:05 +08:00
+
+更新 2026-08-04 12:05 +08:00：真实 dry-run `converge-20260804T040343` 已通过，plan/source hash 分别为 `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591` / `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`；24,411 个稳定迁移候选中有 2,535 个 `strict-v1` 归档候选。baseline 与 LanceDB candidate Recall@8/MRR@8 均为 0.925，scope/lifecycle/forbidden 为 0；LanceDB missing/orphan/stale 为 0，`recommendedAction=none`。提交 `1a59274` 修正群作用域 auto-gold，`49ac6dd` 修正目标日期日记在 rerank tail 中丢失优先级。真实 apply、旧文件归档和 `v3_only` 切换尚未执行。
 
 更新 2026-08-04 10:56 +08:00：Memory V3 仓储统一了业务写入和召回，`strict-v1` 只按确定性规则归档，并以 run manifest 和追加事件提供幂等恢复。`MEMORY_STORAGE_MODE` 增加 `legacy_compat|v3_shadow|v3_only`；收敛 CLI 支持 dry-run 计划、显式应用和显式回滚。代码与自动门禁已通过，但真实维护迁移未执行，`runId`、旧文件 manifest hash 与维护耗时均为 `N/A`。
 
