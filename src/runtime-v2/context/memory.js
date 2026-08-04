@@ -33,14 +33,14 @@ function buildMemoryRecallPolicyPromptSnippet(memoryContext = {}) {
 }
 
 function resolveMemosRecallObject(options = {}, routeMeta = {}, promptMaterials = null) {
-  const candidates = [promptMaterials?.memosRecall, options?.memosRecall, routeMeta?.directChatPlanner?.memosRecall, routeMeta?.toolPlanner?.memosRecall, routeMeta?.memosRecall];
+  const candidates = [promptMaterials?.memosRecall, options?.memosRecall, routeMeta?.memosRecall];
   return candidates.find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
 }
 
 function resolveMemosRecallText(options = {}, routeMeta = {}, promptMaterials = null) {
   const explicitRecall = promptMaterials?.memosRecall || options?.memosRecall || null;
   if (explicitRecall && typeof explicitRecall === 'object' && !Array.isArray(explicitRecall) && explicitRecall.used === false && normalizeText(explicitRecall.rejectedReason) === 'deduped_by_local_memory') return '';
-  const directText = normalizeText(promptMaterials?.memosRecallText || options?.memosRecallText || routeMeta?.directChatPlanner?.memosRecallText || routeMeta?.toolPlanner?.memosRecallText || routeMeta?.memosRecallText);
+  const directText = normalizeText(promptMaterials?.memosRecallText || options?.memosRecallText || routeMeta?.memosRecallText);
   if (directText) return directText;
   try { return normalizeText(getMemosPlannerRecallRuntime().getMemosRecallPromptText(resolveMemosRecallObject(options, routeMeta, promptMaterials))); } catch (_) { return ''; }
 }
@@ -61,12 +61,12 @@ function dedupeMemosRecallForPrompt(memosRecall = {}, memoryContext = {}, option
 }
 
 function resolveOpenVikingRecallObject(options = {}, routeMeta = {}, promptMaterials = null) {
-  const candidates = [promptMaterials?.openVikingRecall, promptMaterials?.openvikingRecall, options?.openVikingRecall, options?.openvikingRecall, routeMeta?.directChatPlanner?.openVikingRecall, routeMeta?.toolPlanner?.openVikingRecall, routeMeta?.openVikingRecall];
+  const candidates = [promptMaterials?.openVikingRecall, promptMaterials?.openvikingRecall, options?.openVikingRecall, options?.openvikingRecall, routeMeta?.openVikingRecall];
   return candidates.find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
 }
 
 function resolveOpenVikingRecallText(options = {}, routeMeta = {}, promptMaterials = null) {
-  const directText = normalizeText(promptMaterials?.openVikingRecallText || promptMaterials?.openvikingRecallText || options?.openVikingRecallText || options?.openvikingRecallText || routeMeta?.directChatPlanner?.openVikingRecallText || routeMeta?.toolPlanner?.openVikingRecallText || routeMeta?.openVikingRecallText);
+  const directText = normalizeText(promptMaterials?.openVikingRecallText || promptMaterials?.openvikingRecallText || options?.openVikingRecallText || options?.openvikingRecallText || routeMeta?.openVikingRecallText);
   if (directText) return directText;
   try { return normalizeText(getOpenVikingRecallRuntime().getOpenVikingRecallPromptText(resolveOpenVikingRecallObject(options, routeMeta, promptMaterials))); } catch (_) { return ''; }
 }

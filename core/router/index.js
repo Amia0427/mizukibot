@@ -54,6 +54,7 @@ const {
   isEarthquakeDataQuery,
   isWeatherCloudQuery
 } = require('../../utils/environmentDataQuery');
+const { applyDeterministicToolRouting } = require('./toolRouting');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -1215,7 +1216,7 @@ function getRouterSubagentModelConfig() {
   return {
     baseUrl: String(config.AI_ROUTER_BASE_URL || config.API_BASE_URL || '').trim(),
     apiKey: String(config.AI_ROUTER_API_KEY || config.API_KEY || '').trim(),
-    model: String(config.AI_ROUTER_MODEL || config.PLAN_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4',
+    model: String(config.AI_ROUTER_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4',
     temperature: 0.1,
     maxTokens: 700,
     retries: 0,
@@ -1377,8 +1378,8 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
   };
   route = markLocalRuleRoute(route, userId);
   if (sanitizeTopRouteType(route?.topRouteType) !== 'direct_chat') return route;
-  if (!detectSafetyBoundaryCaution(intentText)) return route;
-  return markLocalRuleRoute(makeRoute({
+  if (!detectSafetyBoundaryCaution(intentText)) return applyDeterministicToolRouting(route);
+  return applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
     ...route,
     meta: {
       ...(route.meta || {}),
@@ -1386,7 +1387,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
       effectiveIntentText: intentText || cleanText,
       quotePriority
     }
-  }), userId);
+  }), userId));
 }
 
 async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, continuitySignals = {}, effectiveIntentText = '', chatType = '' }, options = {}) {
@@ -1416,7 +1417,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
         requestTrace: options.requestTrace
       });
       if (subagentRoute && typeof subagentRoute === 'object') {
-        return sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl });
+        return applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl }));
       }
     }
 
@@ -1440,7 +1441,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
       effectiveIntentText: intentText || cleanText,
       quotePriority
     };
-    return sanitizedRoute;
+    return applyDeterministicToolRouting(sanitizedRoute);
   } catch (_) {
     return fallbackRoute;
   }

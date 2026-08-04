@@ -50,31 +50,29 @@ module.exports = (async () => {
       },
       resolvePersonaModules: false,
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: ['retrieved_memory_lite', 'background_research'],
-            personaModules: [],
-            blockDecisions: [
-              {
-                blockId: 'retrieved_memory_lite',
-                decision: 'include',
-                confidence: 1,
-                priority: 10,
-                reason: 'memory should outrank background research'
-              },
-              {
-                blockId: 'background_research',
-                decision: 'include',
-                confidence: 1,
-                priority: 20,
-                reason: 'research brief is relevant but lower priority'
-              }
-            ],
-            rationaleByBlock: {
-              retrieved_memory_lite: 'memory should outrank background research',
-              background_research: 'research brief is relevant but lower priority'
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: ['retrieved_memory_lite', 'background_research'],
+          personaModules: [],
+          blockDecisions: [
+            {
+              blockId: 'retrieved_memory_lite',
+              decision: 'include',
+              confidence: 1,
+              priority: 10,
+              reason: 'memory should outrank background research'
+            },
+            {
+              blockId: 'background_research',
+              decision: 'include',
+              confidence: 1,
+              priority: 20,
+              reason: 'research brief is relevant but lower priority'
             }
+          ],
+          rationaleByBlock: {
+            retrieved_memory_lite: 'memory should outrank background research',
+            background_research: 'research brief is relevant but lower priority'
           }
         }
       }

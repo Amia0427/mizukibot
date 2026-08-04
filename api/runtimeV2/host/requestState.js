@@ -1,4 +1,3 @@
-const config = require('../../../config');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { shouldUseMinecraftLLM, getMinecraftModelOverrides } = require('../../../utils/minecraftRouting');
 const { resolveThreadId } = require('../../../utils/langgraphV2Store');
@@ -7,15 +6,7 @@ const {
   resolveShortTermScope
 } = require('../../../utils/shortTermMemory');
 const { createMemoryCliTurnState } = require('../../../utils/memoryCliTurnPolicy');
-const {
-  normalizePlanStep,
-  normalizeStepId: contractNormalizeStepId
-} = require('../contracts');
-const {
-  buildInitialPlanSlice: buildInitialPlanSliceBase,
-  createInitialState: createInitialStateBase,
-  translatePlan: translatePlanBase
-} = require('../state');
+const { createInitialState: createInitialStateBase } = require('../state');
 const {
   nowTs,
   normalizeObject,
@@ -29,58 +20,6 @@ function isWriteLikeCapability(capability = '') {
 
 function isSideEffectPolicy(policy = {}) {
   return isWriteLikeCapability(policy.capability) || String(policy.risk || '').trim().toLowerCase() === 'high';
-}
-
-function inferStepKindFromTool(toolName = '') {
-  const normalized = String(toolName || '').trim();
-  if (!normalized) return 'reply';
-  if (normalized === 'memory_cli') return 'memory_cli';
-  if (normalized === 'humanizer') return 'humanizer';
-  return normalized === 'reply' ? 'reply' : 'tool';
-}
-
-function normalizeStepId(step = {}, fallbackPrefix = 'step', index = 0) {
-  return contractNormalizeStepId(step, fallbackPrefix, index);
-}
-
-function normalizeRoutePlanStep(step = {}, index = 0) {
-  return normalizePlanStep(step, 'route', index);
-}
-
-function normalizePlannedStep(step = {}, index = 0) {
-  return normalizePlanStep(step, 'planner', index);
-}
-
-function normalizeDirectChatPlannerPlanStep(step = {}, index = 0) {
-  return normalizePlanStep(step, 'direct_chat', index);
-}
-
-function getRouteToolPlanner(routeMeta = {}) {
-  const meta = normalizeObject(routeMeta, {});
-  if (meta.toolPlanner && typeof meta.toolPlanner === 'object') return meta.toolPlanner;
-  if (meta.directChatPlanner && typeof meta.directChatPlanner === 'object') return meta.directChatPlanner;
-  return null;
-}
-
-function getToolPlannerExecutionPlan(routeMeta = {}) {
-  const planner = getRouteToolPlanner(routeMeta);
-  const executionPlan = planner?.executionPlan && typeof planner.executionPlan === 'object'
-    ? planner.executionPlan
-    : null;
-  return executionPlan;
-}
-
-function isPlannerSingleAuthorityEnabled() {
-  return config.PLANNER_SINGLE_AUTHORITY_ENABLED === true;
-}
-
-function buildInitialPlanSlice(request = {}, options = {}) {
-  return buildInitialPlanSliceBase(request, {
-    ...normalizeObject(options, {}),
-    getToolPlannerExecutionPlan,
-    normalizeDirectChatPlannerPlanStep,
-    normalizeRoutePlanStep
-  });
 }
 
 function createInitialState(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
@@ -105,30 +44,9 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     shouldUseMinecraftLLM,
     getMinecraftModelOverrides,
     createMemoryCliTurnState,
-    buildInitialPlanSlice,
     nowTs,
     latencyDecision
   });
-}
-
-function shouldPlanRequest(request = {}) {
-  if (request.forcePlanMode) return true;
-  const plannerSteps = normalizeArray(getToolPlannerExecutionPlan(request.routeMeta)?.steps);
-  if (isPlannerSingleAuthorityEnabled()) {
-    return plannerSteps.length > 0;
-  }
-  if (normalizeArray(request.routeMeta?.planSteps).length > 0) return true;
-  if (plannerSteps.length > 0) return true;
-  if (String(request.reviewMode || '').trim()) return false;
-  const topRouteType = String(request.topRouteType || '').trim().toLowerCase();
-  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-  if (
-    topRouteType === 'direct_chat'
-    || routePolicyKey.startsWith('direct_chat/')
-  ) {
-    return plannerSteps.length > 0;
-  }
-  return normalizeArray(request.allowedTools).length > 0;
 }
 
 function normalizeMode(request = {}) {
@@ -138,29 +56,11 @@ function normalizeMode(request = {}) {
   if (String(request.reviewMode || '').trim()) return 'review';
   if (request.imageUrl) return 'image';
   if (request.useMinecraftModel) return 'minecraft';
-  return shouldPlanRequest(request) ? 'tool_plan' : 'chat';
-}
-
-function translatePlan(rawPlan = {}) {
-  return translatePlanBase(rawPlan, {
-    normalizePlannedStep
-  });
+  return normalizeArray(request.allowedTools).length > 0 && request.allowTools !== false ? 'agent' : 'chat';
 }
 
 module.exports = {
-  isWriteLikeCapability,
   isSideEffectPolicy,
-  inferStepKindFromTool,
-  normalizeStepId,
-  normalizeRoutePlanStep,
-  normalizePlannedStep,
-  normalizeDirectChatPlannerPlanStep,
-  buildInitialPlanSlice,
-  getRouteToolPlanner,
-  getToolPlannerExecutionPlan,
-  isPlannerSingleAuthorityEnabled,
   createInitialState,
-  shouldPlanRequest,
-  normalizeMode,
-  translatePlan
+  normalizeMode
 };

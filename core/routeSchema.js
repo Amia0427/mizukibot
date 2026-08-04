@@ -3,8 +3,7 @@
  *
  * Single source of truth rules:
  * - router produces route contracts only
- * - directChatPlanner may only consume direct_chat contracts
- * - routeExecution may only translate contract + planner output into an execution plan
+ * - routeExecution may only translate the canonical route contract into runtime policy
  * - routeProfiles may only provide policy metadata/guidance and must not define top route truth
  */
 const TOP_ROUTE_TYPES = Object.freeze([

@@ -17,15 +17,15 @@ module.exports = (async () => {
     {
       recordedAt: '2026-05-30T09:50:00.000Z',
       category: 'reply_event',
-      type: 'planner_done',
-      module: 'planner',
+      type: 'agent_decision',
+      module: 'agent_decide',
       durationMs: 60000
     },
     {
       recordedAt: '2026-05-30T09:51:00.000Z',
       category: 'reply_event',
-      type: 'planner_done',
-      module: 'planner',
+      type: 'agent_decision',
+      module: 'agent_decide',
       durationMs: 62000
     },
     {
@@ -114,8 +114,8 @@ module.exports = (async () => {
   });
 
   assert.strictEqual(report.schemaVersion, 'main_reply_lag_diagnostic_v1');
-  assert.strictEqual(report.metrics.planner.count, 2);
-  assert.strictEqual(report.metrics.planner.p95Ms, 62000);
+  assert.strictEqual(report.metrics.agentDecision.count, 2);
+  assert.strictEqual(report.metrics.agentDecision.p95Ms, 62000);
   assert.strictEqual(report.metrics.mainModel.count, 2);
   assert.strictEqual(report.metrics.mainModel.p95Ms, 47000);
   assert.strictEqual(report.metrics.generation.count, 0);
@@ -123,12 +123,12 @@ module.exports = (async () => {
   assert.strictEqual(report.metrics.send.p95Ms, 42);
   assert.strictEqual(report.metrics.postReplyWorker.rssMaxMb, 512);
   assert.strictEqual(report.metrics.postReplyWorker.pressure, 'ok');
-  assert.strictEqual(report.summary.mostLikelyBottleneck.code, 'planner');
+  assert.strictEqual(report.summary.mostLikelyBottleneck.code, 'agent_decision');
   assert.deepStrictEqual(report.summary.missingFields, []);
 
   const text = buildMainReplyLagDiagnosticText(report);
-  assert.ok(text.includes('main-reply-lag: bottleneck=planner'));
-  assert.ok(text.includes('planner: p50=60000ms p95=62000ms'));
+  assert.ok(text.includes('main-reply-lag: bottleneck=agent_decision'));
+  assert.ok(text.includes('agent-decision: p50=60000ms p95=62000ms'));
   assert.ok(text.includes('main-model: p50=45000ms p95=47000ms'));
   assert.ok(text.includes('generation: p50=0ms p95=0ms max=0ms samples=0 source=final_reply_send_done(stream).generationDurationMs'));
   assert.ok(text.includes('send: p50=42ms p95=42ms max=42ms samples=1 source=reply_send_success/failure'));
@@ -210,7 +210,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(pressureReport.metrics.postReplyWorker.pressure, 'critical');
   assert.strictEqual(pressureReport.summary.mostLikelyBottleneck.code, 'post_reply_rss');
-  assert.ok(pressureReport.summary.missingFields.includes('planner_duration'));
+  assert.ok(pressureReport.summary.missingFields.includes('agent_decision_duration'));
 
   assert.strictEqual(parseWindowMs('15m'), 15 * 60 * 1000);
   assert.strictEqual(parseWindowMs('2h'), 2 * 60 * 60 * 1000);
@@ -224,7 +224,7 @@ module.exports = (async () => {
     traceEvents: [
       {
         recordedAt: '2026-05-30T09:55:00.000Z',
-        stage: 'direct_chat_planner_done',
+        stage: 'agent_decision',
         durationMs: 1200
       },
       {
@@ -242,7 +242,7 @@ module.exports = (async () => {
     }
   });
   assert.strictEqual(traceFallbackReport.inputs.traceEvents, 2);
-  assert.strictEqual(traceFallbackReport.metrics.planner.p95Ms, 1200);
+  assert.strictEqual(traceFallbackReport.metrics.agentDecision.p95Ms, 1200);
   assert.strictEqual(traceFallbackReport.metrics.generation.p95Ms, 0);
   assert.strictEqual(traceFallbackReport.metrics.send.p95Ms, 0);
 
@@ -268,7 +268,7 @@ module.exports = (async () => {
       throw new Error('provider unavailable');
     }
   });
-  assert.strictEqual(degradedReport.metrics.planner.p95Ms, 62000);
+  assert.strictEqual(degradedReport.metrics.agentDecision.p95Ms, 62000);
   assert.strictEqual(degradedReport.metrics.mainModel.p95Ms, 47000);
   assert.strictEqual(degradedReport.metrics.postReplyWorker.pressure, 'ok');
   assert.strictEqual(degradedReport.diagnostics.runtimeStatus.overallStatus, 'error');

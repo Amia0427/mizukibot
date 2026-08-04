@@ -323,69 +323,6 @@
       }
     }
 
-    if (route?.topRouteType === 'direct_chat') {
-      const plannerStartedAt = Date.now();
-      let plannerDecision = null;
-      try {
-        appendTraceTiming('planner_start', {
-          stage: 'direct_chat_planner_start',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          topRouteType: String(route?.topRouteType || '').trim(),
-          rawMessageTimestampMs,
-          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
-          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
-        });
-        plannerDecision = await planDirectChat(route, buildDirectChatPlannerOptions({
-          route,
-          inboundContext,
-          directedContext,
-          userId: senderId,
-          contextSummary: plannerContextSummary,
-          requestTrace: cloneTraceForMeta(requestTrace),
-          includeRuntimeMetadata: true
-        }));
-      } catch (error) {
-        appendTraceTiming('planner_failed', {
-          stage: 'direct_chat_planner_failed',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          durationMs: Math.max(0, Date.now() - plannerStartedAt),
-          rawMessageTimestampMs,
-          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
-          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
-          finalErrorCode: extractErrorCode(error),
-          error: error?.message || String(error || '')
-        });
-        throw error;
-      }
-      appendTraceTiming('planner_done', {
-        stage: 'direct_chat_planner_done',
-        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-        groupId: String(groupId || '').trim(),
-        userId: String(senderId || '').trim(),
-        chatType,
-        durationMs: Math.max(0, Date.now() - plannerStartedAt),
-        rawMessageTimestampMs,
-        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
-        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
-        shouldUseTools: plannerDecision?.shouldUseTools === true,
-        needsBackground: plannerDecision?.needsBackground === true,
-        plannerFallbackUsed: plannerDecision?.plannerFallbackUsed === true,
-        plannerModel: String(plannerDecision?.plannerModel || '').trim(),
-        allowedToolCount: Array.isArray(plannerDecision?.allowedToolNames) ? plannerDecision.allowedToolNames.length : 0
-      });
-      route.meta = {
-        ...(route.meta || {}),
-        toolPlanner: plannerDecision,
-        directChatPlanner: plannerDecision
-      };
-    }
-
     const routeExecutionStartedAt = Date.now();
     let routeExecutionPlan = null;
     try {

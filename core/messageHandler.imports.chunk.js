@@ -25,6 +25,7 @@ const {
   resolveToolReplyFormattingPreferences
 } = require('../utils/toolReplyFormatting');
 const { isAtBot, detectIntentHybrid } = require('./router');
+const { applyDeterministicToolRouting } = require('./router/toolRouting');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
@@ -92,8 +93,6 @@ const {
   createProactiveGreetingFlow,
   shouldSendScheduledGreeting: proactiveShouldSendScheduledGreeting
 } = require('./proactiveGreetingFlow');
-const { planDirectChat } = require('./directChatPlanner');
-const { buildDirectChatPlannerOptions } = require('./directChatPlannerContext');
 const {
   PRIVATE_CHAT_WHITELIST_REPLY,
   PRIVATE_GROUP_ONLY_REPLY,

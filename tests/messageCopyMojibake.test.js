@@ -20,14 +20,12 @@ assert.strictEqual(classifyPassiveReplyType({
 const prompt = buildToolGuidancePrompt({
   meta: {
     reason: '需要工具',
-    directChatPlanner: {
-      allowedToolNames: ['memory_cli']
-    }
+    allowedTools: ['memory_cli']
   }
 });
 
 assert.ok(prompt.includes('路由原因'));
-assert.ok(prompt.includes('执行步骤') || !prompt.includes('鎵ц'));
+assert.ok(prompt.includes('memory_cli'));
 assert.ok(!prompt.includes('璺敱'));
 
 console.log('messageCopyMojibake.test.js passed');

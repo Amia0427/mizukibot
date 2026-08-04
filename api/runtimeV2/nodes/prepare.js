@@ -70,9 +70,6 @@ function createPrepareNode(deps = {}) {
   const computeEffectiveAllowedTools = typeof deps.computeEffectiveAllowedTools === 'function'
     ? deps.computeEffectiveAllowedTools
     : (() => []);
-  const runCapabilityPreflight = typeof deps.runCapabilityPreflight === 'function'
-    ? deps.runCapabilityPreflight
-    : (async () => null);
   const buildDynamicPromptImpl = typeof deps.buildDynamicPromptImpl === 'function'
     ? deps.buildDynamicPromptImpl
     : (async () => ({ dynamicPrompt: '', affinity: null, memoryContext: null }));
@@ -129,15 +126,6 @@ function createPrepareNode(deps = {}) {
   const classifyPromptThreat = typeof deps.classifyPromptThreat === 'function'
     ? deps.classifyPromptThreat
     : (() => ({ labels: [], reasons: [], score: 0 }));
-  const getToolPlannerExecutionPlan = typeof deps.getToolPlannerExecutionPlan === 'function'
-    ? deps.getToolPlannerExecutionPlan
-    : (() => null);
-  const isPlannerSingleAuthorityEnabled = typeof deps.isPlannerSingleAuthorityEnabled === 'function'
-    ? deps.isPlannerSingleAuthorityEnabled
-    : (() => false);
-  const normalizePlanForResume = typeof deps.normalizePlanForResume === 'function'
-    ? deps.normalizePlanForResume
-    : ((plan) => plan || {});
   const normalizeMode = typeof deps.normalizeMode === 'function'
     ? deps.normalizeMode
     : (() => 'chat');
@@ -191,37 +179,36 @@ function createPrepareNode(deps = {}) {
     return normalizeArray(candidates).find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
   }
 
-  function resolvePlannerRuntimeMeta(request = {}, promptBuildResult = {}) {
+  function resolveRuntimeMeta(request = {}, promptBuildResult = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
     return pickFirstObject([
-      promptBuildResult.directChatPlanner,
-      promptBuildResult.toolPlanner,
-      routeMeta.directChatPlanner,
-      routeMeta.toolPlanner
+      promptBuildResult.runtimeMeta,
+      request.runtimeMeta,
+      routeMeta.runtimeMeta
     ]);
   }
 
   function resolveMemosRecallForObservation(request = {}, promptBuildResult = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
-    const plannerMeta = resolvePlannerRuntimeMeta(request, promptBuildResult);
+    const runtimeMeta = resolveRuntimeMeta(request, promptBuildResult);
     return pickFirstObject([
       promptBuildResult.memosRecall,
       request.memosRecall,
-      plannerMeta.memosRecall,
+      runtimeMeta.memosRecall,
       routeMeta.memosRecall
     ]);
   }
 
   function resolveOpenVikingRecallForObservation(request = {}, promptBuildResult = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
-    const plannerMeta = resolvePlannerRuntimeMeta(request, promptBuildResult);
+    const runtimeMeta = resolveRuntimeMeta(request, promptBuildResult);
     return pickFirstObject([
       promptBuildResult.openVikingRecall,
       promptBuildResult.openvikingRecall,
       request.openVikingRecall,
       request.openvikingRecall,
-      plannerMeta.openVikingRecall,
-      plannerMeta.openvikingRecall,
+      runtimeMeta.openVikingRecall,
+      runtimeMeta.openvikingRecall,
       routeMeta.openVikingRecall,
       routeMeta.openvikingRecall
     ]);
@@ -229,13 +216,11 @@ function createPrepareNode(deps = {}) {
 
   function resolveDynamicPromptPlanForObservation(request = {}, promptBuildResult = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
-    const plannerMeta = resolvePlannerRuntimeMeta(request, promptBuildResult);
+    const runtimeMeta = resolveRuntimeMeta(request, promptBuildResult);
     return pickFirstObject([
       promptBuildResult.dynamicPromptPlan,
       request.dynamicPromptPlan,
-      plannerMeta.dynamicPromptPlan,
-      plannerMeta.plannerDecisionV2?.dynamicPromptPlan,
-      plannerMeta.plannerDecisionV2?.plannerMeta?.dynamicPromptPlan,
+      runtimeMeta.dynamicPromptPlan,
       routeMeta.dynamicPromptPlan
     ]);
   }
@@ -352,26 +337,20 @@ function createPrepareNode(deps = {}) {
     return blocks;
   }
 
-  function resolvePlannerMemosRecall(request = {}) {
+  function resolveMemosRecall(request = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
     const candidates = [
       request.memosRecall,
-      routeMeta.directChatPlanner?.memosRecall,
-      routeMeta.toolPlanner?.memosRecall,
       routeMeta.memosRecall
     ];
     return pickFirstObject(candidates);
   }
 
-  function resolvePlannerOpenVikingRecall(request = {}) {
+  function resolveOpenVikingRecall(request = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
     const candidates = [
       request.openVikingRecall,
       request.openvikingRecall,
-      routeMeta.directChatPlanner?.openVikingRecall,
-      routeMeta.directChatPlanner?.openvikingRecall,
-      routeMeta.toolPlanner?.openVikingRecall,
-      routeMeta.toolPlanner?.openvikingRecall,
       routeMeta.openVikingRecall,
       routeMeta.openvikingRecall
     ];
@@ -382,10 +361,6 @@ function createPrepareNode(deps = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
     return pickFirstObject([
       request.dynamicPromptPlan,
-      routeMeta.directChatPlanner?.dynamicPromptPlan,
-      routeMeta.directChatPlanner?.plannerDecisionV2?.dynamicPromptPlan,
-      routeMeta.toolPlanner?.dynamicPromptPlan,
-      routeMeta.toolPlanner?.plannerDecisionV2?.dynamicPromptPlan,
       routeMeta.dynamicPromptPlan
     ]);
   }
@@ -555,7 +530,7 @@ function createPrepareNode(deps = {}) {
       { priority: 210, kind: 'continuity', meta: { evidenceOnly: true, continuity: shortTermContinuity.meta || {} } }
     ));
 
-    const memosRecall = resolvePlannerMemosRecall(request);
+    const memosRecall = resolveMemosRecall(request);
     const dynamicPlan = resolvePromptDynamicPlan(request);
     const shouldInjectMemos = memosRecall.used === true && planIncludesBlock(dynamicPlan, 'memos_recall');
     const memosText = shouldInjectMemos ? String(getMemosRecallPromptTextImpl(memosRecall) || '').trim() : '';
@@ -570,7 +545,7 @@ function createPrepareNode(deps = {}) {
       }
     ));
 
-    const openVikingRecall = dedupeOpenVikingRecallImpl(resolvePlannerOpenVikingRecall(request), context);
+    const openVikingRecall = dedupeOpenVikingRecallImpl(resolveOpenVikingRecall(request), context);
     const shouldInjectOpenViking = openVikingRecall.used === true && planIncludesBlock(dynamicPlan, 'openviking_recall');
     const openVikingText = shouldInjectOpenViking ? String(getOpenVikingRecallPromptTextImpl(openVikingRecall) || '').trim() : '';
     appendUniquePromptBlock(blocks, createFallbackPromptBlock(
@@ -761,9 +736,6 @@ function createPrepareNode(deps = {}) {
     const responseIntent = String(routeMeta.responseIntent || '').trim().toLowerCase();
     const sourceScope = String(request.facets?.sourceScope || routeMeta.facets?.sourceScope || routeMeta.sourceScope || '').trim().toLowerCase();
     const domain = String(request.facets?.domain || routeMeta.facets?.domain || routeMeta.domain || '').trim().toLowerCase();
-    const directChatPlanner = normalizeObject(routeMeta.directChatPlanner || routeMeta.toolPlanner, {});
-    const plannerMode = String(directChatPlanner.executionPlan?.mode || directChatPlanner.mode || '').trim().toLowerCase();
-    const plannerDecisionSource = String(directChatPlanner.decisionSource || directChatPlanner.plannerMeta?.decisionSource || '').trim().toLowerCase();
     const needsMemory = request.intent?.needsMemory === true
       || routeMeta.intent?.needsMemory === true
       || Boolean(routeMeta.needsMemoryReason || routeMeta.recallFacet);
@@ -784,7 +756,6 @@ function createPrepareNode(deps = {}) {
       && (!toolIntent || toolIntent === 'maybe_tools' || toolIntent === 'none')
       && (!responseIntent || responseIntent === 'answer')
       && (sourceScope === 'notebook' || domain === 'personal')
-      && (plannerMode === 'chat_only' || plannerDecisionSource === 'rule_preflight_notebook_chat_only')
     );
   }
 
@@ -1256,12 +1227,6 @@ function createPrepareNode(deps = {}) {
         contextStats: preparedMainConversationContext?.contextStats || null,
         mainConversationSnapshotSignature: String(preparedMainConversationContext?.signature || '').trim()
       },
-      plan: resumeUsed
-        ? normalizePlanForResume({
-            ...state.plan,
-            ...normalizeObject(restoredState.plan, {})
-          })
-        : state.plan,
       execution: {
         ...restoredExecution,
         mode: resumeUsed && String(restoredState.execution?.mode || '').trim()
@@ -1294,6 +1259,9 @@ function createPrepareNode(deps = {}) {
           }
         }
       },
+      messages: resumeUsed
+        ? normalizeArray(restoredState.messages)
+        : normalizeArray(state.messages),
       output: resumeUsed && restoredState.output
         ? {
             ...state.output,

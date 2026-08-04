@@ -25,6 +25,7 @@ const {
   resolveToolReplyFormattingPreferences
 } = require('../utils/toolReplyFormatting');
 const { isAtBot, detectIntentHybrid } = require('./router');
+const { applyDeterministicToolRouting } = require('./router/toolRouting');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
@@ -89,8 +90,6 @@ const {
   createProactiveGreetingFlow,
   shouldSendScheduledGreeting: proactiveShouldSendScheduledGreeting
 } = require('./proactiveGreetingFlow');
-const { planDirectChat } = require('./directChatPlanner');
-const { buildDirectChatPlannerOptions } = require('./directChatPlannerContext');
 const {
   PRIVATE_CHAT_WHITELIST_REPLY,
   PRIVATE_GROUP_ONLY_REPLY,
@@ -301,13 +300,8 @@ function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
 }
 
 function buildToolGuidancePrompt(route) {
-  const planner = route?.meta?.toolPlanner && typeof route.meta.toolPlanner === 'object'
-    ? route.meta.toolPlanner
-    : (route?.meta?.directChatPlanner && typeof route.meta.directChatPlanner === 'object'
-      ? route.meta.directChatPlanner
-      : null);
-  const toolHints = Array.isArray(planner?.allowedToolNames)
-    ? planner.allowedToolNames.filter(Boolean)
+  const toolHints = Array.isArray(route?.meta?.allowedTools)
+    ? route.meta.allowedTools.filter(Boolean)
     : [];
   if (!toolHints.length) return null;
 
@@ -537,25 +531,12 @@ function isToolStyleRoute(routeKey = '') {
 
 function buildRoutePlanLogPayload(routeExecutionPlan = {}, extra = {}, route = null) {
   const allowedToolNames = Array.isArray(routeExecutionPlan?.allowedTools) ? routeExecutionPlan.allowedTools : [];
-  const planner = route?.meta?.toolPlanner && typeof route.meta.toolPlanner === 'object'
-    ? route.meta.toolPlanner
-    : (route?.meta?.directChatPlanner && typeof route.meta.directChatPlanner === 'object'
-      ? route.meta.directChatPlanner
-      : {});
-  const plannerExecutionPlan = planner?.executionPlan && typeof planner.executionPlan === 'object'
-    ? planner.executionPlan
-    : {};
-  const plannerSteps = Array.isArray(plannerExecutionPlan.steps) ? plannerExecutionPlan.steps : [];
   return {
     routeDebugKey: String(routeExecutionPlan?.routeDebugKey || 'direct_chat/text_chat/answer'),
     topRouteType: String(routeExecutionPlan?.topRouteType || 'direct_chat'),
     executor: String(routeExecutionPlan?.executor || 'direct'),
-    plannerModel: String(planner?.plannerModel || '').trim(),
-    shouldUseTools: Boolean(planner?.shouldUseTools),
-    plannerMode: String(plannerExecutionPlan.mode || '').trim(),
-    plannerStepCount: plannerSteps.length,
-    plannerTools: plannerSteps.map((step) => String(step?.action || '').trim()).filter(Boolean),
-    plannerFallbackUsed: Boolean(planner?.plannerFallbackUsed),
+    decisionSource: 'router',
+    shouldUseTools: routeExecutionPlan?.allowTools === true,
     allowedToolNames,
     allowedToolBuckets: Array.isArray(routeExecutionPlan?.allowedToolBuckets) ? routeExecutionPlan.allowedToolBuckets : [],
     needsBackground: Boolean(routeExecutionPlan?.needsBackground),
@@ -824,13 +805,8 @@ function createMessageHandler({
   }
   const cachedPromptHelpers = {
     buildToolGuidancePrompt(route) {
-      const planner = route?.meta?.toolPlanner && typeof route.meta.toolPlanner === 'object'
-        ? route.meta.toolPlanner
-        : (route?.meta?.directChatPlanner && typeof route.meta.directChatPlanner === 'object'
-          ? route.meta.directChatPlanner
-          : null);
-      const toolHints = Array.isArray(planner?.allowedToolNames)
-        ? planner.allowedToolNames.filter(Boolean)
+      const toolHints = Array.isArray(route?.meta?.allowedTools)
+        ? route.meta.allowedTools.filter(Boolean)
         : [];
       if (!toolHints.length) return null;
 
@@ -988,7 +964,6 @@ function createMessageHandler({
     buildSupplementedTaskText,
     buildSubagentContextSummary,
     routeResolver,
-    planDirectChat,
     routeExecution,
     backgroundTaskRuntime,
     buildRoutePromptBundle,
@@ -1192,9 +1167,6 @@ function createMessageHandler({
     const formattingPreferences = getFormattingPreferences(question);
     const outputFormatInstruction = buildToolReplyFormatInstruction(formattingPreferences);
     mutableOptions.routePrompt = [String(mutableOptions.routePrompt || '').trim(), outputFormatInstruction].filter(Boolean).join('\n\n') || null;
-    const plannerExecutionPlan = mutableOptions.plannerExecutionPlan && typeof mutableOptions.plannerExecutionPlan === 'object'
-      ? mutableOptions.plannerExecutionPlan
-      : null;
     if (!mutableOptions.modelConfig) {
       const fallbackModelConfig = resolveLegacyVisionFallbackModelConfig(imageUrl, userId, mutableOptions.routeMeta || {});
       if (fallbackModelConfig) mutableOptions.modelConfig = fallbackModelConfig;
@@ -1204,7 +1176,6 @@ function createMessageHandler({
       ...mutableOptions,
       disableTools: false,
       disableStream: true,
-      forcePlanMode: String(plannerExecutionPlan?.mode || '').trim() === 'tool_plan',
       routeMeta: {
         ...(mutableOptions.routeMeta || {})
       }
@@ -1258,7 +1229,6 @@ function createMessageHandler({
     config,
     routeResolver,
     routeExecution,
-    planDirectChat,
     askAIDispatch,
     askToolTaskLocally,
     runBackgroundToolTask,
@@ -2762,7 +2732,6 @@ function createMessageHandler({
         : []
     };
     const routerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 180, directedContext });
-    const plannerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 320, directedContext });
     const routeResolverStartedAt = Date.now();
     let route = null;
     let routeResolverError = null;
@@ -2831,11 +2800,9 @@ function createMessageHandler({
       quotePriority: directedContext?.quotePriority || null,
       qqCardUrls: Array.isArray(inboundContext.qqCardUrls) ? inboundContext.qqCardUrls : [],
       cardContexts: Array.isArray(inboundContext.cardContexts) ? inboundContext.cardContexts : [],
-      cardOnly: inboundContext.cardOnly,
-      ...(Array.isArray(inboundContext.cardContexts) && inboundContext.cardContexts.some((card) => card.primaryUrl)
-        ? { allowedTools: Array.from(new Set([...(route.meta?.allowedTools || []), 'web_fetch'])) }
-        : {})
+      cardOnly: inboundContext.cardOnly
     };
+    route = applyDeterministicToolRouting(route);
     if (visualContext) {
       route.meta.visualContext = visualContext;
       route.meta.imageUrls = effectiveVisualInputUrls;
@@ -3131,69 +3098,6 @@ function createMessageHandler({
           reason: String(normalFastDecision.reason || '').trim()
         });
       }
-    }
-
-    if (route?.topRouteType === 'direct_chat') {
-      const plannerStartedAt = Date.now();
-      let plannerDecision = null;
-      try {
-        appendTraceTiming('planner_start', {
-          stage: 'direct_chat_planner_start',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          topRouteType: String(route?.topRouteType || '').trim(),
-          rawMessageTimestampMs,
-          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
-          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
-        });
-        plannerDecision = await planDirectChat(route, buildDirectChatPlannerOptions({
-          route,
-          inboundContext,
-          directedContext,
-          userId: senderId,
-          contextSummary: plannerContextSummary,
-          requestTrace: cloneTraceForMeta(requestTrace),
-          includeRuntimeMetadata: true
-        }));
-      } catch (error) {
-        appendTraceTiming('planner_failed', {
-          stage: 'direct_chat_planner_failed',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          durationMs: Math.max(0, Date.now() - plannerStartedAt),
-          rawMessageTimestampMs,
-          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
-          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
-          finalErrorCode: extractErrorCode(error),
-          error: error?.message || String(error || '')
-        });
-        throw error;
-      }
-      appendTraceTiming('planner_done', {
-        stage: 'direct_chat_planner_done',
-        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-        groupId: String(groupId || '').trim(),
-        userId: String(senderId || '').trim(),
-        chatType,
-        durationMs: Math.max(0, Date.now() - plannerStartedAt),
-        rawMessageTimestampMs,
-        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
-        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
-        shouldUseTools: plannerDecision?.shouldUseTools === true,
-        needsBackground: plannerDecision?.needsBackground === true,
-        plannerFallbackUsed: plannerDecision?.plannerFallbackUsed === true,
-        plannerModel: String(plannerDecision?.plannerModel || '').trim(),
-        allowedToolCount: Array.isArray(plannerDecision?.allowedToolNames) ? plannerDecision.allowedToolNames.length : 0
-      });
-      route.meta = {
-        ...(route.meta || {}),
-        toolPlanner: plannerDecision,
-        directChatPlanner: plannerDecision
-      };
     }
 
     const routeExecutionStartedAt = Date.now();
@@ -3601,7 +3505,7 @@ function createMessageHandler({
           chatType,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           topRouteType: routeExecutionPlan.topRouteType,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             threadId: String(replyOptions?.threadId || inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
             messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
             requestTrace: cloneTraceForMeta(requestTrace)

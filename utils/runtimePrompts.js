@@ -48,15 +48,6 @@ const RUNTIME_PROMPT_DEFAULTS = {
     '{{executionPlanBlock}}',
     '{{reasonLine}}'
   ].join('\n'),
-  'direct-chat-planner': [
-    'Direct chat planner single authority:',
-    'Return JSON only.',
-    'Prefer tools whenever they materially improve factuality, freshness, continuity, or structured output quality.',
-    'Only pure smalltalk, pure opinion, pure rewrite, or obvious self-contained short answers may use chat_only.',
-    'When using tools, output complete executionPlan steps with executable argument drafts.',
-    'Do not output a reply step.',
-    '{{catalogBlock}}'
-  ].join('\n'),
   'streaming-segmentation': [
     'Streaming output rule:',
     '1) Decide chat-message boundaries yourself, send at most {{maxSegments}} chunks total.',

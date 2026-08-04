@@ -99,6 +99,18 @@ function createPersistNode(deps = {}) {
     ? deps.saveAndEmit
     : ((state) => state);
   const config = normalizeObject(deps.config, {});
+  function buildToolExecutionLogs(state = {}) {
+    return normalizeArray(state.execution?.toolResults).map((envelope) => ({
+      action: String(envelope?.tool_name || '').trim(),
+      args: normalizeObject(envelope?.args, {}),
+      ok: String(envelope?.status || '').trim() === 'completed',
+      result: String(envelope?.result || ''),
+      error: String(envelope?.status || '').trim() === 'completed' ? '' : String(envelope?.result || ''),
+      authorization: envelope?.authorization || null,
+      tool_call_id: String(envelope?.tool_call_id || '').trim(),
+      step_id: String(envelope?.step_id || '').trim()
+    })).filter((item) => item.action);
+  }
   const chatHistory = deps.chatHistory;
   const shortTermMemory = deps.shortTermMemory;
   const logPostReplyEnqueueError = typeof deps.logPostReplyEnqueueError === 'function'
@@ -380,6 +392,7 @@ function createPersistNode(deps = {}) {
         postReplyRecapQuery
       })
     };
+    const toolExecutionLogs = buildToolExecutionLogs(state);
     let enqueuedPostReplyJob = null;
     const pendingReplySnapshot = {
       finalReply,
@@ -387,7 +400,7 @@ function createPersistNode(deps = {}) {
       openLoops: normalizeArray(state.memory?.continuityState?.payload?.open_loops),
       assistantCommitments: normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments),
       userConstraints: normalizeArray(state.memory?.continuityState?.payload?.user_constraints),
-      toolSummary: normalizeArray(state.plan?.finalExecLogs)
+      toolSummary: toolExecutionLogs
         .map((item) => {
           const action = String(item?.action || '').trim();
           const ok = item?.ok === true ? 'ok' : 'fail';
@@ -743,7 +756,7 @@ function createPersistNode(deps = {}) {
                 sessionKey: String(request.sessionKey || '').trim(),
                 continuitySnapshot: coreTurn.continuitySnapshot,
                 contextStats: coreTurn.contextStats,
-                execLogs: normalizeArray(state.plan?.finalExecLogs),
+                execLogs: toolExecutionLogs,
                 turns: [coreTurn],
                 firstQueuedAt: coreTurn.createdAt,
                 lastMergedAt: coreTurn.createdAt,

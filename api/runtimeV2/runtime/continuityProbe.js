@@ -39,7 +39,7 @@ function createContinuityProbeHelpers(deps = {}) {
     if (request.imageUrl) return false;
     if (isReviewMode(request.reviewMode)) return false;
     if (!String(request.userId || '').trim() || !question) return false;
-    if (!new Set(['chat', 'tool_plan']).has(normalizedMode)) return false;
+    if (!new Set(['chat', 'agent']).has(normalizedMode)) return false;
     if (topRouteType === 'admin' || topRouteType === 'ignore' || topRouteType === 'refuse') return false;
     if (topRouteType === 'vision' || routePolicyKey.startsWith('vision/')) return false;
     if (!explicitContinuityCue && facet !== 'task_or_plan' && facet !== 'recent_continuity') return false;

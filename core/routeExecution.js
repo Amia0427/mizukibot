@@ -5,11 +5,6 @@ const {
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { getPolicyDefinition: getPolicyDefinitionFromProfiles } = require('./routeProfiles');
 const { getPolicy } = require('../utils/toolPolicy');
-const {
-  buildExecutablePlanFromPlannerDecision,
-  summarizeExecutablePlan,
-  validateExecutablePlanTools
-} = require('./executablePlan');
 const config = require('../config');
 const { filterCompanionAllowedTools } = require('../utils/companionTools');
 const { routeHasReadableCardContext } = require('../utils/cardContext');
@@ -19,8 +14,7 @@ const {
   routeHasExplicitWebSearchRequirement
 } = require('../utils/webSearchRequirement');
 
-// routeExecution consumes only canonical contract data plus planner output.
-// It must not infer a new top route type or treat routeProfiles as routing truth.
+// routeExecution projects router output into runtime options. It does not select tools.
 
 const EXECUTORS = Object.freeze([
   'ignore',
@@ -29,17 +23,6 @@ const EXECUTORS = Object.freeze([
   'direct',
   'background_direct'
 ]);
-
-function getToolPlanner(route = {}) {
-  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
-  if (routeMeta.toolPlanner && typeof routeMeta.toolPlanner === 'object') return routeMeta.toolPlanner;
-  if (routeMeta.directChatPlanner && typeof routeMeta.directChatPlanner === 'object') return routeMeta.directChatPlanner;
-  return null;
-}
-
-function hasQqFixedAction(route = {}) {
-  return Boolean(resolveQqActionTools(route).length > 0);
-}
 
 function getCapabilityForExecutor(executor = 'direct') {
   const normalized = String(executor || '').trim();
@@ -128,12 +111,6 @@ function resolveQqActionTools(route = {}) {
 }
 
 function normalizeAllowedToolBuckets(route = {}, allowedTools = []) {
-  const planner = getToolPlanner(route);
-  const plannerBuckets = Array.isArray(planner?.toolBuckets)
-    ? planner.toolBuckets.map((item) => String(item || '').trim()).filter(Boolean)
-    : [];
-  if (plannerBuckets.length > 0) return Array.from(new Set(plannerBuckets));
-
   const buckets = [];
   for (const toolName of normalizeToolNames(allowedTools)) {
     if (/^mcp_/i.test(toolName)) buckets.push('mcp');
@@ -248,31 +225,19 @@ function buildBasePlan(route = {}) {
   };
 }
 
-function resolvePlannerSource(route = {}) {
-  const planner = getToolPlanner(route);
-  return String(
-    planner?.executablePlan?.source
-    || planner?.plannerSource
-    || planner?.decisionSource
-    || planner?.plannerMeta?.decisionSource
-    || (planner ? 'planner' : '')
-  ).trim();
-}
-
 function buildRouteTrace(route = {}, plan = {}) {
   const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
   const topRouteType = String(plan.topRouteType || sanitizeTopRouteType(route?.topRouteType || 'direct_chat')).trim();
   const policyKey = String(plan.policyKey || resolvePolicyKey(route)).trim();
   const executor = String(plan.executor || 'direct').trim();
-  const planner = getToolPlanner(route);
   return {
     topRouteType,
     policyKey,
-    plannerSource: resolvePlannerSource(route),
+    decisionSource: 'router',
     executor,
     confidence: Number.isFinite(Number(route?.confidence)) ? Number(route.confidence) : 0,
     fallbackReason: String(plan.unavailableReason || routeMeta.fallbackReason || routeMeta.reason || '').trim(),
-    executablePlan: summarizeExecutablePlan(planner?.executablePlan || routeMeta.executablePlan || null)
+    allowedTools: normalizeToolNames(plan.allowedTools || routeMeta.allowedTools)
   };
 }
 
@@ -285,47 +250,11 @@ function withRouteTrace(route = {}, plan = {}) {
 
 function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
   const base = buildBasePlan(route);
-  const plannerDecision = getToolPlanner(route);
   const toolIntent = String(route?.meta?.toolIntent || '').trim();
-  const qqActionTools = resolveQqActionTools(route);
-  const executionPlan = plannerDecision?.executionPlan && typeof plannerDecision.executionPlan === 'object'
-    ? plannerDecision.executionPlan
-    : null;
-  const singleAuthorityEnabled = config.PLANNER_SINGLE_AUTHORITY_ENABLED === true;
-  const isUserToolRoute = new Set(['maybe_tools', 'force_tools']).has(toolIntent);
-  const shouldRequirePlanner = singleAuthorityEnabled && isUserToolRoute && !hasQqFixedAction(route);
-
-  if (shouldRequirePlanner && !plannerDecision) {
-    console.error('[routeExecution] missing toolPlanner for user tool route', {
-      routeDebugKey: buildRouteDebugKey(route),
-      toolIntent,
-      responseIntent: String(route?.meta?.responseIntent || '').trim()
-    });
-    return withRouteTrace(route, {
-      ...base,
-      executor: 'direct',
-      policyKey: resolvePolicyKey(route),
-      routeDebugKey: buildRouteDebugKey(route),
-      allowStream: false,
-      needsBackground: false,
-      unavailableReason: 'planner-missing'
-    });
-  }
-
-  const plannerAllowedTools = normalizeToolNames(
-    Array.isArray(plannerDecision?.allowedToolNames) && plannerDecision.allowedToolNames.length > 0
-      ? plannerDecision.allowedToolNames
-      : (Array.isArray(executionPlan?.steps) ? executionPlan.steps.map((step) => step?.action) : [])
-  );
-  const rawAllowedTools = qqActionTools.length > 0
-    ? plannerAllowedTools.filter((toolName) => qqActionTools.includes(toolName))
-    : plannerAllowedTools;
+  const rawAllowedTools = normalizeToolNames(route?.meta?.allowedTools);
   const allowedTools = filterAllowedToolsForChatType(route, rawAllowedTools, runtimeConfig);
-  const executablePlan = plannerDecision?.executablePlan || buildExecutablePlanFromPlannerDecision(plannerDecision || {}, resolvePolicyKey(route), route);
-  const validation = validateExecutablePlanTools(executablePlan, allowedTools);
-  const toolPlanAllowedSteps = validation.allowedPlanSteps.filter((step) => step.action && step.action !== 'reply');
-  const shouldUseTools = String(executionPlan?.mode || '').trim() === 'tool_plan' && toolPlanAllowedSteps.length > 0;
-  const needsBackground = Boolean(plannerDecision?.needsBackground);
+  const shouldUseTools = allowedTools.length > 0;
+  const needsBackground = route?.meta?.needsBackground === true;
   const routeDebugKey = buildRouteDebugKey(route);
   const policyKey = resolvePolicyKey(route);
   const privateRestrictionReason = resolvePrivateRestrictionReason(route, allowedTools, rawAllowedTools, runtimeConfig);
@@ -344,9 +273,6 @@ function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
         routeDebugKey,
         allowStream: false,
         needsBackground,
-        executablePlan: validation.executablePlan,
-        allowedPlanSteps: validation.allowedPlanSteps,
-        blockedPlanSteps: validation.blockedPlanSteps,
         unavailableReason: ''
       });
     }
@@ -358,9 +284,6 @@ function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
         routeDebugKey,
         allowStream: false,
         needsBackground,
-        executablePlan: validation.executablePlan,
-        allowedPlanSteps: validation.allowedPlanSteps,
-        blockedPlanSteps: validation.blockedPlanSteps,
         unavailableReason: privateRestrictionReason || 'no-allowed-tools'
       });
     }
@@ -371,9 +294,7 @@ function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
       routeDebugKey,
       allowStream: !needsBackground && !isVisionRoute,
       needsBackground,
-      executablePlan: validation.executablePlan,
-      allowedPlanSteps: validation.allowedPlanSteps,
-      blockedPlanSteps: validation.blockedPlanSteps
+      unavailableReason: privateRestrictionReason
     });
   }
 
@@ -384,9 +305,6 @@ function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
     routeDebugKey,
     allowTools: true,
     allowedTools,
-    executablePlan: validation.executablePlan,
-    allowedPlanSteps: validation.allowedPlanSteps,
-    blockedPlanSteps: validation.blockedPlanSteps,
     allowedToolBuckets: normalizeAllowedToolBuckets(route, allowedTools),
     allowStream: false,
     needsBackground,

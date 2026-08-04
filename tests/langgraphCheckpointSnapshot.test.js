@@ -63,15 +63,43 @@ const { snapshotState } = require('../api/runtimeV2/state');
     plan: { steps: [] },
     execution: {
       status: 'completed',
-      directChatToolCompile: {
-        enabled: true,
-        assistantMessage: { role: 'assistant', content: '', tool_calls: [] },
-        directContext: { source: 'direct_reply' },
-        mainConversationSnapshot: { segments: [{ text: 'x'.repeat(5000) }] }
+      agent: {
+        initialized: true,
+        completed: false,
+        pendingToolCalls: [{
+          index: 0,
+          round: 2,
+          toolCallId: 'call_2',
+          toolName: 'web_search',
+          withinBudget: true,
+          toolCall: {
+            id: 'call_2',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"query":"hello"}' }
+          }
+        }],
+        toolRoundCount: 2,
+        toolCallCount: 3,
+        toolHistory: [{
+          fingerprint: 'web_search:{"query":"hello"}',
+          envelope: {
+            tool_call_id: 'call_1',
+            tool_name: 'web_search',
+            status: 'completed',
+            result: 'result'
+          }
+        }],
+        completedToolCallIds: ['call_1'],
+        forceFinal: true,
+        forceFinalAfterTools: false,
+        stopReason: 'tool_round_limit_reached'
       }
     },
     output: { finalReply: 'reply', displayReply: 'reply' },
-    messages: [{ role: 'user', content: 'hello' }]
+    messages: [
+      { role: 'user', content: 'hello' },
+      { role: 'tool', tool_call_id: 'call_1', content: 'result' }
+    ]
   };
 
   const snapshot = snapshotState(state);
@@ -92,7 +120,8 @@ const { snapshotState } = require('../api/runtimeV2/state');
   assert.strictEqual(snapshot.memory.promptSegments.stableSystemBlocks, undefined);
   assert.deepStrictEqual(snapshot.memory.contextStats, { usageRatio: 0.5, compactionLevel: 'tight' });
   assert.strictEqual(snapshot.memory.continuityState.text, 'continuity');
-  assert.strictEqual(snapshot.execution.directChatToolCompile.mainConversationSnapshot, undefined);
+  assert.deepStrictEqual(snapshot.execution.agent, state.execution.agent);
+  assert.deepStrictEqual(snapshot.messages, state.messages);
   assert.strictEqual(snapshot.output.finalReply, 'reply');
 
   console.log('langgraphCheckpointSnapshot.test.js passed');

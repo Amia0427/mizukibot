@@ -14,7 +14,6 @@ const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
 const { buildRuntimePrompt } = require('../../../utils/runtimePrompts');
 const {
   buildMainStableSystemBlocks,
-  buildPlannerStageSystemPrompt,
   buildReviewStageSystemPrompt
 } = require('../../../utils/stagePromptContracts');
 const {
@@ -855,8 +854,7 @@ function resolveMemosRecallObject(options = {}, routeMeta = {}, promptMaterials 
   const candidates = [
     promptMaterials?.memosRecall,
     options?.memosRecall,
-    routeMeta?.directChatPlanner?.memosRecall,
-    routeMeta?.toolPlanner?.memosRecall,
+    routeMeta?.memosRecall,
     routeMeta?.memosRecall
   ];
   return candidates.find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
@@ -876,8 +874,7 @@ function resolveMemosRecallText(options = {}, routeMeta = {}, promptMaterials = 
   const directText = normalizeText(
     promptMaterials?.memosRecallText
     || options?.memosRecallText
-    || routeMeta?.directChatPlanner?.memosRecallText
-    || routeMeta?.toolPlanner?.memosRecallText
+    || routeMeta?.memosRecallText
     || routeMeta?.memosRecallText
   );
   if (directText) return directText;
@@ -956,8 +953,7 @@ function resolveOpenVikingRecallObject(options = {}, routeMeta = {}, promptMater
     promptMaterials?.openvikingRecall,
     options?.openVikingRecall,
     options?.openvikingRecall,
-    routeMeta?.directChatPlanner?.openVikingRecall,
-    routeMeta?.toolPlanner?.openVikingRecall,
+    routeMeta?.openVikingRecall,
     routeMeta?.openVikingRecall
   ];
   return candidates.find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
@@ -969,8 +965,7 @@ function resolveOpenVikingRecallText(options = {}, routeMeta = {}, promptMateria
     || promptMaterials?.openvikingRecallText
     || options?.openVikingRecallText
     || options?.openvikingRecallText
-    || routeMeta?.directChatPlanner?.openVikingRecallText
-    || routeMeta?.toolPlanner?.openVikingRecallText
+    || routeMeta?.openVikingRecallText
     || routeMeta?.openVikingRecallText
   );
   if (directText) return directText;

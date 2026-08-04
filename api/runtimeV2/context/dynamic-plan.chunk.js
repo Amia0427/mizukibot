@@ -20,12 +20,7 @@ function findPlannerDynamicPromptPlan(options = {}) {
   const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
   const candidates = [
     options?.dynamicPromptPlan,
-    routeMeta?.directChatPlanner?.dynamicPromptPlan,
-    routeMeta?.toolPlanner?.dynamicPromptPlan,
-    routeMeta?.directChatPlanner?.plannerDecisionV2?.dynamicPromptPlan,
-    routeMeta?.toolPlanner?.plannerDecisionV2?.dynamicPromptPlan,
-    routeMeta?.directChatPlanner?.plannerDecisionV2?.plannerMeta?.dynamicPromptPlan,
-    routeMeta?.toolPlanner?.plannerDecisionV2?.plannerMeta?.dynamicPromptPlan
+    routeMeta?.dynamicPromptPlan
   ];
   for (const candidate of candidates) {
     if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) return candidate;
@@ -92,7 +87,7 @@ function normalizePlannerDynamicContextPlan(options = {}) {
     )).filter((item) => !skippedBlocks.has(item));
     const personaModules = Array.from(new Set(
       normalizeArray(plannerPlan.personaModules)
-        .concat(normalizeArray(routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules))
+        .concat(normalizeArray(routeMeta?.personaModules))
         .map((item) => normalizeText(item))
         .filter((item) => item && !skippedModules.has(item))
         .concat(blockDecisions.filter((item) => item.decision === 'include' && item.moduleId).map((item) => item.moduleId))
@@ -115,7 +110,7 @@ function normalizePlannerDynamicContextPlan(options = {}) {
   const heuristicPlan = buildHeuristicDynamicPromptPlan({
     continuitySignals: options?.continuitySignals,
     directedContext: options?.routeMeta?.directedContext,
-    personaModules: normalizeArray(options?.routeMeta?.directChatPlanner?.personaModules || options?.routeMeta?.toolPlanner?.personaModules),
+    personaModules: normalizeArray(options?.routeMeta?.personaModules),
     hasRoleplayRuntimeContext: true,
     hasRoleplayInnerProtocol: true,
     hasAffinityState: true,

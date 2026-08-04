@@ -11,22 +11,20 @@ function clearPromptCache() {
   }
 }
 
-function plannerRouteMeta(enabledBlockIds) {
+function buildRouteMeta(enabledBlockIds) {
   return {
-    directChatPlanner: {
-      dynamicPromptPlan: {
-        schemaVersion: 'dynamic_context_plan_v2',
-        enabledBlockIds,
-        personaModules: [],
-        blockDecisions: enabledBlockIds.map((blockId, index) => ({
-          blockId,
-          decision: 'include',
-          confidence: 0.9,
-          priority: 20 + index,
-          reason: 'test include'
-        })),
-        rationaleByBlock: {}
-      }
+    dynamicPromptPlan: {
+      schemaVersion: 'dynamic_context_plan_v2',
+      enabledBlockIds,
+      personaModules: [],
+      blockDecisions: enabledBlockIds.map((blockId, index) => ({
+        blockId,
+        decision: 'include',
+        confidence: 0.9,
+        priority: 20 + index,
+        reason: 'test include'
+      })),
+      rationaleByBlock: {}
     }
   };
 }
@@ -57,7 +55,7 @@ module.exports = (async () => {
       topRouteType: 'direct_chat',
       memoryContext: {},
       openVikingRecall,
-      routeMeta: plannerRouteMeta(['openviking_recall'])
+      routeMeta: buildRouteMeta(['openviking_recall'])
     }
   );
   assert.ok(included.promptSnapshot.assembledBlocks.some((block) => block.id === 'openviking_recall'));
@@ -74,7 +72,7 @@ module.exports = (async () => {
       topRouteType: 'direct_chat',
       memoryContext: {},
       openVikingRecall,
-      routeMeta: plannerRouteMeta([])
+      routeMeta: buildRouteMeta([])
     }
   );
   assert.ok(!skipped.promptSnapshot.assembledBlocks.some((block) => block.id === 'openviking_recall'));
@@ -93,7 +91,7 @@ module.exports = (async () => {
         memoryForPrompt: 'User prefers keyboard-only workflows.'
       },
       openVikingRecall,
-      routeMeta: plannerRouteMeta(['openviking_recall'])
+      routeMeta: buildRouteMeta(['openviking_recall'])
     }
   );
   assert.ok(!deduped.promptSnapshot.assembledBlocks.some((block) => block.id === 'openviking_recall'));
@@ -122,7 +120,7 @@ module.exports = (async () => {
         ],
         promptText: '[OpenVikingRecall]\n1. source=openviking score=0.90 User prefers keyboard-only workflows.'
       },
-      routeMeta: plannerRouteMeta(['openviking_recall'])
+      routeMeta: buildRouteMeta(['openviking_recall'])
     }
   );
   assert.ok(!synonymDeduped.promptSnapshot.assembledBlocks.some((block) => block.id === 'openviking_recall'));
@@ -166,7 +164,7 @@ module.exports = (async () => {
         ],
         promptText: '[OpenVikingRecall]\n1. source=openviking score=0.92 waifu 项目部署状态：失败'
       },
-      routeMeta: plannerRouteMeta(['openviking_recall'])
+      routeMeta: buildRouteMeta(['openviking_recall'])
     }
   );
   assert.ok(!conflictDeduped.promptSnapshot.assembledBlocks.some((block) => block.id === 'openviking_recall'));

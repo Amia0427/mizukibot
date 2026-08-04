@@ -10,12 +10,8 @@ module.exports = (() => {
     'prepare',
     'enhance_live_state',
     'route',
-    'direct_reply',
-    'planner',
-    'dispatch',
-    'validate',
-    'repair_or_continue',
-    'draft_reply',
+    'agent_decide',
+    'execute_tools',
     'humanize',
     'final_validate',
     'persist'
@@ -24,8 +20,7 @@ module.exports = (() => {
   assert.deepStrictEqual(LANGGRAPH_V2_TOPOLOGY.edges, [
     { from: 'prepare', to: 'enhance_live_state' },
     { from: 'enhance_live_state', to: 'route' },
-    { from: 'planner', to: 'dispatch' },
-    { from: 'dispatch', to: 'validate' },
+    { from: 'execute_tools', to: 'agent_decide' },
     { from: 'humanize', to: 'final_validate' },
     { from: 'final_validate', to: 'persist' },
     { from: 'persist', to: END_TARGET }
@@ -35,44 +30,19 @@ module.exports = (() => {
       from: 'route',
       router: 'routeAfterRoute',
       branches: {
-        chat: 'direct_reply',
-        proactive: 'direct_reply',
-        review: 'direct_reply',
-        image: 'direct_reply',
-        minecraft: 'direct_reply',
-        tool_plan: 'planner'
+        chat: 'agent_decide',
+        proactive: 'agent_decide',
+        review: 'agent_decide',
+        image: 'agent_decide',
+        minecraft: 'agent_decide',
+        agent: 'agent_decide'
       }
     },
     {
-      from: 'direct_reply',
-      router: 'routeAfterDirectReply',
+      from: 'agent_decide',
+      router: 'routeAfterAgentDecide',
       branches: {
-        planner: 'planner',
-        persist: 'persist',
-        __end__: END_TARGET
-      }
-    },
-    {
-      from: 'validate',
-      router: 'routeAfterValidate',
-      branches: {
-        answer: 'draft_reply',
-        repair: 'repair_or_continue'
-      }
-    },
-    {
-      from: 'repair_or_continue',
-      router: 'routeAfterRepair',
-      branches: {
-        dispatch: 'dispatch',
-        answer: 'draft_reply'
-      }
-    },
-    {
-      from: 'draft_reply',
-      router: 'routeAfterDraftReply',
-      branches: {
-        dispatch: 'dispatch',
+        execute_tools: 'execute_tools',
         humanize: 'humanize'
       }
     }
@@ -108,8 +78,8 @@ module.exports = (() => {
   assert.ok(calls.some((call) => call[0] === 'addEdge' && call[1] === 'persist' && call[2] === end));
   assert.ok(calls.some((call) => (
     call[0] === 'addConditionalEdges'
-    && call[1] === 'direct_reply'
-    && call[3].__end__ === end
+    && call[1] === 'agent_decide'
+    && call[3].execute_tools === 'execute_tools'
   )));
 
   assert.throws(() => applyLangGraphV2Topology(graph, {
@@ -119,9 +89,9 @@ module.exports = (() => {
   }), /missing LangGraph V2 node implementation: persist/);
   assert.throws(() => applyLangGraphV2Topology(graph, {
     nodes,
-    routers: { ...routers, routeAfterRepair: null },
+    routers: { ...routers, routeAfterAgentDecide: null },
     end
-  }), /missing LangGraph V2 router implementation: routeAfterRepair/);
+  }), /missing LangGraph V2 router implementation: routeAfterAgentDecide/);
 
   console.log('langgraphV2.test.js passed');
 })();

@@ -201,10 +201,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     if (!fallbackPersonaModuleDecision) {
       fallbackPersonaModuleDecision = selectPersonaModules(
         {
-          ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
+          ...(options?.personaModuleDecision || {}),
           personaModules: normalizeArray(baseDynamicPromptPlan.personaModules).length > 0
             ? baseDynamicPromptPlan.personaModules
-            : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
+            : normalizeArray(options?.personaModuleDecision?.personaModules)
         },
         {
           ...fallbackPersonaModuleContext,

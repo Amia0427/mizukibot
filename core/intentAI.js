@@ -81,7 +81,7 @@ function getRouterApiKey() {
 }
 
 function getRouterModel() {
-  return String(config.AI_ROUTER_MODEL || config.PLAN_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
+  return String(config.AI_ROUTER_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
 }
 
 async function detectIntentByAI({

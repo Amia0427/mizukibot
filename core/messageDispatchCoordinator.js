@@ -46,7 +46,7 @@ function createMessageDispatchCoordinator(deps = {}) {
   }
 
   function applyGroupDirectGuardToReply(reply = '', route = {}, routeExecutionPlan = {}, groupId = '') {
-    const routeMeta = buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+    const routeMeta = buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
       groupId,
       chatType: route?.meta?.chatType || 'group'
     });
@@ -120,14 +120,14 @@ function createMessageDispatchCoordinator(deps = {}) {
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           routeDebugKey: routeExecutionPlan.routeDebugKey,
           topRouteType: routeExecutionPlan.topRouteType,
-          dispatchBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct' : 'tool_plan',
-          triggerBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct.final_send' : 'tool_plan.final_send',
+          dispatchBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct' : 'agent',
+          triggerBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct.final_send' : 'agent.final_send',
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
           imageUrl,
           imageUrls,
           deferPersist: false,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             groupId,
             messageId: String(sourceMessageId || '').trim(),
             threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
@@ -250,7 +250,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           triggerReason: 'direct_reply.final_send',
           topRouteType: routeExecutionPlan.topRouteType,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             groupId,
             messageId: String(sourceMessageId || '').trim(),
             threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
@@ -278,7 +278,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           allowedTools: routeExecutionPlan.allowedTools,
           imageUrl,
           imageUrls,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             groupId,
             messageId: String(sourceMessageId || '').trim(),
             threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()

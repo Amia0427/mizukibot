@@ -515,7 +515,6 @@
         : []
     };
     const routerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 180, directedContext });
-    const plannerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 320, directedContext });
     const routeResolverStartedAt = Date.now();
     let route = null;
     let routeResolverError = null;

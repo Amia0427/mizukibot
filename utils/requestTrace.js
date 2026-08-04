@@ -19,9 +19,9 @@ const TRACE_TEXT_FIELDS = new Set([
   'mainFallbackScope', 'apiBaseUrlHost', 'modelSource', 'apiBaseUrlSource', 'apiKeySource',
   'finalErrorCode', 'errorCode', 'concurrencyLane', 'concurrencyScope', 'foreground_lane',
   'foreground_request_id', 'inbound_lane', 'inbound_pool', 'inbound_request_id',
-  'ignoreSessionLimitReason', 'executor', 'planner', 'apiBaseUrl', 'requestUrl',
+  'ignoreSessionLimitReason', 'executor', 'apiBaseUrl', 'requestUrl',
   'retry', 'tool', 'toolName', 'replyPath', 'finishReason', 'mode', 'jobId', 'postReplyJobId',
-  'decisionSource', 'plannerDecisionSource', 'plannerModel', 'plannerMode', 'unavailableReason',
+  'decisionSource', 'decision', 'stopReason', 'status', 'blockedReason', 'toolCallId', 'unavailableReason',
   'needsMemoryReason', 'recallFacet', 'downgradeReason', 'relationship', 'fastPath'
 ]);
 const TRACE_NUMBER_FIELDS = new Set([
@@ -30,16 +30,16 @@ const TRACE_NUMBER_FIELDS = new Set([
   'lagFromMessageMs', 'foreground_active_admin', 'foreground_active_general',
   'foreground_active_total', 'foreground_wait_ms', 'inbound_active_admin',
   'inbound_active_general', 'inbound_active_total', 'inbound_wait_ms', 'attempt', 'retryCount',
-  'maxRetry', 'pid', 'plannerMs', 'executorMs', 'streamMs', 'firstTokenMs', 'sendMs',
+  'maxRetry', 'pid', 'executorMs', 'streamMs', 'firstTokenMs', 'sendMs',
   'prepareMs', 'routeMs', 'dispatchMs', 'validateMs', 'persistMs', 'toolMs', 'maxAttempts',
-  'allowedToolCount', 'plannerStepCount', 'tokens'
+  'allowedToolCount', 'toolRoundCount', 'toolCallCount', 'round', 'callCount', 'tokens'
 ]);
 const TRACE_BOOLEAN_FIELDS = new Set([
   'isAdmin', 'applied', 'success', 'ok', 'cache', 'richMessage', 'fallbackActive', 'fallbackForced',
   'mainFallbackActive', 'mainFallbackForced', 'privilegedPrivateChat', 'ignoreSessionLimit',
   'needsBackground', 'streamCompleted', 'retryable', 'saved', 'shouldPersistBridge',
   'shouldPersistJournal', 'shouldLearn', 'shouldEnqueuePostReplyJob', 'workerStarted',
-  'stream', 'sent', 'streamDoneSeen', 'allowTools', 'shouldUseTools', 'plannerFallbackUsed',
+  'stream', 'sent', 'streamDoneSeen', 'allowTools', 'shouldUseTools', 'forced',
   'hasContext', 'needsMemory', 'forceMemoryContext'
 ]);
 const TRACE_IDENTITY_FIELDS = new Map([
@@ -153,7 +153,7 @@ function serializeRequestTraceEvent(payload = {}) {
     }
     if (Object.keys(cache).length > 0) serialized.cache = cache;
   }
-  for (const field of ['allowedToolNames', 'plannerTools']) {
+  for (const field of ['allowedToolNames', 'toolNames']) {
     if (!Array.isArray(payload[field])) continue;
     serialized[field] = payload[field]
       .slice(0, 100)

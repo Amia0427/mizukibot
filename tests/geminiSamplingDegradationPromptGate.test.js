@@ -36,14 +36,12 @@ module.exports = (async () => {
         }
       },
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [],
+          rationaleByBlock: {}
         }
       }
     }
@@ -72,17 +70,15 @@ module.exports = (async () => {
         dailyJournalText: 'date: 2026-06-12\n昨天聊了汤咖喱和素材店。'
       },
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'skip', reason: 'planner missed recall' },
-              { blockId: 'daily_journal', decision: 'skip', reason: 'planner missed recall' }
-            ],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'skip', reason: 'dynamic plan missed recall' },
+            { blockId: 'daily_journal', decision: 'skip', reason: 'dynamic plan missed recall' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }

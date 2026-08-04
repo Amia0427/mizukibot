@@ -69,7 +69,6 @@ function createToolExecutionHelpers(deps = {}) {
     decideMemoryCliTurnAction,
     safeParseMemoryCliResult,
     captureToolFailure,
-    isPlannerSingleAuthorityEnabled,
     toolExecutors,
     resolveToolExecutor
   } = deps;
@@ -315,13 +314,7 @@ function createToolExecutionHelpers(deps = {}) {
     if (existingUrl) return stepInputs;
 
     const previousEnvelopes = normalizeArray(state.execution?.toolResults);
-    const previousSteps = normalizeArray(state.plan?.steps);
-    const webSearchResult = [...previousEnvelopes].reverse().find((item) => String(item?.tool_name || '').trim() === 'web_search' && String(item?.status || '').trim() === 'completed')
-      || previousSteps
-        .filter((candidate) => String(candidate?.tool || '').trim() === 'web_search')
-        .flatMap((candidate) => normalizeArray(candidate?.evidence))
-        .reverse()
-        .find((item) => String(item?.status || '').trim() === 'completed');
+    const webSearchResult = [...previousEnvelopes].reverse().find((item) => String(item?.tool_name || '').trim() === 'web_search' && String(item?.status || '').trim() === 'completed');
     const rows = parseSearchResultRows(webSearchResult?.result || '');
     if (rows.length === 0) {
       throw new Error('web_fetch could not resolve url from previous web_search result');
@@ -541,11 +534,10 @@ function createToolExecutionHelpers(deps = {}) {
 
   function getPreviousMemorySearchResult(state = {}, currentStepId = '') {
     const currentId = normalizeText(currentStepId);
-    const planEvidence = normalizeArray(state.plan?.steps)
-      .filter((candidate) => normalizeText(candidate?.id) !== currentId)
-      .flatMap((candidate) => normalizeArray(candidate?.evidence));
     const executionEvidence = normalizeArray(state.execution?.toolResults);
-    const candidates = [...executionEvidence, ...planEvidence].reverse();
+    const candidates = executionEvidence
+      .filter((candidate) => normalizeText(candidate?.step_id) !== currentId)
+      .reverse();
     for (const envelope of candidates) {
       const resultText = String(envelope?.result || '').trim();
       if (!resultText) continue;
@@ -698,19 +690,6 @@ function createToolExecutionHelpers(deps = {}) {
         return cachedEnvelope;
       }
       if (toolName === 'memory_cli') {
-        if (isPlannerSingleAuthorityEnabled()) {
-          const commandText = normalizeText(normalizedArgs.command);
-          if (/^mem open --ref\s+\"mc_ref:planner_pending:/i.test(commandText)) {
-            const previousResult = safeParseMemoryCliResult(getPreviousMemorySearchResult(state, step.id));
-            const previousRef = normalizeText(previousResult?.results?.[0]?.ref);
-            if (previousRef) {
-              normalizedArgs = {
-                ...normalizedArgs,
-                command: `mem open --ref ${JSON.stringify(previousRef)}`
-              };
-            }
-          }
-        }
         if (isUnresolvedMemoryOpenCommand(normalizedArgs.command)) {
           const envelope = buildUnresolvedMemoryRefEnvelope(step, normalizedArgs, policy, executionState);
           logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {

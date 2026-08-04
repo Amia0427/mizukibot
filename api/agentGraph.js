@@ -2,23 +2,9 @@
 // through the facade/V2 host and keep compat helpers isolated from the shell.
 const { askAIByGraph, askAIByGraphV1 } = require('./agentGraphFacade');
 const { runPersistInBackgroundFromCheckpoint } = require('./agentGraphV2');
-const {
-  createPlanRuntime,
-  extractStreamDelta,
-  finalizePlanRuntime,
-  looksLikeFailureReply,
-  recordPlanRuntimeToolResult,
-  shouldSuppressStreamMessage
-} = require('./agentGraphCompat');
 
 module.exports = {
   askAIByGraph,
   askAIByGraphV1,
-  createPlanRuntime,
-  extractStreamDelta,
-  finalizePlanRuntime,
-  looksLikeFailureReply,
-  recordPlanRuntimeToolResult,
-  shouldSuppressStreamMessage,
   runPersistInBackgroundFromCheckpoint
 };

@@ -132,9 +132,6 @@
     const formattingPreferences = getFormattingPreferences(question);
     const outputFormatInstruction = buildToolReplyFormatInstruction(formattingPreferences);
     mutableOptions.routePrompt = [String(mutableOptions.routePrompt || '').trim(), outputFormatInstruction].filter(Boolean).join('\n\n') || null;
-    const plannerExecutionPlan = mutableOptions.plannerExecutionPlan && typeof mutableOptions.plannerExecutionPlan === 'object'
-      ? mutableOptions.plannerExecutionPlan
-      : null;
     if (!mutableOptions.modelConfig) {
       const fallbackModelConfig = resolveLegacyVisionFallbackModelConfig(imageUrl, userId, mutableOptions.routeMeta || {});
       if (fallbackModelConfig) mutableOptions.modelConfig = fallbackModelConfig;
@@ -144,7 +141,6 @@
       ...mutableOptions,
       disableTools: false,
       disableStream: true,
-      forcePlanMode: String(plannerExecutionPlan?.mode || '').trim() === 'tool_plan',
       routeMeta: {
         ...(mutableOptions.routeMeta || {})
       }
@@ -198,7 +194,6 @@
     config,
     routeResolver,
     routeExecution,
-    planDirectChat,
     askAIDispatch,
     askToolTaskLocally,
     runBackgroundToolTask,

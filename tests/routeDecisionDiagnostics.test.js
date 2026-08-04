@@ -59,15 +59,14 @@ const rows = [
     stage: 'normal_fast_reply_skipped',
     reason: 'memory_recall_like'
   }),
-  ev(directRequestId, 3, 'planner_start', 10, {
-    stage: 'direct_chat_planner_start'
+  ev(directRequestId, 3, 'runtime_v2_node_start', 10, {
+    stage: 'node_start',
+    node: 'agent_decide'
   }),
-  ev(directRequestId, 4, 'planner_done', 60, {
-    stage: 'direct_chat_planner_done',
+  ev(directRequestId, 4, 'runtime_v2_agent_decision', 60, {
+    stage: 'agent_decision',
     durationMs: 50,
-    shouldUseTools: false,
-    allowedToolCount: 0,
-    plannerFallbackUsed: true
+    decision: 'final'
   }),
   ev(directRequestId, 5, 'route_execution_done', 62, {
     stage: 'route_execution_done',
@@ -76,7 +75,6 @@ const rows = [
     topRouteType: 'direct_chat',
     executor: 'direct',
     shouldUseTools: false,
-    plannerMode: 'chat_only',
     allowedToolNames: []
   }),
   ev(directRequestId, 6, 'runtime_dispatch_start', 70, {
@@ -142,9 +140,8 @@ const direct = report.requests.find((item) => item.requestId === directRequestId
 assert.strictEqual(direct.route.kind, 'direct_reply');
 assert.strictEqual(direct.fastReply.reason, 'memory_recall_like');
 assert.strictEqual(direct.fastReply.exitFlags.continuity, true);
-assert.strictEqual(direct.planner.entered, true);
-assert.strictEqual(direct.planner.plannerFallbackUsed, true);
-assert.strictEqual(direct.runtime.node, 'prepare');
+assert.strictEqual(direct.runtime.node, 'agent_decide');
+assert.ok(direct.runtime.nodes.includes('prepare'));
 assert.strictEqual(direct.runtime.prepareFastPath, 'plain_private_chat');
 assert.strictEqual(direct.durations.upstreamMs, 500);
 

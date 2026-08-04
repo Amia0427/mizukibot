@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 
 const config = require('../config');
-const directChatPlanner = require('../core/directChatPlanner');
 const { detectIntent } = require('../core/router');
 const { resolveRouteExecution } = require('../core/routeExecution');
 const {
@@ -281,23 +280,6 @@ function summarizeFastReplyFromEvents(events = []) {
   };
 }
 
-function summarizePlannerFromEvents(events = []) {
-  const start = firstBy(events, (event) => eventStage(event) === 'direct_chat_planner_start' || event.tracePhase === 'planner_start');
-  const done = firstBy(events, (event) => eventStage(event) === 'direct_chat_planner_done' || event.tracePhase === 'planner_done');
-  const failed = firstBy(events, (event) => eventStage(event) === 'direct_chat_planner_failed' || event.tracePhase === 'planner_failed');
-  return {
-    entered: Boolean(start || done || failed),
-    failed: Boolean(failed),
-    decisionSource: normalizeText(done?.decisionSource || done?.plannerDecisionSource),
-    shouldUseTools: done?.shouldUseTools === true,
-    needsBackground: done?.needsBackground === true,
-    allowedToolCount: Number(done?.allowedToolCount || 0) || 0,
-    plannerFallbackUsed: done?.plannerFallbackUsed === true,
-    plannerModel: normalizeText(done?.plannerModel),
-    durationMs: duration(done) ?? duration(failed) ?? deltaBetween(start, done || failed)
-  };
-}
-
 function summarizeRouteExecutionFromEvents(events = []) {
   const routeExecution = lastBy(events, (event) => eventStage(event) === 'route_execution_done' || eventStage(event) === 'route_execution_failed');
   const dispatch = lastBy(events, (event) => eventStage(event) === 'dispatch_branch_selected');
@@ -313,9 +295,6 @@ function summarizeRouteExecutionFromEvents(events = []) {
     routeDebugKey: normalizeText(routeExecution?.routeDebugKey || dispatch?.routeDebugKey || finalSend?.routeDebugKey),
     topRouteType: normalizeText(routeExecution?.topRouteType || dispatch?.topRouteType || finalSend?.topRouteType || complete?.topRouteType),
     executor: normalizeText(routeExecution?.executor || dispatch?.executor),
-    plannerMode: normalizeText(routeExecution?.plannerMode || dispatch?.plannerMode),
-    plannerStepCount: Number(routeExecution?.plannerStepCount ?? dispatch?.plannerStepCount ?? 0) || 0,
-    plannerTools: normalizeArray(routeExecution?.plannerTools || dispatch?.plannerTools).map(normalizeText).filter(Boolean),
     shouldUseTools: routeExecution?.shouldUseTools === true || dispatch?.shouldUseTools === true,
     allowTools: dispatch?.allowTools === true || routeExecution?.allowTools === true,
     allowedToolNames: normalizeArray(routeExecution?.allowedToolNames || dispatch?.allowedToolNames).map(normalizeText).filter(Boolean),
@@ -361,8 +340,6 @@ function summarizeRuntimeFromEvents(events = []) {
 function summarizeDurations(events = []) {
   const ingress = firstBy(events, (event) => eventStage(event) === 'handle_incoming_start' || event.tracePhase === 'message_ingress');
   const fastSend = firstBy(events, (event) => eventStage(event) === 'normal_fast_reply_send_done');
-  const plannerStart = firstBy(events, (event) => eventStage(event) === 'direct_chat_planner_start' || event.tracePhase === 'planner_start');
-  const plannerDone = firstBy(events, (event) => eventStage(event) === 'direct_chat_planner_done' || event.tracePhase === 'planner_done');
   const routeExecution = lastBy(events, (event) => eventStage(event) === 'route_execution_done');
   const runtimeDispatchStart = firstBy(events, (event) => eventStage(event) === 'formal_route_dispatch_start' || event.tracePhase === 'runtime_dispatch_start');
   const runtimeDispatchDone = firstBy(events, (event) => eventStage(event) === 'formal_route_dispatch_done' || event.tracePhase === 'runtime_dispatch_done');
@@ -375,7 +352,6 @@ function summarizeDurations(events = []) {
   const complete = lastBy(events, (event) => eventStage(event) === 'request_complete');
   return {
     normalFastReplyMs: duration(fastSend),
-    plannerMs: duration(plannerDone) ?? deltaBetween(plannerStart, plannerDone),
     routeExecutionMs: duration(routeExecution),
     formalDispatchMs: duration(runtimeDispatchDone) ?? deltaBetween(runtimeDispatchStart, runtimeDispatchDone),
     prepareMs: deltaBetween(prepareStart, prepareDone),
@@ -385,13 +361,12 @@ function summarizeDurations(events = []) {
   };
 }
 
-function inferRouteKind({ fastReply = {}, planner = {}, routeExecution = {} } = {}) {
+function inferRouteKind({ fastReply = {}, routeExecution = {} } = {}) {
   if (fastReply.succeeded) return 'normal_fast_reply';
   if (routeExecution.unavailableReason && routeExecution.dispatchBranch === 'direct_reply') return 'degraded_direct_reply';
-  if (routeExecution.dispatchBranch === 'tool_plan' || routeExecution.allowTools) return 'planner_tool_route';
-  if (routeExecution.dispatchBranch === 'background_direct' || routeExecution.needsBackground) return 'planner_background';
+  if (routeExecution.dispatchBranch === 'agent' || routeExecution.allowTools) return 'tool_route';
+  if (routeExecution.dispatchBranch === 'background_direct' || routeExecution.needsBackground) return 'background_direct';
   if (routeExecution.dispatchBranch === 'direct_reply') return 'direct_reply';
-  if (planner.entered) return planner.shouldUseTools ? 'planner_tool_route' : 'direct_reply';
   return routeExecution.routePolicyKey || 'unknown';
 }
 
@@ -405,7 +380,7 @@ function explainFastReplySkipReason(reason = '') {
     non_direct_executor: { key: 'direct_executor', label: 'executor is direct', exitFlag: 'route' },
     route_unavailable: { key: 'route_available', label: 'route execution is available', exitFlag: 'route' },
     tools_allowed: { key: 'tools_not_allowed', label: 'route does not allow tools', exitFlag: 'tools' },
-    tools_present: { key: 'no_tools_present', label: 'no planner/tool allowlist present', exitFlag: 'tools' },
+    tools_present: { key: 'no_tools_present', label: 'no tool allowlist present', exitFlag: 'tools' },
     image_present: { key: 'no_image_input', label: 'no image or visual input', exitFlag: 'image' },
     route_action_or_safety: { key: 'no_route_action_or_safety', label: 'no action/safety route metadata', exitFlag: 'permission' },
     memory_cli_turn: { key: 'no_memory_cli_turn', label: 'no memory_cli turn state', exitFlag: 'continuity' },
@@ -451,7 +426,6 @@ function summarizeRequestFromEvents(requestId = '', events = []) {
   const sorted = sortEvents(events);
   const ingress = firstBy(sorted, (event) => eventStage(event) === 'handle_incoming_start' || event.tracePhase === 'message_ingress');
   const fastReply = summarizeFastReplyFromEvents(sorted);
-  const planner = summarizePlannerFromEvents(sorted);
   const routeExecution = summarizeRouteExecutionFromEvents(sorted);
   const runtime = summarizeRuntimeFromEvents(sorted);
   const durations = summarizeDurations(sorted);
@@ -465,7 +439,7 @@ function summarizeRequestFromEvents(requestId = '', events = []) {
     groupId: normalizeText(ingress?.groupId || sorted.find((event) => event.groupId)?.groupId),
     chatType: normalizeText(ingress?.chatType || sorted.find((event) => event.chatType)?.chatType),
     route: {
-      kind: inferRouteKind({ fastReply, planner, routeExecution }),
+      kind: inferRouteKind({ fastReply, routeExecution }),
       policyKey: routeExecution.routePolicyKey,
       debugKey: routeExecution.routeDebugKey,
       topRouteType: routeExecution.topRouteType,
@@ -479,7 +453,6 @@ function summarizeRequestFromEvents(requestId = '', events = []) {
       missedConditions: fastConditions.missed,
       exitFlags: fastConditions.exitFlags
     },
-    planner,
     routeExecution,
     runtime,
     durations
@@ -542,31 +515,12 @@ function summarizeTestInput(options = {}) {
     isAdminUser: () => options.admin === true
   });
 
-  let plannerDecision = null;
-  if (route.topRouteType === 'direct_chat' && !fastExplanation.eligible) {
-    const ruleDecision = directChatPlanner.buildRuleBasedPlan(route, {
-      userId,
-      allowedTools: normalizeArray(options.allowedTools),
-      fallbackUsed: false,
-      decisionSource: 'diagnostic_rule_planner'
-    });
-    plannerDecision = directChatPlanner.normalizePlannerOutput(ruleDecision, route, {
-      userId,
-      allowedTools: normalizeArray(options.allowedTools)
-    });
-    route.meta = {
-      ...(route.meta || {}),
-      toolPlanner: plannerDecision,
-      directChatPlanner: plannerDecision
-    };
-  }
-
   const routeExecutionPlan = resolveRouteExecution(route, config, {});
   const allowTools = options.allowTools === true || routeExecutionPlan.allowTools === true;
   const routeKind = fastExplanation.eligible
     ? 'normal_fast_reply'
     : (allowTools
-      ? 'planner_tool_route'
+      ? 'tool_route'
       : (normalizeText(routeExecutionPlan.unavailableReason) ? 'degraded_direct_reply' : 'direct_reply'));
   return {
     inputMode: 'test_input',
@@ -580,7 +534,7 @@ function summarizeTestInput(options = {}) {
       debugKey: routeExecutionPlan.routeDebugKey,
       topRouteType: routeExecutionPlan.topRouteType,
       executor: routeExecutionPlan.executor,
-      dispatchBranch: routeKind === 'normal_fast_reply' ? 'normal_fast_reply' : (allowTools ? 'tool_plan' : 'direct_reply'),
+      dispatchBranch: routeKind === 'normal_fast_reply' ? 'normal_fast_reply' : (allowTools ? 'agent' : 'direct_reply'),
       unavailableReason: normalizeText(routeExecutionPlan.unavailableReason),
       localRuleId: normalizeText(route.meta?.localRuleId),
       routeReason: normalizeText(route.meta?.reason)
@@ -594,17 +548,6 @@ function summarizeTestInput(options = {}) {
       missedConditions: fastExplanation.missedConditions,
       exitFlags: fastExplanation.exitFlags
     },
-    planner: {
-      entered: route.topRouteType === 'direct_chat' && !fastExplanation.eligible,
-      failed: false,
-      decisionSource: normalizeText(plannerDecision?.decisionSource),
-      shouldUseTools: plannerDecision?.shouldUseTools === true,
-      needsBackground: routeExecutionPlan.needsBackground === true,
-      allowedToolCount: normalizeArray(plannerDecision?.allowedToolNames).length,
-      plannerFallbackUsed: plannerDecision?.plannerFallbackUsed === true,
-      plannerModel: normalizeText(plannerDecision?.plannerModel),
-      durationMs: null
-    },
     routeExecution: {
       routePolicyKey: routeExecutionPlan.policyKey,
       routeDebugKey: routeExecutionPlan.routeDebugKey,
@@ -615,19 +558,18 @@ function summarizeTestInput(options = {}) {
       allowedToolNames: normalizeArray(routeExecutionPlan.allowedTools),
       needsBackground: routeExecutionPlan.needsBackground === true,
       unavailableReason: normalizeText(routeExecutionPlan.unavailableReason),
-      dispatchBranch: routeKind === 'normal_fast_reply' ? 'normal_fast_reply' : (allowTools ? 'tool_plan' : 'direct_reply'),
+      dispatchBranch: routeKind === 'normal_fast_reply' ? 'normal_fast_reply' : (allowTools ? 'agent' : 'direct_reply'),
       durationMs: null
     },
     runtime: {
       node: routeKind === 'normal_fast_reply' ? 'normal_fast_reply' : 'prepare',
-      nodes: routeKind === 'normal_fast_reply' ? [] : ['prepare', 'route', routeExecutionPlan.allowTools ? 'planner/dispatch' : 'direct_reply'],
-      branch: routeKind === 'normal_fast_reply' ? 'normal_fast_reply' : (allowTools ? 'tool_plan' : 'direct_reply'),
+      nodes: routeKind === 'normal_fast_reply' ? [] : ['prepare', 'route', 'agent_decide', ...(routeExecutionPlan.allowTools ? ['execute_tools'] : [])],
+      branch: routeKind === 'normal_fast_reply' ? 'normal_fast_reply' : (allowTools ? 'agent' : 'direct_reply'),
       prepareFastPath: '',
       reason: 'test input prediction; no runtime was executed'
     },
     durations: {
       normalFastReplyMs: null,
-      plannerMs: null,
       routeExecutionMs: null,
       formalDispatchMs: null,
       prepareMs: null,
@@ -728,15 +670,6 @@ function formatRouteDecisionDiagnostic(report = {}) {
     ].join(' '));
     lines.push(`  exits: ${formatExitFlags(request.fastReply?.exitFlags)}`);
     lines.push([
-      '  planner:',
-      `entered=${request.planner?.entered === true}`,
-      `source=${request.planner?.decisionSource || 'none'}`,
-      `tools=${request.planner?.shouldUseTools === true}`,
-      `allowed=${Number(request.planner?.allowedToolCount || 0) || 0}`,
-      `fallback=${request.planner?.plannerFallbackUsed === true}`,
-      `ms=${formatMs(request.planner?.durationMs)}`
-    ].join(' '));
-    lines.push([
       '  runtime:',
       `node=${request.runtime?.node || 'unknown'}`,
       `nodes=${normalizeArray(request.runtime?.nodes).join('>') || 'none'}`,
@@ -746,7 +679,6 @@ function formatRouteDecisionDiagnostic(report = {}) {
     lines.push([
       '  durations:',
       `fast=${formatMs(request.durations?.normalFastReplyMs)}`,
-      `planner=${formatMs(request.durations?.plannerMs)}`,
       `routeExec=${formatMs(request.durations?.routeExecutionMs)}`,
       `prepare=${formatMs(request.durations?.prepareMs)}`,
       `routeNode=${formatMs(request.durations?.routeNodeMs)}`,

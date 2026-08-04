@@ -11,7 +11,6 @@ const expectedTests = [
   'tests/memoryV3EventsDailyFiles.test.js',
   'tests/postReplyTaskRunner.test.js',
   'tests/postReplyWorkerRuntime.test.js',
-  'tests/draftReplyToolEvidence.test.js',
   'tests/memoryWritePipeline.test.js',
   'tests/memoryV3RecallVerificationFilter.test.js',
   'tests/postReplyVectorWatchdog.test.js'

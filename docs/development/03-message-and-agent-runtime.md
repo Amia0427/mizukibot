@@ -1,6 +1,6 @@
 # 消息与 Agent 运行时
 
-本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-02 17:21 +08:00。
+本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-04 +08:00。
 
 读完后应能回答：一条 OneBot 消息在哪里被接收、在哪些位置可能提前返回、何时进入 Runtime V2、工具如何受策略约束、回复如何防重复与过期，以及回复后的持久化为何不应阻塞用户可见结果。
 
@@ -13,7 +13,7 @@
 | 新消息命名空间 | [`../../src/message/index.js`](../../src/message/index.js) | `src/message/` 与 `core/` 混合 | 迁移期 facade，不代表所有实现已经移动到 `src/` |
 | Agent 公共 API | [`../../api/agentGraph.js`](../../api/agentGraph.js) | [`../../api/runtimeV2/host/index.js`](../../api/runtimeV2/host/index.js) | 保留旧调用签名，但 V2 是唯一主机 |
 | 图结构 | [`../../api/runtimeV2/topology.js`](../../api/runtimeV2/topology.js) | `api/runtimeV2/nodes/` | 节点名、固定边和条件边的真值来源 |
-| 路由执行 | [`../../core/messageRouteFlow/index.js`](../../core/messageRouteFlow/index.js) | 同目录与消息处理器 | 把领域路由转成直接回复、工具计划、后台任务或管理员动作 |
+| 路由执行 | [`../../core/messageRouteFlow/index.js`](../../core/messageRouteFlow/index.js) | 同目录与消息处理器 | 把领域路由和 Router 工具授权交给统一 Agent 入口 |
 | 回复出口 | [`../../core/messageReplyRuntime.js`](../../core/messageReplyRuntime.js) | 同文件及系统回复模块 | 用户可见文本净化、敏感词保护、流式分段与 QQ 发送 |
 | 回复后任务 | [`../../utils/postReplyJobQueue/index.js`](../../utils/postReplyJobQueue/index.js) | `utils/postReplyWorker/` | 日记、学习、Memory V3 事件、物化和质量维护 |
 
@@ -83,7 +83,7 @@ flowchart TD
     D --> E["去重、权限、连续消息、并发锁"]
     E --> F["被动群感知或特殊命令"]
     E --> G["detectIntentHybrid"]
-    G --> H["direct-chat planner / route execution plan"]
+    G --> H["route execution / allowedTools"]
     H --> I["messageRouteFlow"]
     I --> J["api/agentGraph 公共入口"]
     J --> K["Runtime V2 LangGraph"]
@@ -134,23 +134,17 @@ WebSocket `message` 与 HTTP reverse handler 都调用 `acceptNapCatIncomingMess
 
 私聊或明确 @/引用 Bot 的消息继续正式路由。此处还会处理视觉 caption、card-only 修正、短期 session key、stable thread id 和 freshness guard。
 
-### 5. 路由与执行计划是两个决策
+### 5. Router 同时决定路由与工具授权
 
-消息处理器先调用 `detectIntentHybrid()` 得到高层 `topRouteType`、清洗文本和 route metadata。对 `direct_chat` 还会运行 direct-chat planner，决定：
+消息处理器调用 `detectIntentHybrid()` 得到高层 `topRouteType`、清洗文本和 route metadata。`core/router` 同时写入 `route.meta.allowedTools`，它是本轮工具授权的唯一上界；普通聊天默认空列表，明确的读取、搜索、卡片比较或写操作意图才开放对应工具。共享链接与最多三张卡片等确定性规则也在 Router 内完成。
 
-- 是否允许工具；
-- 允许哪些工具/能力桶；
-- 是否允许流式输出；
-- 是否需要后台任务；
-- route policy/debug key。
-
-`routeExecutionPlan` 是后续工具策略、提示词、telemetry 和回复格式的共同输入。不要只新增一个 route 字符串而不更新执行计划、允许工具和测试，否则“路由识别成功”也可能在执行层被拒绝。
+`routeExecutionPlan` 只把 Router 结果转成 executor、stream 和运行时约束。它以及后续 preflight、请求参数都只能取交集收窄 `allowedTools`，不能新增 Router 未授权的工具。不要只新增 route 字符串而不更新 Router allowlist、工具策略和测试。
 
 符合严格条件的普通文本可能走 normal fast reply。这是独立热路径，发送成功后自己更新短期历史和副作用；失败才回退正式路由。修改主回复行为时要先确认问题是否只发生在 fast path、formal path，还是两者共有的回复出口。
 
 ### 6. 正式路由把消息交给 Agent 公共 API
 
-`createMessageRouteFlow()` 根据执行计划处理管理员、后台控制、不可用分支和正式 Agent 调用。直接回复分支最终使用保留的调用签名：
+`createMessageRouteFlow()` 根据路由约束处理管理员、后台控制、不可用分支和正式 Agent 调用。普通聊天、前台工具请求、后台消息处理和任务续写最终共用保留的调用签名：
 
 ```js
 askAIByGraph(question, userInfo, userId, customPrompt, imageUrl, options)
@@ -165,14 +159,9 @@ askAIByGraph(question, userInfo, userId, customPrompt, imageUrl, options)
 图结构以 `LANGGRAPH_V2_TOPOLOGY` 为准：
 
 ```text
-prepare -> enhance_live_state -> route
-  route(chat/proactive/review/image/minecraft) -> direct_reply
-  route(tool_plan) -> planner -> dispatch -> validate
-  direct_reply -> planner | persist | END
-  validate -> draft_reply | repair_or_continue
-  repair_or_continue -> dispatch | draft_reply
-  draft_reply -> dispatch | humanize
-  humanize -> final_validate -> persist -> END
+prepare -> enhance_live_state -> route -> agent_decide
+agent_decide -> execute_tools -> agent_decide -> ...
+agent_decide -> humanize -> final_validate -> persist -> END
 ```
 
 ### 节点职责
@@ -181,41 +170,41 @@ prepare -> enhance_live_state -> route
 | --- | --- | --- |
 | `prepare` | 恢复 checkpoint/短期状态、构建记忆与 prompt、能力预检、延迟预算 | 改上下文输入、prompt 预算、恢复语义 |
 | `enhance_live_state` | 把当前动态状态补入准备结果 | 改实时状态增强，不应承担通用路由 |
-| `route` | 把请求归入 chat/tool_plan 等图分支 | 增加图级模式 |
-| `direct_reply` | 主模型直接回答，并可编译模型 tool calls | 改直接回复或 direct tool loop |
-| `planner` | 生成/恢复结构化执行计划 | 增加计划字段或单一决策权规则 |
-| `dispatch` | 执行 capability batch，收集 execution envelope | 增加 capability 调度、并行或 preflight |
-| `validate` | 验证工具证据与计划结果 | 改证据充分性、最大轮次 |
-| `repair_or_continue` | 基于失败构造修复计划或转回答 | 改可修复错误策略 |
-| `draft_reply` | 用工具证据合成草稿，也可再次产生工具步骤 | 改证据到答案的合成 |
+| `route` | 规范化图模式并把所有正式请求送入统一 Agent | 增加图级模式 |
+| `agent_decide` | 调用主模型原生 tool calls；无调用时确定最终正文 | 改模型决策、强制结束或 provider 归一化 |
+| `execute_tools` | 校验并执行当前批次，写入 tool messages 与 execution envelope | 改授权、并行、重复调用或副作用 checkpoint |
 | `humanize` | 按路由决定润色/流式最终文本 | 改人格润色或分段，不应改事实 |
 | `final_validate` | 失败回复分类、prompt 安全和最终保护 | 改最后一道安全/失败判定 |
 | `persist` | 写短期状态、事件并排队慢副作用 | 改持久化或后台任务边界 |
+
+每个包含 tool calls 的模型响应算一个工具轮次，最多 `AGENT_MAX_ROUNDS=3`；越权、参数错误、重复和批次超限调用都计入累计调用数，累计最多 `DIRECT_TOOL_MAX_CALLS_PER_TURN=4`。达到任一上限后，`agent_decide` 以空工具集再调用主模型一次；仍无正文时使用受控失败回复并停止。普通无工具路由可流式输出，工具路由只在循环结束后输出最终答案，中间模型文本不会发送给用户。
 
 ### 工具执行不是任意函数调用
 
 工具从 capability registry 和 executors 解析，经以下层次约束：
 
-1. route/planner 生成 allowed tools 与 execution plan。
+1. Router 生成 `route.meta.allowedTools`，执行层只能收窄该集合。
 2. capability preflight 验证可用性。
 3. [`../../utils/toolPolicy/manifest.js`](../../utils/toolPolicy/manifest.js) 按工具名和规范化 action 解析版本化 policy。
 4. 两个 Runtime V2 执行入口验证公开静态注册或真实动态 MCP 注册，未知工具、internal executor 和未知 action 默认阻断。
 5. Runtime V2 direct、scheduler 和 legacy 最终都通过 [`../../api/toolAuthorization.js`](../../api/toolAuthorization.js) 调用 executor。
 6. scheduler 按同一 policy 决定 batch、只读缓存、是否可并行以及 side-effect 顺序。
-7. dispatch 在副作用前后持久化 checkpoint，direct tool loop 不并发或合并副作用调用。
-8. 每一步返回标准 execution envelope，进入验证、修复与最终证据包。
+7. `execute_tools` 只并行安全的只读调用；副作用严格按顺序执行，并在调用前后持久化 checkpoint。
+8. 每一步返回标准 execution envelope，并作为 tool result 回灌主模型；重复调用复用已有结果，不重新执行。
 
 policy 至少声明 `risk/capability/effect/confirmation/scope/idempotency/replay/exposure`。混合读写工具必须按 action 解析；未携带 action 时使用保守写入策略。动态 MCP 只以 `api/toolRegistry.js` 的精确注册名称为准，`mcp_*` 前缀或 descriptor metadata 不能作为注册证明。
 
-需要增加工具时，必须同时补 schema、executor、manifest policy 和测试，并运行 `npm run check:agent:static`。不要在 `direct_reply` 中写工具名特判，也不要让写入/删除/外发能力进入只读缓存或并行批次。
+需要增加工具时，必须同时补 Router allowlist 规则、schema、executor、manifest policy 和测试，并运行 `npm run check:agent:static`。不要在 `agent_decide` 中写工具名特判，也不要让写入/删除/外发能力进入只读缓存或并行批次。
 
 `confirmation=none` 直接执行；`explicit` 和 `admin_explicit` 只创建一次性票据，并返回确定性的 `/tool-confirm <ID>` 与 `/tool-cancel <ID>`。消息入口在连续消息聚合和模型路由前解析这两个命令，票据必须匹配原用户、private/group 类型和群号；`admin_explicit` 在确认时再次读取当前管理员配置。
 
-票据保存在 [`../../utils/toolAuthorizationStore.js`](../../utils/toolAuthorizationStore.js)，状态只允许 `pending -> executing -> completed|uncertain`、`pending -> cancelled|expired`。确认执行前重新校验参数和上下文哈希、schema、完整 policy、静态公开能力或动态 MCP 精确注册；领取票据使用 SQLite 条件更新。executor 开始后的异常、进程中断和完成状态落盘失败都进入 `uncertain`，execution envelope 固定 `retryable=false`，不能进入 repair plan。终态会清除原始参数与上下文，但保留摘要哈希和 `tool_authorization_decision` 审计事件。
+票据保存在 [`../../utils/toolAuthorizationStore.js`](../../utils/toolAuthorizationStore.js)，状态只允许 `pending -> executing -> completed|uncertain`、`pending -> cancelled|expired`。确认执行前重新校验参数和上下文哈希、schema、完整 policy、静态公开能力或动态 MCP 精确注册；领取票据使用 SQLite 条件更新。executor 开始后的异常、进程中断和完成状态落盘失败都进入 `uncertain`，execution envelope 固定 `retryable=false`，不能由 Agent 自动重试。终态会清除原始参数与上下文，但保留摘要哈希和 `tool_authorization_decision` 审计事件。
 
 ### Checkpoint 与恢复
 
 Runtime V2 使用 [`../../utils/langgraphV2Store.js`](../../utils/langgraphV2Store.js) 持久化节点快照和事件。新写入端是 `DATA_DIR/langgraph_v2.sqlite`：普通节点通过 `saveTransition()` 在一个事务中提交 checkpoint 与关联 event，副作用前后边界也必须各自使用原子 transition，不能重新拆成两个独立写入。
+
+Agent checkpoint 保存 `messages`、待执行调用、工具轮次、累计调用数、调用指纹、完成调用 ID、执行结果和强制结束原因。恢复时从未完成调用继续；副作用调用的完成状态已经在调用后 checkpoint 中确认，不得重放。关键事件为 `agent_decision`、`agent_tool_round`、`agent_tool_result`、`agent_limit_reached` 和 `agent_forced_final`。
 
 旧 `langgraph_v2_checkpoints/` 和 `langgraph_v2_events/` 只做按 thread 惰性兼容读取，不启动扫描、不批量迁移、不回写。checkpoint 以 SQLite 优先，仅在无 SQLite 记录时回退 legacy；event 在无 tombstone 时合并 legacy 与 SQLite。`clear(threadId)` 在同一事务删除 SQLite checkpoint/event 并永久保留 tombstone，后续写入不能移除 tombstone。
 
@@ -262,6 +251,8 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 
 任务状态、attempt、lease 和 completedTasks 用于幂等恢复。新增后台步骤必须声明依赖、fatal/nonfatal 策略、压力下是否可跳过，并让 job result 保持 JSON 可序列化。
 
+`core/researchTaskQueue.js` 与 `core/researchSubagent.js` 仍保留历史代码，但生产入口已经断开，不会产生新研究任务；已有 research brief 仍可读取。
+
 ## 关键开发契约
 
 ### 公共入口与实现文件分开
@@ -276,7 +267,7 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 
 ### route metadata 是跨层协议
 
-`routePolicyKey`、`routeDebugKey`、`topRouteType`、`groupId`、`chatType`、`threadId`、`messageId` 和 request trace 会穿过路由、prompt、工具策略、发送、持久化和诊断。添加字段时要决定：是否可序列化、是否进入 checkpoint、是否含敏感信息、是否需要出现在 post-reply job。
+`routePolicyKey`、`routeDebugKey`、`topRouteType`、`allowedTools`、`groupId`、`chatType`、`threadId`、`messageId` 和 request trace 会穿过路由、prompt、工具策略、发送、持久化和诊断。`allowedTools` 是不可突破的授权上界。添加字段时要决定：是否可序列化、是否进入 checkpoint、是否含敏感信息、是否需要出现在 post-reply job。
 
 ### 失败必须保留类型
 
@@ -291,7 +282,7 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 | 新工具确认命令 | `core/messageToolAuthorization.js` | 同用户/聊天绑定、管理员复验、过期与重复确认、模型路由前早退 |
 | 新高层路由 | 当前 intent router 与 message route flow | execution plan、policy key、prompt 与路由测试 |
 | 新 Agent 图分支 | `api/runtimeV2/topology.js` 与独立 node | state shape、checkpoint、条件路由、LangGraph 测试 |
-| 新工具能力 | capability registry/executor/policy | planner catalog、preflight、side-effect 并行规则、evidence envelope |
+| 新工具能力 | Router、capability registry/executor/policy | allowlist、preflight、副作用顺序、execution envelope |
 | 改流式回复 | `core/messageReplyRuntime.js` 与 V2 streaming coordinator | chunk 去重、最终 flush、新鲜度、私聊/群聊间隔 |
 | 改回复后学习 | persist node 或 post-reply task | 前台延迟、幂等、job 依赖、失败重试 |
 | 新随进程运行的 scheduler | `index.js` 生命周期组合 | readiness、重连、stop/drain、资源快照 |
@@ -303,8 +294,8 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 - 在模型返回后直接发送，绕过 sensitive guard、freshness 和 reply telemetry。
 - 流式已发送后又走标准发送，产生重复回复。
 - 在 graph state 放不可序列化对象，导致 checkpoint 恢复失败。
-- 在 `direct_reply` 内新增工具特判，绕开 capability policy 和 execution envelope。
-- 把 `confirmation_required` 或 `uncertain` 当作普通工具失败交给模型 repair，导致副作用重复执行。
+- 在 `agent_decide` 内新增工具特判，绕开 Router allowlist、capability policy 和 execution envelope。
+- 把 `confirmation_required` 或 `uncertain` 当作普通工具失败交给模型自动重试，导致副作用重复执行。
 - 只在消息文本中展示确认命令，却没有持久化票据、原子领取和当前身份/policy 复验。
 - 把 post-reply 失败当成主回复失败，拖慢或重复用户可见回复。
 - 修改 chunk 或兼容 sentinel，却没有改变真实入口。
@@ -331,10 +322,10 @@ node scripts/run-tests.js tests/messageHandlerModuleBoundary.test.js tests/messa
 ### Runtime V2 与持久化
 
 ```bash
-node scripts/run-tests.js tests/langgraphV2SqliteStore.test.js tests/runtimeV2Persistence.test.js tests/toolPolicyRuntimeEffects.test.js tests/runtimeStatusDiagnostics.test.js tests/sqliteRuntimeShutdown.test.js
+node scripts/run-tests.js tests/reactAgentLoop.test.js tests/langgraphV2SqliteStore.test.js tests/runtimeV2Persistence.test.js tests/toolPolicyRuntimeEffects.test.js tests/runtimeStatusDiagnostics.test.js tests/sqliteRuntimeShutdown.test.js
 ```
 
-验收点：checkpoint/event 原子提交及回滚；legacy 惰性兼容、tombstone、quarantine 和物理损坏边界；副作用 transition、诊断和连接关闭。
+验收点：多轮工具调用和强制结束；checkpoint/event 原子提交及回滚；恢复不重放副作用；只读并行、Router allowlist、legacy 惰性兼容、诊断和连接关闭。
 
 ### 诊断现有运行实例
 

@@ -20,7 +20,6 @@ module.exports = (() => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
-    process.env.PLANNER_SINGLE_AUTHORITY_ENABLED = 'true';
     process.env.PREPARE_SOFT_BUDGET_MS = '601';
     process.env.MEMORY_RETRIEVAL_SOFT_BUDGET_MS = '301';
     process.env.CONTINUITY_PROBE_SOFT_BUDGET_MS = '251';
@@ -36,7 +35,6 @@ module.exports = (() => {
 
     assert.strictEqual(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS, 75000);
     assert.strictEqual(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_TOTAL_TIMEOUT_MS, 75000);
-    assert.strictEqual(config.PLANNER_SINGLE_AUTHORITY_ENABLED, true);
     assert.strictEqual(config.PREPARE_SOFT_BUDGET_MS, 601);
     assert.strictEqual(config.MEMORY_RETRIEVAL_SOFT_BUDGET_MS, 301);
     assert.strictEqual(config.CONTINUITY_PROBE_SOFT_BUDGET_MS, 251);

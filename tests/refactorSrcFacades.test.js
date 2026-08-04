@@ -17,13 +17,6 @@ const newVectorRetrieval = require('../src/memory/vector/retrieval');
 const newVectorStore = require('../src/memory/vector/store');
 const newVectorWrite = require('../src/memory/vector/write');
 
-const newPlanning = require('../src/runtime-v2/planning');
-const planningConstants = require('../src/runtime-v2/planning/constants');
-const planningClassifiers = require('../src/runtime-v2/planning/classifiers');
-const planningPrompt = require('../src/runtime-v2/planning/prompt');
-const planningTools = require('../src/runtime-v2/planning/tool-selection');
-const planningNormalizer = require('../src/runtime-v2/planning/normalizer');
-
 const newMemoryCli = require('../src/memory/cli');
 
 function assertFunctions(target, names) {
@@ -82,15 +75,6 @@ assertFunctions(newVectorEmbedding, ['requestEmbedding', 'shouldUseRemoteEmbeddi
 assertFunctions(newVectorRetrieval, ['retrieveUnifiedMemories']);
 assertFunctions(newVectorStore, ['loadLibrary']);
 assertFunctions(newVectorWrite, ['addMemoryItemsBatch']);
-
-assertFunctions(newPlanning, ['planRequestV2', 'sanitizePlan']);
-assert.strictEqual(planningConstants.PLANNER_DECISION_VERSION, 'planner_decision_v2');
-assertFunctions(planningClassifiers, ['prefersMemoryRecall']);
-assert.strictEqual(planningClassifiers.prefersMemoryRecall('你还记得昨天聊了什么吗'), true);
-assert.strictEqual(planningClassifiers.prefersMemoryRecall('把这句话翻译成英文'), false);
-assertFunctions(planningPrompt, ['buildPlannerPrompt']);
-assertFunctions(planningTools, ['pickMinimalToolAllowlist']);
-assertFunctions(planningNormalizer, ['normalizePlannerDecisionV2']);
 
 assertFunctions(newMemoryCli, ['runMemoryCli']);
 

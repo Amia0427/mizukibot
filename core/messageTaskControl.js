@@ -1,4 +1,4 @@
-const { buildDirectChatPlannerOptions } = require('./directChatPlannerContext');
+const { applyDeterministicToolRouting } = require('./router/toolRouting');
 
 function createMessageTaskControlCoordinator(deps = {}) {
   const {
@@ -8,7 +8,6 @@ function createMessageTaskControlCoordinator(deps = {}) {
     buildSupplementedTaskText,
     buildSubagentContextSummary,
     routeResolver,
-    planDirectChat,
     routeExecution,
     backgroundTaskRuntime,
     buildRoutePromptBundle,
@@ -113,8 +112,7 @@ function createMessageTaskControlCoordinator(deps = {}) {
 
       const supplementedText = buildSupplementedTaskText(session, command.payload);
       const routerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 180 });
-      const plannerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 320 });
-      const route = await routeResolver({
+      let route = await routeResolver({
         rawText: String(rawText || '').replace(cleanText, supplementedText),
         botQQ,
         userId: senderId,
@@ -127,19 +125,7 @@ function createMessageTaskControlCoordinator(deps = {}) {
       };
       route.cleanText = supplementedText;
       route.rawText = supplementedText;
-      if (route?.topRouteType === 'direct_chat') {
-        const plannerDecision = await planDirectChat(route, buildDirectChatPlannerOptions({
-          route,
-          directedContext: route?.meta?.directedContext || null,
-          userId: senderId,
-          contextSummary: plannerContextSummary
-        }));
-        route.meta = {
-          ...(route.meta || {}),
-          toolPlanner: plannerDecision,
-          directChatPlanner: plannerDecision
-        };
-      }
+      route = applyDeterministicToolRouting(route);
       const routeExecutionPlan = routeExecution.resolveRouteExecution(route, config, {});
 
       if (String(routeExecutionPlan.executor || '').trim() !== 'background_direct' && !routeExecutionPlan.allowTools) {

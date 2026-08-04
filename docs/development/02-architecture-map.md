@@ -1,6 +1,6 @@
 # 架构地图与代码落点
 
-> 源码核验时间：2026-08-02 17:21 +08:00。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
+> 源码核验时间：2026-08-04 +08:00。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
 
 本文用于回答三个问题：进程如何协作、代码当前由谁实现、一个新改动应该放在哪里。
 
@@ -16,7 +16,7 @@ flowchart LR
   Web["Web 管理与健康检查\nweb/server/index.js"]
   Ingress["消息入口队列\ncore/messageIngressDispatcher.js"]
   Handler["消息处理器\ncore/messageHandler.runtime.js"]
-  Route["路由与执行计划\ncore/router + core/routeExecution.js"]
+  Route["路由与工具授权\ncore/router + core/routeExecution.js"]
   Graph["LangGraph V2\napi/runtimeV2/host/index.js"]
   Model["模型协议与 HTTP\napi/runtimeV2/model + src/model/http"]
   Tools["工具与能力执行\napi/toolExecutors + api/runtimeV2/capabilities"]
@@ -159,8 +159,8 @@ core/messageHandler.js
 
 - `src/message/ingress`、`routing`、`reply`、`dispatch` 目前分别转发到 `core/messageIngress.js`、`core/router/index.js`、`core/messageReplyRuntime.js`、`core/messageDispatchCoordinator.js`；
 - `src/memory/v3`、`context`、`journal`、`cli` 目前分别转发到 `utils/memory-v3`、`utils/memoryContext`、`utils/dailyJournal`、`utils/memoryCli`；
-- `src/runtime-v2/host` 转发到 `api/runtimeV2/host`，图编译和节点装配仍由 `api/` 持有；
-- `api/runtimeV2/planning/service.js` 反向转发到 `src/runtime-v2/planning`，planning 已迁到 `src/`。
+- `src/runtime-v2/host` 转发到 `api/runtimeV2/host`，图编译、Agent 决策与工具执行节点仍由 `api/` 持有；
+- `src/runtime-v2/context` 持有动态上下文实现，`api/runtimeV2/context` 保留运行时接线；旧的 direct-chat 计划模块和 `src/runtime-v2/planning` 已移除。
 
 结论：修改前必须执行“从公共入口沿 `require()` 追到第一个非门面实现”的动作，不能按路径名称猜测。
 
@@ -194,7 +194,7 @@ core/messageHandler.js
 2. `core/messageIngressDispatcher.js`：异步队列、active 上限、drop 和 drain；
 3. `core/messageHandler.runtime.js`：`createMessageHandler()` 与 `handleIncomingMessage()`；
 4. `core/router/index.js`：`detectIntentHybrid()`；
-5. `core/routeExecution.js`：`resolveRouteExecution()` 把 route 变成 executor/tool/stream 约束；
+5. `core/routeExecution.js`：`resolveRouteExecution()` 把 route 变成 executor/tool/stream 约束，并且只能收窄 Router 给出的工具集合；
 6. `core/messageRouteFlow/index.js`：`dispatchFormalRoute`/`dispatchByRoutePlan()`；
 7. `api/agentGraph.js` -> `api/agentGraphFacade.js` -> `api/agentGraphV2.js`；
 8. `api/runtimeV2/host/index.js`：`createRuntime()`、LangGraph 节点装配和 `askAIByGraphV2()`；
@@ -204,16 +204,14 @@ core/messageHandler.js
 LangGraph V2 的主拓扑是：
 
 ```text
-prepare -> enhance_live_state -> route
-  chat/proactive/review/image/minecraft -> direct_reply
-  tool_plan -> planner -> dispatch -> validate
-validate -> draft_reply 或 repair_or_continue
-repair_or_continue -> dispatch 或 draft_reply
-draft_reply -> dispatch 或 humanize
-humanize -> final_validate -> persist -> END
+prepare -> enhance_live_state -> route -> agent_decide
+agent_decide -> execute_tools -> agent_decide -> ...
+agent_decide -> humanize -> final_validate -> persist -> END
 ```
 
-不要绕过 `routeExecution` 直接凭 route 字符串决定工具权限；不要绕过 `persist` 节点自行复制回复后写入逻辑。
+`core/router` 是工具授权的唯一来源，只有 `route.meta.allowedTools` 明确列出的工具可以暴露给模型；后续执行层只能取交集收窄，不能扩权。无工具路由保留流式回复，工具路由缓冲中间轮次，只发送最终答案。不要绕过 `persist` 节点自行复制回复后写入逻辑。
+
+`core/researchTaskQueue.js` 与 `core/researchSubagent.js` 仅为历史研究 brief 兼容保留，生产消息流不再入队；历史 brief 仍可读取。
 
 ## 7. 数据所有权
 
@@ -254,8 +252,8 @@ rg -n "module\.exports|require\(" <候选入口和相邻模块>
 | 主进程启动、信号、监听器接线 | `index.js` 或专用 lifecycle helper | 根入口只保留 orchestration，复杂逻辑下沉 |
 | QQ ingress、消息预处理、路由、回复发送 | 当前 owner `core/`；对外从 `src/message` 暴露 | 未完成迁移前不要新建第三套消息管线 |
 | 独立产品功能 | `src/features/<feature>/` | 参考 meme、daily-share、passive-awareness；旧 `core/` 路径只做兼容 facade |
-| LangGraph 节点、图路由、capability 调度 | `api/runtimeV2/` | 图 host 当前仍由这里拥有 |
-| Runtime V2 动态上下文与 planning | `src/runtime-v2/context`、`src/runtime-v2/planning` | 保持显式 DAG 和重依赖惰性加载 |
+| LangGraph 节点、图路由、Agent 工具执行 | `api/runtimeV2/` | 图 host、`agent_decide` 和 `execute_tools` 当前由这里拥有 |
+| Runtime V2 动态上下文 | `src/runtime-v2/context` | 保持显式依赖和重依赖惰性加载 |
 | 模型 HTTP 协议/重试/transport | `src/model/http/` | `api/httpClient.js` 是兼容 facade |
 | 模型请求编排、fallback、输出解析 | `api/runtimeV2/model/` | 不要把 provider 编排塞回通用 HTTP transport |
 | 向量记忆实现 | `src/memory/vector/` | `utils/vectorMemory.js` 是兼容 facade |

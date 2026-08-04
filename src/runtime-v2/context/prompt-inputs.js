@@ -203,10 +203,10 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
   const personaWorldbookSearch = personaModuleCandidates.personaWorldbookSearch || {};
   const personaModuleDecision = timing.measureSync('persona_module_selection', () => selectPersonaModules(
     {
-      ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
+      ...(options?.personaModuleDecision || {}),
       personaModules: dynamicPromptPlan.personaModules.length > 0
         ? dynamicPromptPlan.personaModules
-        : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
+        : normalizeArray(options?.personaModuleDecision?.personaModules)
     },
     {
       question,

@@ -97,16 +97,11 @@ function eventType(row = {}) {
   return normalizeText(row.type || row.event || row.stage || row.tracePhase).toLowerCase();
 }
 
-function isPlannerEvent(row = {}) {
+function isAgentDecisionEvent(row = {}) {
   const type = eventType(row);
   const stage = normalizeText(row.stage).toLowerCase();
-  const moduleName = normalizeText(row.module || row.component || row.node).toLowerCase();
-  return type.includes('planner_done')
-    || stage.includes('planner_done')
-    || (
-      (moduleName === 'planner' || moduleName === 'direct_chat_planner')
-      && Number.isFinite(resolveDurationMs(row, ['plannerDurationMs', 'durationMs', 'duration_ms']))
-    );
+  return (type.includes('agent_decision') || stage.includes('agent_decision'))
+    && Number.isFinite(resolveDurationMs(row, ['agentDecisionDurationMs', 'durationMs', 'duration_ms']));
 }
 
 function isSendEvent(row = {}) {
@@ -221,10 +216,10 @@ function filterRowsByWindow(rows = [], sinceMs = 0, untilMs = Date.now()) {
   return filterWindow(rows, { sinceMs, untilMs });
 }
 
-function summarizePlanner(perfEvents = []) {
-  const rows = perfEvents.filter(isPlannerEvent);
+function summarizeAgentDecision(perfEvents = []) {
+  const rows = perfEvents.filter(isAgentDecisionEvent);
   return {
-    ...summarizeDurations(rows, (row) => resolveDurationMs(row, ['plannerDurationMs', 'durationMs', 'duration_ms'])),
+    ...summarizeDurations(rows, (row) => resolveDurationMs(row, ['agentDecisionDurationMs', 'durationMs', 'duration_ms'])),
     missing: rows.length === 0
   };
 }
@@ -306,10 +301,10 @@ function scoreBottleneck(report = {}) {
   const metrics = report.metrics || {};
   const candidates = [
     {
-      code: 'planner',
-      label: 'planner 耗时',
-      score: nonNegativeNumber(metrics.planner?.p95Ms || metrics.planner?.maxMs, 0),
-      evidence: `planner p95=${metrics.planner?.p95Ms || 0}ms max=${metrics.planner?.maxMs || 0}ms`
+      code: 'agent_decision',
+      label: 'Agent 决策耗时',
+      score: nonNegativeNumber(metrics.agentDecision?.p95Ms || metrics.agentDecision?.maxMs, 0),
+      evidence: `agentDecision p95=${metrics.agentDecision?.p95Ms || 0}ms max=${metrics.agentDecision?.maxMs || 0}ms`
     },
     {
       code: 'main_model',
@@ -343,7 +338,7 @@ function scoreBottleneck(report = {}) {
     return {
       code: 'unknown',
       label: '样本不足',
-      evidence: '缺少 planner、主模型、发送耗时或 RSS 压力样本'
+      evidence: '缺少 Agent 决策、主模型、发送耗时或 RSS 压力样本'
     };
   }
   known.sort((a, b) => b.score - a.score || a.code.localeCompare(b.code));
@@ -436,7 +431,7 @@ async function buildMainReplyLagDiagnostic(options = {}) {
     : null;
 
   const metrics = {
-    planner: summarizePlanner(latencyEvents),
+    agentDecision: summarizeAgentDecision(latencyEvents),
     mainModel: summarizeMainModel(modelRows),
     generation: summarizeGeneration(latencyEvents),
     send: summarizeSend(latencyEvents),
@@ -456,7 +451,7 @@ async function buildMainReplyLagDiagnostic(options = {}) {
       maxLines
     },
     summary: {
-      plannerP95Ms: metrics.planner.p95Ms,
+      agentDecisionP95Ms: metrics.agentDecision.p95Ms,
       mainModelP95Ms: metrics.mainModel.p95Ms,
       generationP95Ms: metrics.generation.p95Ms,
       sendP95Ms: metrics.send.p95Ms,
@@ -484,7 +479,7 @@ async function buildMainReplyLagDiagnostic(options = {}) {
       errors: diagnosticErrors
     }
   };
-  if (metrics.planner.missing) report.summary.missingFields.push('planner_duration');
+  if (metrics.agentDecision.missing) report.summary.missingFields.push('agent_decision_duration');
   if (metrics.mainModel.missing) report.summary.missingFields.push('main_model_duration');
   if (metrics.send.missing) report.summary.missingFields.push('send_duration');
   if (!metrics.postReplyWorker.rssMaxMb) report.summary.missingFields.push('post_reply_worker_rss');
@@ -498,7 +493,7 @@ function buildMainReplyLagDiagnosticText(report = {}) {
   const queue = metrics.postReplyWorker?.queue || {};
   const lines = [
     `main-reply-lag: bottleneck=${summary.mostLikelyBottleneck?.code || 'unknown'} (${summary.mostLikelyBottleneck?.label || 'unknown'}) window=${Math.round(nonNegativeNumber(report.window?.windowMs, 0) / 60000)}m`,
-    `planner: p50=${metrics.planner?.p50Ms || 0}ms p95=${metrics.planner?.p95Ms || 0}ms max=${metrics.planner?.maxMs || 0}ms samples=${metrics.planner?.count || 0}`,
+    `agent-decision: p50=${metrics.agentDecision?.p50Ms || 0}ms p95=${metrics.agentDecision?.p95Ms || 0}ms max=${metrics.agentDecision?.maxMs || 0}ms samples=${metrics.agentDecision?.count || 0}`,
     `main-model: p50=${metrics.mainModel?.p50Ms || 0}ms p95=${metrics.mainModel?.p95Ms || 0}ms max=${metrics.mainModel?.maxMs || 0}ms samples=${metrics.mainModel?.count || 0} provider=${metrics.mainModel?.latest?.provider || ''} model=${metrics.mainModel?.latest?.model || ''}`,
     `generation: p50=${metrics.generation?.p50Ms || 0}ms p95=${metrics.generation?.p95Ms || 0}ms max=${metrics.generation?.maxMs || 0}ms samples=${metrics.generation?.count || 0} source=final_reply_send_done(stream).generationDurationMs`,
     `send: p50=${metrics.send?.p50Ms || 0}ms p95=${metrics.send?.p95Ms || 0}ms max=${metrics.send?.maxMs || 0}ms samples=${metrics.send?.count || 0} source=reply_send_success/failure`,
@@ -525,7 +520,7 @@ module.exports = {
   filterRowsByWindow,
   isMainReplyModelCall,
   isGenerationEvent,
-  isPlannerEvent,
+  isAgentDecisionEvent,
   isSendEvent,
   parseWindowMs,
   resolveEventMs,
@@ -533,6 +528,6 @@ module.exports = {
   summarizeDurations,
   summarizeGeneration,
   summarizeMainModel,
-  summarizePlanner,
+  summarizeAgentDecision,
   summarizeSend
 };

@@ -85,24 +85,24 @@ function formatInterval(interval) {
 function main() {
   const filePath = path.join(process.cwd(), 'data', 'inbound_timing.jsonl');
   const events = readTimingEvents(filePath, 5000);
-  const routePlannerReplyIntervals = buildIntervals(events, [
+  const routeAgentReplyIntervals = buildIntervals(events, [
     'route_resolver_done',
-    'direct_chat_planner_done',
+    'agent_decision',
     'reply_send_success',
     'reply_send_failure'
   ]);
-  const overlaps = computeOverlapStats(routePlannerReplyIntervals);
+  const overlaps = computeOverlapStats(routeAgentReplyIntervals);
   const foreground = summarizeForeground(events);
 
   console.log(`timing_file=${filePath}`);
-  console.log(`route_planner_reply_intervals=${routePlannerReplyIntervals.length}`);
+  console.log(`route_agent_reply_intervals=${routeAgentReplyIntervals.length}`);
   console.log(`foreground_count=${foreground.count}`);
   console.log(`foreground_peak_total=${foreground.peakTotal}`);
   console.log(`foreground_avg_wait_ms=${foreground.avgWaitMs}`);
   console.log(`interval_overlaps=${overlaps.length}`);
 
   console.log('\nrecent_intervals:');
-  for (const interval of routePlannerReplyIntervals.slice(-20)) {
+  for (const interval of routeAgentReplyIntervals.slice(-20)) {
     console.log(formatInterval(interval));
   }
 

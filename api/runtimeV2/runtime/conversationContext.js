@@ -51,29 +51,17 @@ function createConversationContextHelpers(deps = {}) {
     config,
     normalizeToolNames,
     filterAllowedToolsForMemoryCliTurn,
-    mergeAllowedToolsWithMemoryCli,
-    isPlannerSingleAuthorityEnabled,
-    getRouteToolPlanner,
     resolveModelTokenLimit,
     buildSecuritySystemPrompt
   } = deps;
 
   function computeEffectiveAllowedTools(request = {}, memoryCliTurn = null) {
-    if (isPlannerSingleAuthorityEnabled()) {
-      const planner = getRouteToolPlanner(request.routeMeta);
-      const plannedTools = normalizeToolNames(
-        Array.isArray(planner?.allowedToolNames) ? planner.allowedToolNames : []
-      );
-      const filteredPlannedTools = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED
-        ? plannedTools
-        : plannedTools.filter((toolName) => toolName !== 'memory_cli');
-      return filterAllowedToolsForMemoryCliTurn(filteredPlannedTools, memoryCliTurn);
-    }
-    return mergeAllowedToolsWithMemoryCli(request.allowedTools, {
-      ...request,
-      disableTools: !request.allowTools,
-      memoryCliTurn
-    });
+    if (request.allowTools === false) return [];
+    const routeAllowedTools = normalizeToolNames(request.allowedTools);
+    const enabledTools = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED
+      ? routeAllowedTools
+      : routeAllowedTools.filter((toolName) => toolName !== 'memory_cli');
+    return filterAllowedToolsForMemoryCliTurn(enabledTools, memoryCliTurn);
   }
 
   function resolveMainConversationModelName(request = {}) {

@@ -20,7 +20,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'cancel_scheduled_task'
 ]);
 
-const COMPANION_PLANNER_SAFE_READ_TOOLS = Object.freeze([
+const COMPANION_SAFE_READ_TOOLS = Object.freeze([
   'getWeather',
   'skill_earthquake_latest',
   'skill_weather',
@@ -75,7 +75,7 @@ function filterCompanionToolExecutors(executors = {}, config = {}) {
 }
 
 module.exports = {
-  COMPANION_PLANNER_SAFE_READ_TOOLS,
+  COMPANION_SAFE_READ_TOOLS,
   COMPANION_TOOL_PRESET,
   filterCompanionAllowedTools,
   filterCompanionToolExecutors,

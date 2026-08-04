@@ -60,7 +60,7 @@ function createHumanizeNode(deps = {}) {
     if (mode === 'force') return true;
     const text = String(draftReply || '').trim();
     if (!text) return false;
-    if (String(state.execution?.mode || '').trim() === 'tool_plan') return true;
+    if (String(state.execution?.mode || '').trim() === 'agent') return true;
     if (text.length > 120) return true;
     if (countSentenceLikeUnits(text) >= 3) return true;
     if (String(request.routePolicyKey || '').trim().toLowerCase().startsWith('direct_chat/style_')) return true;
@@ -73,26 +73,32 @@ function createHumanizeNode(deps = {}) {
     const events = [createEvent('node_start', { node: 'humanize' })];
     const isReviewRoute = isReviewMode(request.reviewMode);
     const shouldUseModelHumanizer = shouldInvokeModelHumanizer(state, draftReply, request);
+    const streamAlreadyCompleted = Boolean(
+      request.streaming
+      && state.output?.stream?.completed
+      && state.output?.stream?.hadOutput
+    );
     const shouldSkip = !draftReply
       || isReplyFailure(draftReply, { emptyIsFailure: true })
       || !isHumanizerEnabledImpl()
       || isReviewRoute
       || shouldBypassHumanizerForPolicy(request.routePolicyKey)
+      || streamAlreadyCompleted
       || !shouldUseModelHumanizer;
 
     if (shouldSkip) {
-      const finalReply = request.streaming
+      const finalReply = request.streaming && !streamAlreadyCompleted
         ? await maybeStreamFinalReply(state, draftReply)
         : draftReply;
       const displayReply = String(state.output?.displayReply || finalReply || '').trim() || finalReply;
       const nextStream = request.streaming && String(finalReply || '').trim()
         ? {
-          ...ensureOutputStream(state.output, state.execution?.mode === 'tool_plan' ? 'final_only' : 'direct'),
+          ...ensureOutputStream(state.output, state.execution?.mode === 'agent' ? 'final_only' : 'direct'),
           ...mirrorStreamingFlags(state.output, finalReply),
           completed: true,
-          mode: state.execution?.mode === 'tool_plan' ? 'final_only' : 'direct'
+          mode: state.execution?.mode === 'agent' ? 'final_only' : 'direct'
         }
-        : ensureOutputStream(state.output, state.execution?.mode === 'tool_plan' ? 'final_only' : 'none');
+        : ensureOutputStream(state.output, state.execution?.mode === 'agent' ? 'final_only' : 'none');
       const skippedEvents = events.concat([
         createEvent('node_complete', { node: 'humanize' })
       ]);

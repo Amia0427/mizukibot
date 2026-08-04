@@ -2,25 +2,17 @@ const assert = require('assert');
 
 process.env.BOT_TOOL_MODE = 'companion';
 process.env.COMPANION_TOOL_MODE_ENABLED = 'true';
-process.env.PLAN_API_BASE_URL = '';
-process.env.PLAN_API_KEY = '';
-process.env.PLANNER_SUBAGENT_ENABLED = 'false';
 
 const config = require('../config');
 config.BOT_TOOL_MODE = 'companion';
 config.COMPANION_TOOL_MODE_ENABLED = true;
-config.PLAN_API_BASE_URL = '';
-config.PLAN_API_KEY = '';
-config.PLANNER_SUBAGENT_ENABLED = false;
 
 const { getToolNames } = require('../api/toolRegistry');
 const { executeGlobalToolBatch } = require('../api/globalToolRuntime');
 const { buildCapabilityRegistry } = require('../api/runtimeV2/capabilities/registry');
 const scheduler = require('../api/runtimeV2/capabilities/scheduler');
-const { normalizePlanStep } = require('../api/runtimeV2/contracts');
-const { buildDirectChatExecutionBatches } = require('../api/runtimeV2/services/directChat');
-const { planDirectChat } = require('../core/directChatPlanner');
 const routeExecution = require('../core/routeExecution');
+const { applyDeterministicToolRouting } = require('../core/router/toolRouting');
 
 function route(text, topRouteType = 'direct_chat', chatType = 'private') {
   return {
@@ -34,32 +26,21 @@ function route(text, topRouteType = 'direct_chat', chatType = 'private') {
       chatMode: 'text_chat',
       toolIntent: 'none',
       responseIntent: 'answer',
-      allowedTools: ['read_shared_link']
+      allowedTools: []
     }
   };
 }
 
 function cardRoute({ text = '', urls = [], cardOnly = false, chatType = 'private', topRouteType = 'direct_chat' } = {}) {
   return {
-    topRouteType,
-    question: text,
-    cleanText: text,
-    intent: { needsMemory: false, needsPlanning: false, toolNeed: [] },
-    facets: { sourceScope: 'none', domain: 'general', outputKind: 'answer' },
+    ...route(text, topRouteType, chatType),
     meta: {
-      chatType,
-      chatMode: 'text_chat',
-      toolIntent: 'none',
-      responseIntent: 'answer',
-      allowedTools: ['web_fetch'],
+      ...route(text, topRouteType, chatType).meta,
       cardOnly,
       qqCardUrls: urls,
       cardContexts: urls.map((url, index) => ({
         kind: index % 2 === 0 ? 'news' : 'music',
         title: `卡片 ${index + 1}`,
-        description: '',
-        sourceLabel: '',
-        previewImageUrl: '',
         primaryUrl: url
       }))
     }
@@ -69,93 +50,77 @@ function cardRoute({ text = '', urls = [], cardOnly = false, chatType = 'private
 module.exports = (async () => {
   assert.ok(getToolNames().includes('read_shared_link'));
 
-  const privateDecision = await planDirectChat(route('看看这个 https://b23.tv/abc123'));
-  assert.strictEqual(privateDecision.executionPlan.mode, 'tool_plan');
-  assert.deepStrictEqual(privateDecision.allowedToolNames, ['read_shared_link']);
-  assert.strictEqual(privateDecision.executionPlan.steps.length, 1);
-  assert.strictEqual(privateDecision.executionPlan.steps[0].action, 'read_shared_link');
-  assert.deepStrictEqual(privateDecision.executionPlan.steps[0].args, { url: 'https://b23.tv/abc123' });
-  assert.strictEqual(privateDecision.decisionSource, 'rule_preflight_shared_link');
+  const privateLink = applyDeterministicToolRouting(route('看看这个 https://b23.tv/abc123'));
+  assert.deepStrictEqual(privateLink.meta.allowedTools, ['read_shared_link']);
+  assert.strictEqual(privateLink.meta.sharedLinkUrl, 'https://b23.tv/abc123');
 
-  const groupDecision = await planDirectChat(route('这个怎么样 https://music.163.com/#/song?id=186016', 'direct_chat', 'group'));
-  assert.strictEqual(groupDecision.executionPlan.mode, 'tool_plan');
+  const groupLink = applyDeterministicToolRouting(route(
+    '这个怎么样 https://music.163.com/#/song?id=186016',
+    'direct_chat',
+    'group'
+  ));
+  assert.deepStrictEqual(groupLink.meta.allowedTools, ['read_shared_link']);
 
-  const ignored = await planDirectChat(route('https://b23.tv/abc123', 'ignore', 'group'));
-  assert.strictEqual(ignored.executionPlan.mode, 'chat_only');
-  assert.ok(!ignored.allowedToolNames.includes('read_shared_link'));
+  const ignored = applyDeterministicToolRouting(route('https://b23.tv/abc123', 'ignore', 'group'));
+  assert.deepStrictEqual(ignored.meta.allowedTools, []);
 
-  const duplicate = await planDirectChat(route('https://b23.tv/abc123 再看 https://music.163.com/#/song?id=186016'));
-  assert.strictEqual(duplicate.executionPlan.steps.length, 1);
-  assert.strictEqual(duplicate.executionPlan.steps[0].args.url, 'https://b23.tv/abc123');
+  const duplicate = applyDeterministicToolRouting(route(
+    'https://b23.tv/abc123 再看 https://music.163.com/#/song?id=186016'
+  ));
+  assert.strictEqual(duplicate.meta.sharedLinkUrl, 'https://b23.tv/abc123');
+  assert.deepStrictEqual(duplicate.meta.allowedTools, ['read_shared_link']);
 
-  const purePrivateCardRoute = cardRoute({
+  const purePrivateCard = applyDeterministicToolRouting(cardRoute({
     text: '[分享链接] https://music.163.com/#/song?id=186016',
     urls: ['https://music.163.com/#/song?id=186016'],
     cardOnly: true
-  });
-  const purePrivateCard = await planDirectChat(purePrivateCardRoute);
-  assert.deepStrictEqual(purePrivateCard.allowedToolNames, ['web_fetch']);
-  assert.strictEqual(purePrivateCard.executionPlan.steps[0].action, 'web_fetch');
-  const purePrivateExecution = routeExecution.resolveRouteExecution({
-    ...purePrivateCardRoute,
-    meta: {
-      ...purePrivateCardRoute.meta,
-      toolPlanner: purePrivateCard
-    }
-  }, config);
+  }));
+  assert.deepStrictEqual(purePrivateCard.meta.allowedTools, ['read_shared_link', 'web_fetch']);
+  const purePrivateExecution = routeExecution.resolveRouteExecution(purePrivateCard, config);
   assert.strictEqual(purePrivateExecution.allowTools, true);
-  assert.deepStrictEqual(purePrivateExecution.allowedTools, ['web_fetch']);
+  assert.ok(purePrivateExecution.allowedTools.includes('web_fetch'));
 
-  const ordinaryShare = await planDirectChat(cardRoute({
+  const ordinaryShare = applyDeterministicToolRouting(cardRoute({
     text: '分享给你 https://example.com/ordinary',
     urls: ['https://example.com/ordinary']
   }));
-  assert.strictEqual(ordinaryShare.executionPlan.mode, 'chat_only');
+  assert.strictEqual(ordinaryShare.meta.cardReadPolicy, 'metadata_only');
+  assert.deepStrictEqual(ordinaryShare.meta.allowedTools, []);
 
-  const requestedSummary = await planDirectChat(cardRoute({
+  const requestedSummary = applyDeterministicToolRouting(cardRoute({
     text: '帮我总结一下 https://example.com/summary',
     urls: ['https://example.com/summary']
   }));
-  assert.strictEqual(requestedSummary.executionPlan.steps[0].action, 'web_fetch');
+  assert.strictEqual(requestedSummary.meta.cardReadPolicy, 'read');
+  assert.deepStrictEqual(requestedSummary.meta.allowedTools, ['web_fetch']);
 
-  const groupPureCard = await planDirectChat(cardRoute({
+  const groupPureCard = applyDeterministicToolRouting(cardRoute({
     text: '[分享链接] https://example.com/group',
     urls: ['https://example.com/group'],
     cardOnly: true,
     chatType: 'group'
   }));
-  assert.strictEqual(groupPureCard.executionPlan.mode, 'chat_only');
+  assert.strictEqual(groupPureCard.meta.cardReadPolicy, 'metadata_only');
+  assert.deepStrictEqual(groupPureCard.meta.allowedTools, []);
 
   const comparedUrls = [
     'https://example.com/first',
     'https://example.com/second',
     'https://example.com/third'
   ];
-  const comparedCards = await planDirectChat(cardRoute({
+  const comparedCards = applyDeterministicToolRouting(cardRoute({
     text: '比较这三张卡片',
     urls: comparedUrls
   }));
-  assert.deepStrictEqual(
-    comparedCards.executionPlan.steps.map((step) => step.args.url),
-    comparedUrls
-  );
-  assert.deepStrictEqual(
-    comparedCards.plannerDecisionV2.steps.map((step) => step.parallelGroup),
-    ['qq_card_fetch', 'qq_card_fetch', 'qq_card_fetch']
-  );
-  const normalizedComparedSteps = comparedCards.plannerDecisionV2.steps
-    .map((step, index) => normalizePlanStep(step, 'direct_chat', index));
-  assert.strictEqual(
-    buildDirectChatExecutionBatches(normalizedComparedSteps).find((batch) => batch.mode === 'parallel').items.length,
-    3
-  );
+  assert.deepStrictEqual(comparedCards.meta.allowedTools, ['web_fetch']);
+  assert.deepStrictEqual(comparedCards.meta.qqCardUrls, comparedUrls);
 
-  const tooManyCards = await planDirectChat(cardRoute({
+  const tooManyCards = applyDeterministicToolRouting(cardRoute({
     text: '看看这些卡片',
     urls: Array.from({ length: 4 }, (_, index) => `https://example.com/${index + 1}`)
   }));
-  assert.strictEqual(tooManyCards.executionPlan.mode, 'chat_only');
-  assert.strictEqual(tooManyCards.decisionSource, 'rule_preflight_card_limit');
+  assert.strictEqual(tooManyCards.meta.cardReadPolicy, 'limit_exceeded');
+  assert.deepStrictEqual(tooManyCards.meta.allowedTools, []);
 
   const registry = buildCapabilityRegistry();
   assert.strictEqual(registry.byName.get('read_shared_link').timeoutMs, 30000);
@@ -214,9 +179,7 @@ module.exports = (async () => {
     args: { url: secretUrl }
   }], {
     allowedGlobalTools: ['read_shared_link'],
-    toolExecutors: {
-      read_shared_link: async () => '公开内容已读取'
-    }
+    toolExecutors: { read_shared_link: async () => '公开内容已读取' }
   });
   assert.strictEqual(globalBatch.results[0].status, 'completed');
   assert.ok(!JSON.stringify(globalBatch.results[0]).includes('must-not-log'));

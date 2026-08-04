@@ -4,7 +4,7 @@ const {
 } = require('../../api/runtimeV2/guards/groupDirectReplyStyleGuard');
 
 function buildGroupDirectGuardRequest(route = {}, routeExecutionPlan = {}, chatType = 'group', groupId = '') {
-  const routeMeta = buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+  const routeMeta = buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
     groupId,
     chatType
   });

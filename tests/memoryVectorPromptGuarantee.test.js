@@ -120,16 +120,14 @@ module.exports = (async () => {
       topRouteType: 'direct_chat',
       memoryContext,
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.9, priority: 20, reason: 'planner miss' }
-            ],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.9, priority: 20, reason: 'dynamic plan miss' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }

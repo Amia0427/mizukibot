@@ -5,7 +5,6 @@ const { createMessageTaskControlCoordinator } = require('../core/messageTaskCont
 const sent = [];
 let backgroundTriggered = false;
 let resolvedRouteMeta = null;
-let plannerOptionsSeen = null;
 
 const runtime = {
   getSessionState() {
@@ -53,10 +52,6 @@ module.exports = (async () => {
         schedulerInjection: 'task scheduler'
       }
     }),
-    planDirectChat: async (_route, options) => {
-      plannerOptionsSeen = options;
-      return { executionPlan: {} };
-    },
     routeExecution: {
       resolveRouteExecution: (route) => {
         resolvedRouteMeta = route?.meta || null;
@@ -101,15 +96,14 @@ module.exports = (async () => {
   assert.strictEqual(supplement, true);
   assert.strictEqual(backgroundTriggered, true);
   assert.ok(resolvedRouteMeta);
-  assert.ok(resolvedRouteMeta.toolPlanner);
-  assert.ok(resolvedRouteMeta.directChatPlanner);
-  assert.ok(plannerOptionsSeen);
-  assert.strictEqual(plannerOptionsSeen.directedContext.scene, 'task_supplement');
-  assert.strictEqual(plannerOptionsSeen.memoryContext.memoryForPrompt, 'task memory');
-  assert.strictEqual(plannerOptionsSeen.availableContextSignals.retrievedMemory, true);
-  assert.strictEqual(plannerOptionsSeen.dynamicFewShotPrompt, 'task few shot');
-  assert.deepStrictEqual(plannerOptionsSeen.memoryCliTurn, { exposed: true });
-  assert.strictEqual(plannerOptionsSeen.schedulerInjection, 'task scheduler');
+  assert.strictEqual(resolvedRouteMeta.toolPlanner, undefined);
+  assert.strictEqual(resolvedRouteMeta.directChatPlanner, undefined);
+  assert.strictEqual(resolvedRouteMeta.directedContext.scene, 'task_supplement');
+  assert.strictEqual(resolvedRouteMeta.memoryContext.memoryForPrompt, 'task memory');
+  assert.strictEqual(resolvedRouteMeta.availableContextSignals.retrievedMemory, true);
+  assert.strictEqual(resolvedRouteMeta.dynamicFewShotPrompt, 'task few shot');
+  assert.deepStrictEqual(resolvedRouteMeta.memoryCliTurn, { exposed: true });
+  assert.strictEqual(resolvedRouteMeta.schedulerInjection, 'task scheduler');
 
   console.log('messageTaskControl.test.js passed');
 })().catch((error) => {

@@ -64,7 +64,6 @@ function createDeps(overrides = {}) {
     computeEffectiveAllowedTools() {
       return [];
     },
-    runCapabilityPreflight: async () => null,
     buildDynamicPromptImpl: async () => {
       throw new Error('dynamic prompt should be skipped for plain private chat');
     },
@@ -83,15 +82,6 @@ function createDeps(overrides = {}) {
     },
     classifyPromptThreat() {
       return { labels: [], reasons: [], score: 0 };
-    },
-    getToolPlannerExecutionPlan() {
-      return null;
-    },
-    isPlannerSingleAuthorityEnabled() {
-      return false;
-    },
-    normalizePlanForResume(plan = {}) {
-      return plan;
     },
     normalizeMode() {
       return 'chat';
@@ -191,12 +181,7 @@ module.exports = (async () => {
       toolIntent: 'maybe_tools',
       responseIntent: 'answer',
       facets: { sourceScope: 'notebook' },
-      intent: { needsMemory: false, needsPlanning: false },
-      directChatPlanner: {
-        decisionSource: 'rule_preflight_notebook_chat_only',
-        executionPlan: { mode: 'chat_only', steps: [] },
-        allowedToolNames: []
-      }
+      intent: { needsMemory: false, needsPlanning: false }
     }
   }));
   assert.strictEqual(notebookChatOnlyResult.execution.latencyBreakdown.prepare.fast_path, 'notebook_chat_only');

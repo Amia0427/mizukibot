@@ -28,7 +28,6 @@ function createBaseDeps(overrides = {}) {
     },
     routeResolver: async () => null,
     routeExecution: {},
-    planDirectChat: async () => null,
     askAIDispatch: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, replyOptions) => {
       replyOptionsSeen.push({ ...replyOptions });
       replyOptions.persistedReplyText = 'ai reply';

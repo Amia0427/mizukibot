@@ -130,7 +130,6 @@ function buildV2CanonicalSegments(state, input = {}, deps = {}) {
   const recentHistoryMessages = normalizeArray(input.recentHistoryMessages);
   const userTurnMessages = normalizeArray(input.userTurnMessages);
   const toolEvidenceMessages = normalizeArray(input.toolEvidenceMessages);
-  const plannerArtifactMessages = normalizeArray(input.plannerArtifactMessages);
   const includeMemoryContextSegments = input.disableMemoryContextSegments !== true;
   const modelName = String(input.modelName || request.modelConfig?.model || '').trim();
   const modelWindowTokens = Math.max(
@@ -156,8 +155,7 @@ function buildV2CanonicalSegments(state, input = {}, deps = {}) {
     task_memory: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.taskMemory) : [],
     group_memory: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.groupMemory) : [],
     style_signals: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.styleSignals) : [],
-    tool_evidence: toolEvidenceMessages,
-    planner_artifacts: plannerArtifactMessages
+    tool_evidence: toolEvidenceMessages
   };
 
   const compactionPlan = buildContextCompactionPlan({

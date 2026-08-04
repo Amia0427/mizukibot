@@ -46,8 +46,7 @@ const CHUNK_GROUPS = [
       'dynamic-prompt-02.chunk.js',
       'vision.chunk.js'
     ]
-  },
-  { entrypoint: 'src/runtime-v2/planning', chunkDir: 'src/runtime-v2/planning' }
+  }
 ];
 
 function collectJsFiles(dir) {

@@ -52,7 +52,7 @@ function isMainReplyCall(row = {}) {
   const dispatch = String(row.dispatch_branch || '').trim();
   if (/v2_(assistant_message|streaming_reply)|direct_reply|draft_reply/i.test(source)) return true;
   if (/direct_reply|draft_reply/i.test(trigger)) return true;
-  if (/direct_reply|tool_plan/i.test(dispatch)) return true;
+  if (/direct_reply|agent/i.test(dispatch)) return true;
   return false;
 }
 

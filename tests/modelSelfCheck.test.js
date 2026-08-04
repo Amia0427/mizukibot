@@ -29,10 +29,6 @@ module.exports = (async () => {
       ADMIN_API_BASE_URL: 'https://admin.example/v1/chat/completions',
       ADMIN_API_KEY: 'admin-key',
       ADMIN_AI_MODEL: 'admin-model',
-      DIRECT_CHAT_PLANNER_ENABLED: 'true',
-      PLAN_API_BASE_URL: 'https://plan.example/v1',
-      PLAN_API_KEY: 'plan-key',
-      PLAN_MODEL: 'plan-model',
       MEMORY_API_BASE_URL: 'https://memory.example/v1',
       MEMORY_API_KEY: 'memory-key',
       MEMORY_MODEL: 'memory-model',
@@ -81,7 +77,6 @@ module.exports = (async () => {
 
     const specs = buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.deepStrictEqual(specs.map((item) => item.type), [
-      'plan',
       'embedding',
       'rerank',
       'memory',
@@ -90,35 +85,32 @@ module.exports = (async () => {
       'passive_awareness_decision',
       'passive_awareness_reply'
     ]);
-    assert.strictEqual(specs[0].url, 'https://plan.example/v1/chat/completions');
-    assert.strictEqual(specs[0].body.max_tokens, 8);
-    assert.strictEqual(specs[0].body.stream, false);
-    assert.deepStrictEqual(specs[1].body.input, ['ok']);
-    assert.deepStrictEqual(specs[2].body.documents, ['ok', 'ping']);
-    assert.strictEqual(specs[2].body.top_n, 1);
-    assert.strictEqual(specs[4].model, 'main-model');
-    assert.strictEqual(specs[5].model, 'admin-model');
+    assert.deepStrictEqual(specs[0].body.input, ['ok']);
+    assert.deepStrictEqual(specs[1].body.documents, ['ok', 'ping']);
+    assert.strictEqual(specs[1].body.top_n, 1);
+    assert.strictEqual(specs[3].model, 'main-model');
+    assert.strictEqual(specs[4].model, 'admin-model');
+    assert.ok(!specs[3].body.reasoning_effort);
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[3].body, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[3].body, 'repetition_penalty'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[3].body, 'prompt_cache_key'));
     assert.ok(!specs[4].body.reasoning_effort);
     assert.ok(!Object.prototype.hasOwnProperty.call(specs[4].body, 'top_a'));
     assert.ok(!Object.prototype.hasOwnProperty.call(specs[4].body, 'repetition_penalty'));
     assert.ok(!Object.prototype.hasOwnProperty.call(specs[4].body, 'prompt_cache_key'));
-    assert.ok(!specs[5].body.reasoning_effort);
-    assert.ok(!Object.prototype.hasOwnProperty.call(specs[5].body, 'top_a'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(specs[5].body, 'repetition_penalty'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(specs[5].body, 'prompt_cache_key'));
-    assert.strictEqual(specs[6].url, 'https://passive-decision.example/v1/chat/completions');
-    assert.strictEqual(specs[6].model, 'passive-decision-model');
+    assert.strictEqual(specs[5].url, 'https://passive-decision.example/v1/chat/completions');
+    assert.strictEqual(specs[5].model, 'passive-decision-model');
+    assert.strictEqual(specs[5].body.max_tokens, 8);
+    assert.strictEqual(specs[5].body.stream, false);
+    assert.strictEqual(specs[5].body.__preferredProtocol, 'chat_completions');
+    assert.strictEqual(specs[6].url, 'https://passive-reply.example/v1/chat/completions');
+    assert.strictEqual(specs[6].model, 'passive-reply-model');
     assert.strictEqual(specs[6].body.max_tokens, 8);
     assert.strictEqual(specs[6].body.stream, false);
     assert.strictEqual(specs[6].body.__preferredProtocol, 'chat_completions');
-    assert.strictEqual(specs[7].url, 'https://passive-reply.example/v1/chat/completions');
-    assert.strictEqual(specs[7].model, 'passive-reply-model');
-    assert.strictEqual(specs[7].body.max_tokens, 8);
-    assert.strictEqual(specs[7].body.stream, false);
-    assert.strictEqual(specs[7].body.__preferredProtocol, 'chat_completions');
 
     const results = await runModelSelfCheck({ adminUserId: 'admin_1', normalUserId: 'user_1' });
-    assert.strictEqual(calls.length, 8);
+    assert.strictEqual(calls.length, 7);
     assert.ok(calls.every((call) => call.retries === 0));
     assert.ok(calls.every((call) => Number(call.body.__timeoutMs) >= 1000));
     assert.strictEqual(results.find((item) => item.type === 'rerank').status, 'timeout');
@@ -158,14 +150,6 @@ module.exports = (async () => {
     const mirroredMainSelfCheck = require('../utils/modelSelfCheck');
     const mirroredSpecs = mirroredMainSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.strictEqual(mirroredSpecs.find((item) => item.type === 'passive_awareness_reply').body.__provider, 'openai_compatible');
-
-    process.env.DIRECT_CHAT_PLANNER_ENABLED = 'false';
-    clearProjectCache();
-    const plannerDisabledSelfCheck = require('../utils/modelSelfCheck');
-    const plannerDisabledSpecs = plannerDisabledSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
-    assert.strictEqual(plannerDisabledSpecs.find((item) => item.type === 'plan').url, '');
-    assert.strictEqual(plannerDisabledSpecs.find((item) => item.type === 'plan').body, null);
-    process.env.DIRECT_CHAT_PLANNER_ENABLED = 'true';
 
     process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
     process.env.API_PROVIDER = 'openai_compatible';

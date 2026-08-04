@@ -55,7 +55,7 @@
 
 ### 2.3 在组合根注入依赖
 
-Runtime 节点、协调器和 Web 子路由普遍采用 `createXxx(deps)`、`createXxx(options)` 或 `registerXxxRoute(app, deps)`。例如 `web/mainReplyContextPreviewRoute.js` 可注入 `buildMainReplyContextPreview`，`api/runtimeV2/nodes/validate.js` 可注入事件、校验和持久化函数。
+Runtime 节点、协调器和 Web 子路由普遍采用 `createXxx(deps)`、`createXxx(options)` 或 `registerXxxRoute(app, deps)`。例如 `web/mainReplyContextPreviewRoute.js` 可注入 `buildMainReplyContextPreview`，`api/runtimeV2/nodes/agentDecide.js` 与 `api/runtimeV2/nodes/executeTools.js` 可注入模型调用、工具执行、事件和 checkpoint 持久化函数。
 
 遵循以下边界：
 

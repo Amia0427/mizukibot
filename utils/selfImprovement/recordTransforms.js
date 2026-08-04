@@ -138,7 +138,7 @@ function canonicalizePatternKey(rawPatternKey = '', kind = '', context = {}, sum
         const issuePart = normalizeKeyPart(slashParts.slice(2).join('_'), '');
         return `tool.${normalizeKeyPart(slashParts[1], 'unknown')}.${KNOWN_TOOL_ISSUES.has(issuePart) || isStableOtherIssue(issuePart) ? issuePart : stableOtherIssue(existing, summaryKey)}`;
       }
-      if (prefix === 'direct_chat' || prefix === 'tool_plan' || prefix === 'review' || prefix === 'admin') {
+      if (prefix === 'direct_chat' || prefix === 'agent' || prefix === 'review' || prefix === 'admin') {
         const subject = normalizeKeyPart(prefix, prefix);
         const issue = detectRouteIssue(summary, details, { ...context, topRouteType: prefix, routePolicyKey: existing }) || normalizeKeyPart(slashParts.slice(1).join('_'), '');
         return `route.${subject}.${KNOWN_ROUTE_ISSUES.has(issue) || isStableOtherIssue(issue) ? issue : stableOtherIssue(existing, summaryKey)}`;

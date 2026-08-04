@@ -79,9 +79,9 @@ function shouldInjectSelfImprovement(options = {}) {
     return false;
   }
   return topRouteType === 'direct_chat'
-    || topRouteType === 'tool_plan'
+    || topRouteType === 'agent'
     || routePolicyKey.startsWith('direct_chat/')
-    || routePolicyKey.startsWith('tool_plan/')
+    || routePolicyKey.startsWith('agent/')
     || (!topRouteType && !routePolicyKey);
 }
 

@@ -32,12 +32,11 @@ module.exports = (() => {
     ev(requestId, 2, 'message_ingress_lock_acquired', 15000, { stage: 'inbound_lock_acquired' }),
     ev(requestId, 3, 'message_ingress_route_entry', 15002, { stage: 'inbound_route_entry' }),
     ev(requestId, 4, 'router_start', 18000, { stage: 'route_resolver_start' }),
-    ev(requestId, 5, 'planner_start', 18010, { stage: 'direct_chat_planner_start' }),
-    ev(requestId, 6, 'planner_done', 34010, {
-      stage: 'direct_chat_planner_done',
+    ev(requestId, 5, 'runtime_v2_node_start', 18010, { stage: 'node_start', node: 'agent_decide' }),
+    ev(requestId, 6, 'runtime_v2_agent_decision', 34010, {
+      stage: 'agent_decision',
       durationMs: 16000,
-      shouldUseTools: false,
-      allowedToolCount: 0
+      decision: 'final'
     }),
     ev(requestId, 7, 'runtime_dispatch_start', 34020, { stage: 'formal_route_dispatch_start' }),
     ev(requestId, 8, 'dispatch_branch_selected', 34030, {
@@ -111,7 +110,7 @@ module.exports = (() => {
   assert.strictEqual(request.requestId, requestId);
   assert.strictEqual(request.segments.ingressToLockMs, 15000);
   assert.strictEqual(request.segments.routeEntryToRouterStartMs, 2998);
-  assert.strictEqual(request.segments.plannerMs, 16000);
+  assert.strictEqual(request.segments.agentDecisionMs, 16000);
   assert.strictEqual(request.segments.dispatchToPrepareMs, 2970);
   assert.strictEqual(request.segments.prepareAndRouteToUpstreamMs, 500);
   assert.strictEqual(request.segments.prepareMs, 5);
@@ -122,9 +121,9 @@ module.exports = (() => {
   assert.strictEqual(request.prepare.fastPath, 'plain_private_chat');
   assert.strictEqual(request.preModel.thinkingEmojiStage, 'thinking_emoji_skipped');
   assert.strictEqual(request.preModel.thinkingEmojiReason, 'private_no_tool_direct_reply');
-  assert.strictEqual(request.dominantPreUpstream.code, 'planner');
-  assert.strictEqual(request.slowFlags.plannerMs, 16000);
-  assert.ok(formatRequestTracePreflightDiagnostic(report).includes('dominant=planner:16000ms'));
+  assert.strictEqual(request.dominantPreUpstream.code, 'agent_decision');
+  assert.strictEqual(request.slowFlags.agentDecisionMs, 16000);
+  assert.ok(formatRequestTracePreflightDiagnostic(report).includes('dominant=agent_decision:16000ms'));
   assert.ok(formatRequestTracePreflightDiagnostic(report).includes('routeDoneToUpstream=480ms'));
   assert.ok(formatRequestTracePreflightDiagnostic(report).includes('thinkingEmoji=thinking_emoji_skipped'));
   assert.ok(formatRequestTracePreflightDiagnostic(report).includes('toolStartToPrepare=n/a'));

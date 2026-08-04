@@ -120,22 +120,7 @@ const visualExecution = resolveRouteExecution({
   meta: {
     ...visualRoute.meta,
     userId: 'ordinary-user',
-    chatType: 'private',
-    toolPlanner: {
-      shouldUseTools: true,
-      allowedToolNames: ['render_qq_visual'],
-      executionPlan: {
-        mode: 'tool_plan',
-        steps: [{
-          id: 'render_step',
-          action: 'render_qq_visual',
-          args: {
-            renderer: 'svg',
-            markup: '<svg viewBox="0 0 1 1"/>'
-          }
-        }]
-      }
-    }
+    chatType: 'private'
   }
 }, {
   BOT_TOOL_MODE: 'companion',
@@ -144,7 +129,6 @@ const visualExecution = resolveRouteExecution({
   PRIVATE_CHAT_ENABLED: false
 });
 assert.deepStrictEqual(visualExecution.allowedTools, ['render_qq_visual']);
-assert.strictEqual(visualExecution.allowedPlanSteps.length, 1);
 
 for (const prompt of ['画一只写实的小猫', '生成一张写实照片']) {
   const route = detectIntent({

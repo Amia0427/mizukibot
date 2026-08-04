@@ -233,10 +233,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const personaModuleDecision = shouldResolvePersonaModules
     ? (promptMaterials?.personaModuleDecision || selectPersonaModules(
       {
-        ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
+        ...(options?.personaModuleDecision || {}),
         personaModules: dynamicPromptPlan.personaModules.length > 0
           ? dynamicPromptPlan.personaModules
-          : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
+          : normalizeArray(options?.personaModuleDecision?.personaModules)
       },
       {
         question,

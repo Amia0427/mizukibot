@@ -1,87 +1,74 @@
 const assert = require('assert');
 
-const { createDirectReplyNode } = require('../api/runtimeV2/nodes/directReply');
+const { createAgentDecideNode } = require('../api/runtimeV2/nodes/agentDecide');
 
 module.exports = (async () => {
   let replyCalls = 0;
-  let savedState = null;
-
-  const directReplyNode = createDirectReplyNode({
-    normalizeObject: (value, fallback = {}) => (value && typeof value === 'object' ? value : fallback),
-    normalizeArray: (value) => (Array.isArray(value) ? value : []),
+  const requestReplyImpl = async () => {
+    replyCalls += 1;
+    return replyCalls === 1
+      ? '<tool_calls><tool_call><name>memory_cli</name></tool_call></tool_calls>'
+      : '这次直接正常回答，不调用工具。';
+  };
+  const agentDecide = createAgentDecideNode({
     createEvent: (type, payload = {}) => ({ type, ...payload }),
-    isReviewMode: () => false,
-    shouldBypassHumanizerForPolicy: () => false,
-    computeEffectiveAllowedTools: () => [],
-    getToolPlannerExecutionPlan: () => null,
-    isPlannerSingleAuthorityEnabled: () => false,
-    getRouteToolPlanner: () => null,
+    saveAndEmit: (state) => state,
     buildVisionMessageContent: (text) => text,
-    stripMemoryCliInstruction: (text) => String(text || ''),
-    isPureToolCallMarkup: (text = '') => /^<tool_calls>[\s\S]*<\/tool_calls>$/i.test(String(text || '').trim()),
     getMainConversationSystemMessages: () => [],
     buildDirectReplyMessages: () => ({
-      messages: [{ role: 'user', content: '普通直答，不允许工具' }],
-      compactionPlan: null,
-      canonicalSegments: null
+      messages: [{ role: 'user', content: '普通直答，不允许工具' }]
     }),
-    buildLiveMainConversationSnapshot: () => null,
-    ensureOutputStream: (_output, mode = 'none') => ({ mode, completed: false, hadOutput: false }),
-    createMemoryCliTurnState: (value) => value || null,
-    cloneDirectToolLoopState: (value) => ({ ...(value || {}) }),
-    normalizeMessageForToolLoop: (value) => value,
-    requestReplyImpl: async () => {
-      replyCalls += 1;
-      if (replyCalls === 1) {
-        return '<tool_calls><tool_call><name>memory_cli</name></tool_call></tool_calls>';
+    isReviewMode: () => false,
+    streamDirectReply: async () => {
+      throw new Error('stream path should not run');
+    },
+    requestReplyImpl,
+    requestAssistantMessageImpl: async () => {
+      throw new Error('tool path should not run');
+    },
+    resolveToolLoopReply: async (assistantMessage, messages, context) => {
+      if (!/^<tool_calls>[\s\S]*<\/tool_calls>$/i.test(assistantMessage.content)) {
+        return { text: assistantMessage.content, source: 'assistant' };
       }
-      return {
-        persistedText: '这次直接正常回答，不调用工具。',
-        visibleText: '这次直接正常回答，不调用工具。'
-      };
+      const text = await requestReplyImpl(messages.concat([{
+        role: 'system',
+        content: 'Reply in plain natural language without tools.'
+      }]), {
+        ...context,
+        disableTools: true,
+        allowedTools: []
+      });
+      return { text, source: 'markup_only_retry' };
     },
+    ensureOutputStream: () => ({ mode: 'none' }),
     classifyDirectReplyError: () => 'tool_error',
-    attemptDirectMemoryRecovery: async () => null,
-    getControlledFailureReply: () => 'Tool error: tool call markup was returned without executing any tool.',
-    updateMemoryCliTurnStateAfterError: (state) => state,
-    classifyReplyFailure: (text = '') => {
-      const compact = String(text || '').trim();
-      if (!compact) return { type: 'none' };
-      if (/^tool error:/i.test(compact)) return { type: 'tool_error' };
-      return { type: 'none' };
-    },
-    saveAndEmit: (state) => {
-      savedState = state;
-      return state;
-    }
+    summarizeDirectReplyError: (error) => String(error?.message || error || ''),
+    getControlledFailureReply: () => 'controlled failure'
   });
 
-  const result = await directReplyNode({
+  const result = await agentDecide({
     request: {
       question: '看看这张图怎么样',
       userId: 'u_markup_retry',
       routePolicyKey: 'direct_chat/default',
       topRouteType: 'direct_chat',
-      allowTools: false,
       allowedTools: [],
-      routeMeta: { chatType: 'private' },
+      routeMeta: { chatType: 'private', allowedTools: [] },
       streaming: false
     },
-    execution: {
-      mode: 'chat',
-      memoryCliTurn: null
-    },
-    memory: {
-      dynamicPrompt: ''
-    },
-    output: {},
-    plan: {}
+    execution: { agent: {} },
+    memory: { dynamicPrompt: '' },
+    output: { stream: {} },
+    messages: [],
+    events: []
   });
 
-  assert.strictEqual(result.output.finalReply, '这次直接正常回答，不调用工具。');
-  assert.ok(replyCalls >= 2);
-  assert.ok(Array.isArray(savedState?.events));
-  assert.ok(savedState.events.some((event) => event.type === 'tool_markup_blocked' && event.stage === 'initial_reply'));
+  assert.strictEqual(result.output.draftReply, '这次直接正常回答，不调用工具。');
+  assert.strictEqual(replyCalls, 2);
+  assert.ok(result.events.some((event) => (
+    event.type === 'agent_decision'
+    && event.resolutionSource === 'markup_only_retry'
+  )));
 
   console.log('toolCallMarkupRetry.test.js passed');
 })().catch((error) => {

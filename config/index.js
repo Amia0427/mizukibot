@@ -18,7 +18,6 @@ const {
   REQUIRED_SYSTEM_PERSONA_FILES,
   REQUIRED_SYSTEM_PERSONA_PATHS
 } = require('./promptRuntime');
-const { buildPlannerRuntimeConfig } = require('./plannerRuntime');
 const { buildMemosRuntimeConfig } = require('./memosRuntime');
 const { buildOpenVikingRuntimeConfig } = require('./openVikingRuntime');
 const { buildPostReplyWatchdogRuntimeConfig } = require('./postReplyRuntime');
@@ -454,19 +453,14 @@ module.exports = {
   GLOBAL_TOOLS_API_KEY: pick('GLOBAL_TOOLS_API_KEY', ''),
   GLOBAL_TOOLS_MODEL: pick('GLOBAL_TOOLS_MODEL', ''),
   GLOBAL_TOOLS_MAX_CALLS_PER_TURN: pickNum('GLOBAL_TOOLS_MAX_CALLS_PER_TURN', 4),
-  GLOBAL_TOOLS_MAX_PLANNER_TURNS: 1,
   GLOBAL_TOOLS_MAX_EVIDENCE_CHARS: pickNum('GLOBAL_TOOLS_MAX_EVIDENCE_CHARS', 6000),
-  ...buildPlannerRuntimeConfig({ pick, pickNum, pickBool }),
   MODEL_SELF_CHECK_TIMEOUT_MS: Math.max(1000, pickNum('MODEL_SELF_CHECK_TIMEOUT_MS', 25000)),
   // AI router can use a dedicated endpoint/key/model. Empty values fall back to the main AI config.
   AI_ROUTER_BASE_URL: pick('AI_ROUTER_BASE_URL', pick('AI_ROUTER_BASEURI', '')),
   AI_ROUTER_API_KEY: pick('AI_ROUTER_API_KEY', pick('AI_ROUTER_APIKEY', '')),
   AI_ROUTER_MODEL: pick('AI_ROUTER_MODEL', ''),
   ROUTER_SUBAGENT_ENABLED: pickBool('ROUTER_SUBAGENT_ENABLED', false),
-  PLANNER_SUBAGENT_ENABLED: pickBool('PLANNER_SUBAGENT_ENABLED', false),
-  PLANNER_SINGLE_AUTHORITY_ENABLED: pickBool('PLANNER_SINGLE_AUTHORITY_ENABLED', true),
   ROUTER_SUBAGENT_TIMEOUT_MS: pickNum('ROUTER_SUBAGENT_TIMEOUT_MS', 8000),
-  PLANNER_SUBAGENT_TIMEOUT_MS: pickNum('PLANNER_SUBAGENT_TIMEOUT_MS', 8000),
   // Global generation parameters for all model calls.
   AI_TEMPERATURE: pickNum('AI_TEMPERATURE', 0.9),
   // Keep nucleus sampling configurable for more natural dialogue rhythm.
@@ -615,7 +609,6 @@ module.exports = {
   MC_AI_MAX_TOKENS: pickNum('MC_AI_MAX_TOKENS', NaN),
 
   // ===== Plan-and-Solve =====
-  ENABLE_PLAN_SOLVE: pickBool('ENABLE_PLAN_SOLVE', true),
   // 浠呭浣庨闄╁伐鍏疯皟鐢ㄥ惎鐢ㄥ苟鍙戞墽琛岋紝鍏奸【鍚炲悙涓庡畨鍏ㄣ€?
   AGENT_PARALLEL_SAFE_TOOLS: pickBool('AGENT_PARALLEL_SAFE_TOOLS', true),
   AGENT_DEPENDENCY_AWARE_BATCHING: pickBool('AGENT_DEPENDENCY_AWARE_BATCHING', true),
@@ -623,8 +616,6 @@ module.exports = {
   AGENT_BATCH_TOOL_TIMEOUT_MS: Math.max(0, pickNum('AGENT_BATCH_TOOL_TIMEOUT_MS', pickNum('TOOL_TIMEOUT_MS', 10000))),
   AGENT_TOOL_RESULT_CACHE_TTL_MS: Math.max(0, pickNum('AGENT_TOOL_RESULT_CACHE_TTL_MS', 15000)),
   AGENT_RUNTIME_METRICS_ENABLED: pickBool('AGENT_RUNTIME_METRICS_ENABLED', true),
-  PLAN_MAX_STEPS: pickNum('PLAN_MAX_STEPS', 5),
-  PLAN_TIMEOUT_MS: pickNum('PLAN_TIMEOUT_MS', 12000),
   AGENT_MAX_ROUNDS: pickNum('AGENT_MAX_ROUNDS', 3),
 
   // ===== Behavior =====

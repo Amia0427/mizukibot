@@ -18,22 +18,7 @@ function buildPrivateWriteRoute(userId = '') {
       chatMode: 'text_chat',
       responseIntent: 'action_guidance',
       toolIntent: 'force_tools',
-      toolPlanner: {
-        shouldUseTools: true,
-        needsBackground: false,
-        allowedToolNames: ['notebook_add_document'],
-        executablePlan: {
-          goal: 'write notebook',
-          policyKey: 'act/default',
-          source: 'planner',
-          needsTools: true,
-          steps: [{ id: 'write', action: 'notebook_add_document', purpose: 'write note' }]
-        },
-        executionPlan: {
-          mode: 'tool_plan',
-          steps: [{ id: 'write', action: 'notebook_add_document', args: {}, purpose: 'write note' }]
-        }
-      }
+      allowedTools: ['notebook_add_document']
     },
     intent: {
       risk: 'low',
@@ -63,22 +48,7 @@ function buildPrivateQzoneRoute(userId = '') {
       chatMode: 'text_chat',
       responseIntent: 'action_guidance',
       toolIntent: 'force_tools',
-      toolPlanner: {
-        shouldUseTools: true,
-        needsBackground: false,
-        allowedToolNames: ['qzone_draft'],
-        executablePlan: {
-          goal: 'draft qzone post',
-          policyKey: 'act/qq-publish-qzone',
-          source: 'planner',
-          needsTools: true,
-          steps: [{ id: 'draft', action: 'qzone_draft', purpose: 'draft qzone post' }]
-        },
-        executionPlan: {
-          mode: 'tool_plan',
-          steps: [{ id: 'draft', action: 'qzone_draft', args: {}, purpose: 'draft qzone post' }]
-        }
-      }
+      allowedTools: ['qzone_draft']
     },
     intent: {
       risk: 'medium',

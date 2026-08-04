@@ -2,18 +2,10 @@ const assert = require('assert');
 
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
-const { createDispatchNode } = require('../api/runtimeV2/nodes/dispatch');
-const {
-  buildExecutionBatches,
-  executeBatch
-} = require('../api/runtimeV2/capabilities/scheduler');
+const { buildExecutionBatches, executeBatch } = require('../api/runtimeV2/capabilities/scheduler');
 const { buildStaticToolDescriptors } = require('../api/runtimeV2/capabilities/registry');
 const { createToolExecutionHelpers } = require('../api/runtimeV2/runtime/toolExecution');
-const {
-  getPolicy,
-  hasPublicToolPolicy,
-  resolveToolPolicy
-} = require('../utils/toolPolicy');
+const { getPolicy, hasPublicToolPolicy, resolveToolPolicy } = require('../utils/toolPolicy');
 
 async function executeWithoutConfirmation(input) {
   return {
@@ -55,7 +47,6 @@ function createExecutionHelpers(executor, options = {}) {
     decideMemoryCliTurnAction: () => ({ ok: true }),
     safeParseMemoryCliResult: () => null,
     captureToolFailure: () => {},
-    isPlannerSingleAuthorityEnabled: () => false,
     toolExecutors: {
       skill_stock_watchlist: executor,
       skill_ontology_graph: executor,
@@ -64,15 +55,14 @@ function createExecutionHelpers(executor, options = {}) {
   });
 }
 
-function createState(toolName, inputs) {
+function createState(toolName) {
   return {
     request: {
       userId: 'u1',
-      routeMeta: {},
+      routeMeta: { allowedTools: [toolName] },
       allowedTools: [toolName]
     },
     execution: {},
-    plan: { steps: [] },
     memory: {}
   };
 }
@@ -97,45 +87,37 @@ module.exports = (async () => {
   ], staticRegistry);
   assert.deepStrictEqual(writeBatches.map((batch) => batch.mode), ['serial', 'serial']);
 
-  let schedulerCalls = 0;
+  let stockCalls = 0;
   const stockDescriptor = {
     ...staticRegistry.byName.get('skill_stock_watchlist'),
     executor: async () => {
-      schedulerCalls += 1;
+      stockCalls += 1;
       return 'ok';
     }
   };
-  const stockRegistry = buildRegistry([stockDescriptor]);
-  const toolResultCache = new Map();
-  const schedulerState = createState('skill_stock_watchlist', {});
-  const schedulerContext = {
-    registry: stockRegistry,
+  const stockContext = {
+    registry: buildRegistry([stockDescriptor]),
     executeAuthorizedToolCall: executeWithoutConfirmation,
-    toolResultCache,
+    toolResultCache: new Map(),
     toolResultCacheTtlMs: 1000,
-    helpers: {
-      enforceToolPolicy: (_toolName, args) => args
-    }
+    helpers: { enforceToolPolicy: (_toolName, args) => args }
   };
-
   const [firstRead] = await executeBatch([
     createStep('scheduler_read_1', 'skill_stock_watchlist', { action: 'list' })
-  ], schedulerState, schedulerContext);
+  ], createState('skill_stock_watchlist'), stockContext);
   const [cachedRead] = await executeBatch([
     createStep('scheduler_read_2', 'skill_stock_watchlist', { action: 'list' })
-  ], schedulerState, schedulerContext);
-  assert.strictEqual(firstRead.side_effect, false);
-  assert.strictEqual(cachedRead.cached, true);
-  assert.strictEqual(schedulerCalls, 1, 'read action should reuse scheduler cache');
-
+  ], createState('skill_stock_watchlist'), stockContext);
   const [firstWrite] = await executeBatch([
     createStep('scheduler_write_1', 'skill_stock_watchlist', { action: 'add', ticker: 'AAA' })
-  ], schedulerState, schedulerContext);
+  ], createState('skill_stock_watchlist'), stockContext);
   await executeBatch([
     createStep('scheduler_write_2', 'skill_stock_watchlist', { action: 'add', ticker: 'AAA' })
-  ], schedulerState, schedulerContext);
+  ], createState('skill_stock_watchlist'), stockContext);
+  assert.strictEqual(firstRead.side_effect, false);
+  assert.strictEqual(cachedRead.cached, true);
   assert.strictEqual(firstWrite.side_effect, true);
-  assert.strictEqual(schedulerCalls, 3, 'write action must never reuse scheduler cache');
+  assert.strictEqual(stockCalls, 3);
 
   let ontologyCalls = 0;
   const ontologyDescriptor = {
@@ -145,32 +127,28 @@ module.exports = (async () => {
       return 'ok';
     }
   };
-  const ontologyRegistry = buildRegistry([ontologyDescriptor]);
-  const ontologyCache = new Map();
   const ontologyContext = {
-    registry: ontologyRegistry,
+    registry: buildRegistry([ontologyDescriptor]),
     executeAuthorizedToolCall: executeWithoutConfirmation,
-    toolResultCache: ontologyCache,
+    toolResultCache: new Map(),
     toolResultCacheTtlMs: 1000,
-    helpers: {
-      enforceToolPolicy: (_toolName, args) => args
-    }
+    helpers: { enforceToolPolicy: (_toolName, args) => args }
   };
   await executeBatch([
     createStep('ontology_read_1', 'skill_ontology_graph', { action: 'query', type: 'Task' })
-  ], createState('skill_ontology_graph', {}), ontologyContext);
+  ], createState('skill_ontology_graph'), ontologyContext);
   const [cachedOntologyRead] = await executeBatch([
     createStep('ontology_read_2', 'skill_ontology_graph', { action: 'query', type: 'Task' })
-  ], createState('skill_ontology_graph', {}), ontologyContext);
+  ], createState('skill_ontology_graph'), ontologyContext);
   const [ontologyValidate] = await executeBatch([
     createStep('ontology_validate_1', 'skill_ontology_graph', { action: 'validate' })
-  ], createState('skill_ontology_graph', {}), ontologyContext);
+  ], createState('skill_ontology_graph'), ontologyContext);
   await executeBatch([
     createStep('ontology_validate_2', 'skill_ontology_graph', { action: 'validate' })
-  ], createState('skill_ontology_graph', {}), ontologyContext);
+  ], createState('skill_ontology_graph'), ontologyContext);
   assert.strictEqual(cachedOntologyRead.cached, true);
   assert.strictEqual(ontologyValidate.side_effect, true);
-  assert.strictEqual(ontologyCalls, 3, 'ontology writes must not reuse the read-only cache');
+  assert.strictEqual(ontologyCalls, 3);
 
   let directCalls = 0;
   const directHelpers = createExecutionHelpers(async () => {
@@ -179,158 +157,33 @@ module.exports = (async () => {
   });
   const directRead = await directHelpers.runToolStep(
     createStep('direct_read', 'skill_stock_watchlist', { action: 'list' }),
-    createState('skill_stock_watchlist', { action: 'list' })
+    createState('skill_stock_watchlist')
   );
   const directWrite = await directHelpers.runToolStep(
     createStep('direct_write', 'skill_stock_watchlist', { action: 'add', ticker: 'AAA' }),
-    createState('skill_stock_watchlist', { action: 'add', ticker: 'AAA' })
+    createState('skill_stock_watchlist')
   );
   assert.strictEqual(directRead.side_effect, false);
   assert.strictEqual(directWrite.side_effect, true);
   assert.strictEqual(directCalls, 2);
 
-  const directOntologyRead = await directHelpers.runToolStep(
-    createStep('direct_ontology_read', 'skill_ontology_graph', { action: 'query', type: 'Task' }),
-    createState('skill_ontology_graph', { action: 'query', type: 'Task' })
-  );
-  const directOntologyValidate = await directHelpers.runToolStep(
-    createStep('direct_ontology_validate', 'skill_ontology_graph', { action: 'validate' }),
-    createState('skill_ontology_graph', { action: 'validate' })
-  );
-  assert.strictEqual(directOntologyRead.side_effect, false);
-  assert.strictEqual(directOntologyValidate.side_effect, true);
-  assert.strictEqual(directCalls, 4);
-
-  let concurrentWriteCalls = 0;
+  let concurrentWrites = 0;
   const writeHelpers = createExecutionHelpers(async () => {
-    concurrentWriteCalls += 1;
+    concurrentWrites += 1;
     await new Promise((resolve) => setTimeout(resolve, 15));
     return 'ok';
-  }, {
-    inflightDedup: true
-  });
+  }, { inflightDedup: true });
   await Promise.all([
     writeHelpers.runToolStep(
       createStep('write_stock_1', 'skill_stock_watchlist', { action: 'add', ticker: 'AAA' }),
-      createState('skill_stock_watchlist', { action: 'add', ticker: 'AAA' })
+      createState('skill_stock_watchlist')
     ),
     writeHelpers.runToolStep(
       createStep('write_stock_2', 'skill_stock_watchlist', { action: 'add', ticker: 'AAA' }),
-      createState('skill_stock_watchlist', { action: 'add', ticker: 'AAA' })
+      createState('skill_stock_watchlist')
     )
   ]);
-  assert.strictEqual(concurrentWriteCalls, 2, 'write actions must not share inflight work');
-
-  async function runDispatch(inputs, options = {}) {
-    const checkpointEvents = [];
-    const persisted = [];
-    const transitions = [];
-    const stepCount = Math.max(1, Number(options.stepCount) || 1);
-    const steps = Array.from({ length: stepCount }, (_, index) => (
-      createStep(`dispatch_step_${index + 1}`, 'skill_stock_watchlist', inputs)
-    ));
-    const dispatchNode = createDispatchNode({
-      createEvent: (type, payload = {}) => ({ type, ...payload }),
-      stableHash: (value) => JSON.stringify(value || {}),
-      isCompletedSideEffectStep: () => false,
-      findEvidenceEnvelope: () => null,
-      isDirectChatRequest: () => false,
-      buildExecutionBatches: (items) => [{ mode: options.batchMode || 'serial', items }],
-      buildLiveMainConversationSnapshot: () => null,
-      computeEffectiveAllowedTools: () => ['skill_stock_watchlist'],
-      createMemoryCliTurnState: (value = {}) => value,
-      persistCheckpoint(state) {
-        persisted.push(Boolean(state.execution?.pendingInterrupt));
-      },
-      appendRuntimeEvents(_state, events) {
-        checkpointEvents.push(...events.filter((event) => event.type === 'checkpoint'));
-      },
-      saveTransition(state, node, status, events) {
-        transitions.push({
-          events,
-          node,
-          pendingInterrupt: Boolean(state.execution?.pendingInterrupt),
-          status
-        });
-      },
-      updatePlanStepsWithEnvelope(steps, envelope) {
-        return steps.map((item) => item.id === envelope.step_id
-          ? { ...item, status: envelope.status, evidence: [envelope] }
-          : item);
-      },
-      getPolicy,
-      isSideEffectPolicy: (policy) => policy.effect !== 'none',
-      async executeBatch(steps) {
-        return steps.map((item) => ({
-          tool_call_id: `${item.id}_call`,
-          step_id: item.id,
-          tool_name: item.tool,
-          args_hash: JSON.stringify(item.inputs || {}),
-          args: item.inputs || {},
-          status: 'completed',
-          result: 'ok',
-          side_effect: getPolicy(item.tool, item.inputs).effect !== 'none',
-          retryable: false,
-          attempt: 1
-        }));
-      },
-      rebuildFinalPlanFromSteps: (state) => ({ steps: state.plan.steps }),
-      buildExecLogsFromSteps: () => [],
-      mergeAllowedToolsWithMemoryCli: (allowed) => allowed || [],
-      saveAndEmit: (state) => state,
-      config: { PLAN_MAX_STEPS: 5 }
-    });
-    await dispatchNode({
-      request: {
-        question: 'stock action',
-        allowedTools: ['skill_stock_watchlist'],
-        allowTools: true
-      },
-      plan: { steps },
-      execution: { retryQueue: [], memoryCliTurn: {}, toolResults: [] },
-      memory: { dirty: false },
-      output: {}
-    });
-    return { checkpointEvents, persisted, transitions };
-  }
-
-  const readDispatch = await runDispatch({ action: 'list' });
-  assert.deepStrictEqual(readDispatch.checkpointEvents, []);
-  assert.deepStrictEqual(readDispatch.persisted, []);
-  assert.deepStrictEqual(readDispatch.transitions, []);
-
-  const writeDispatch = await runDispatch({ action: 'add', ticker: 'AAA' });
-  assert.deepStrictEqual(
-    writeDispatch.transitions.flatMap((transition) => transition.events.map((event) => event.stage)),
-    ['before_side_effect', 'after_side_effect']
-  );
-  assert.deepStrictEqual(
-    writeDispatch.transitions.map((transition) => transition.pendingInterrupt),
-    [true, false]
-  );
-  assert.ok(writeDispatch.transitions.every((transition) => transition.node === 'dispatch'));
-  assert.ok(writeDispatch.transitions.every((transition) => transition.status === 'running'));
-  assert.deepStrictEqual(writeDispatch.checkpointEvents, []);
-  assert.deepStrictEqual(writeDispatch.persisted, []);
-
-  const parallelWriteDispatch = await runDispatch(
-    { action: 'add', ticker: 'BBB' },
-    { batchMode: 'parallel', stepCount: 2 }
-  );
-  assert.strictEqual(parallelWriteDispatch.transitions.length, 3);
-  assert.deepStrictEqual(
-    parallelWriteDispatch.transitions[0].events.map((event) => event.stage),
-    ['before_side_effect', 'before_side_effect']
-  );
-  assert.strictEqual(parallelWriteDispatch.transitions[0].pendingInterrupt, true);
-  assert.deepStrictEqual(
-    parallelWriteDispatch.transitions.slice(1).map((transition) => transition.events[0].stage),
-    ['after_side_effect', 'after_side_effect']
-  );
-  assert.deepStrictEqual(
-    parallelWriteDispatch.transitions.slice(1).map((transition) => transition.pendingInterrupt),
-    [false, false]
-  );
+  assert.strictEqual(concurrentWrites, 2);
 
   console.log('toolPolicyRuntimeEffects.test.js passed');
 })().catch((error) => {

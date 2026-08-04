@@ -81,89 +81,15 @@ async function withTimeout(label = '', timeoutMs = 30000, fn) {
 }
 
 async function benchDirectReplyNoTool() {
-  const { createDirectReplyNode } = require('../api/runtimeV2/nodes/directReply');
+  const { createAgentDecideNode } = require('../api/runtimeV2/nodes/agentDecide');
   let modelCalls = 0;
   let lastRunModelCalls = 0;
-  const node = createDirectReplyNode({
-    normalizeObject(value, fallback = {}) {
-      return value && typeof value === 'object' ? value : fallback;
-    },
-    normalizeArray(value) {
-      return Array.isArray(value) ? value : [];
-    },
+  const node = createAgentDecideNode({
     createEvent(type, payload = {}) {
       return { type, ...payload };
     },
-    isReviewMode() {
-      return false;
-    },
-    shouldBypassHumanizerForPolicy() {
-      return false;
-    },
-    computeEffectiveAllowedTools() {
-      return [];
-    },
-    getToolPlannerExecutionPlan() {
-      return null;
-    },
-    isPlannerSingleAuthorityEnabled() {
-      return false;
-    },
-    getRouteToolPlanner() {
-      return null;
-    },
-    buildVisionMessageContent(text) {
-      return text;
-    },
-    stripMemoryCliInstruction(text) {
-      return String(text || '');
-    },
-    getMainConversationSystemMessages() {
-      return [];
-    },
-    buildDirectReplyMessages(_state, messageContent) {
-      return {
-        messages: [{ role: 'user', content: String(messageContent || '') }]
-      };
-    },
-    buildLiveMainConversationSnapshot() {
-      return null;
-    },
-    ensureOutputStream(output = {}, mode = 'direct') {
-      return {
-        ...(output.stream || {}),
-        mode,
-        hadOutput: false,
-        completed: false,
-        fallbackToNonStream: false
-      };
-    },
-    createMemoryCliTurnState(value) {
-      return value || {};
-    },
-    cloneDirectToolLoopState(value) {
-      return { ...(value || {}) };
-    },
-    normalizeMessageForToolLoop(message) {
-      return message;
-    },
-    async requestAssistantMessageImpl() {
-      throw new Error('no-tool benchmark should not use assistant probe path');
-    },
-    compileDirectChatToolCallsToPlan(toolCalls, plan) {
-      return { ...(plan || {}), steps: toolCalls };
-    },
     saveAndEmit(state) {
       return state;
-    },
-    mirrorStreamingFlags() {
-      return {};
-    },
-    isPureToolCallMarkup() {
-      return false;
-    },
-    async streamDirectReply() {
-      throw new Error('should not stream in benchmark');
     },
     async requestReplyImpl() {
       modelCalls += 1;
@@ -172,29 +98,14 @@ async function benchDirectReplyNoTool() {
         visibleText: 'bench direct reply'
       };
     },
-    buildReplyTextVariants(text = '') {
-      return {
-        visibleText: String(text || '').trim(),
-        persistedText: String(text || '').trim()
-      };
-    },
     classifyDirectReplyError() {
       return 'generic_model_failure';
     },
     summarizeDirectReplyError(error) {
       return String(error?.message || error || '');
     },
-    async attemptDirectMemoryRecovery() {
-      return null;
-    },
     getControlledFailureReply() {
       return 'controlled failure';
-    },
-    updateMemoryCliTurnStateAfterError(state = {}) {
-      return state;
-    },
-    classifyReplyFailure() {
-      return { type: 'none' };
     }
   });
 
@@ -207,7 +118,6 @@ async function benchDirectReplyNoTool() {
         routeMeta: {},
         topRouteType: 'direct_chat',
         customPrompt: '',
-        allowTools: true,
         allowedTools: [],
         modelConfig: {},
         imageUrl: '',
@@ -216,17 +126,18 @@ async function benchDirectReplyNoTool() {
       },
       execution: {
         mode: 'chat',
-        memoryCliTurn: null,
+        agent: {},
         latencyBreakdown: {}
       },
       memory: {
         dynamicPrompt: '',
-        affinity: null
+        preparedMainConversationContext: {
+          messages: [{ role: 'user', content: 'bench' }]
+        }
       },
       output: {
         stream: {}
-      },
-      plan: {}
+      }
     });
     lastRunModelCalls = modelCalls - beforeCalls;
     return result;
@@ -248,8 +159,7 @@ async function benchDirectReplyNoTool() {
     warm: summarize(warm),
     modelCallsPerRun: lastRunModelCalls,
     totalModelCalls: modelCalls,
-    promptCollectMs: Number(lastWarmResult?.execution?.latencyBreakdown?.prepare?.prompt_collect_ms || 0) || 0,
-    promptRenderMs: Number(lastWarmResult?.execution?.latencyBreakdown?.prepare?.prompt_render_ms || 0) || 0
+    completed: lastWarmResult?.execution?.agent?.completed === true
   };
 }
 
@@ -306,9 +216,6 @@ async function benchReadonlyTool() {
       return null;
     },
     captureToolFailure() {},
-    isPlannerSingleAuthorityEnabled() {
-      return false;
-    },
     toolExecutors: {
       web_search: async () => {
         searchCalls += 1;
