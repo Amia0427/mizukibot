@@ -259,7 +259,8 @@ function buildNegativeGoldCases(limit = 20) {
   const max = Math.max(0, Math.min(20, Number(limit || 20) || 20));
   if (max === 0) return [];
   const nodes = loadMemoryNodes()
-    .filter((node) => normalizeText(node.id) && normalizeText(node.text) && normalizeText(node.userId));
+    .filter((node) => normalizeText(node.id) && normalizeText(node.text) && normalizeText(node.userId))
+    .filter((node) => normalizeSource(node.scopeType) !== 'group');
   const out = [];
   const seen = new Set();
   for (const node of nodes) {
