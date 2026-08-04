@@ -77,7 +77,7 @@ const lowResourceMainProcessMode = lowResourceMode && runtimeRole === 'main';
 const lowResourceDisableLanceDbHotPath = pickBool('LOW_RESOURCE_DISABLE_LANCEDB_HOT_PATH', false);
 const lowResourceDisableWorldbookSemantic = pickBool('LOW_RESOURCE_DISABLE_WORLDBOOK_SEMANTIC', false);
 const lowResourceLiteBudget = lowResourceMainProcessMode;
-const MAIN_REPLY_DEFAULT_MAX_TOKENS = 8192;
+const MAIN_REPLY_DEFAULT_MAX_TOKENS = 50000;
 const CHROME_LIKE_JA3 = '771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0';
 
 function pickLiteBudgetNum(key, normalFallback, liteCap) {
