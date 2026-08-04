@@ -3,7 +3,7 @@ const maimaiToolSchemas = [
     type: 'function',
     function: {
       name: 'maimai_chart_search',
-      description: '查询舞萌曲目与谱面，支持定数、难度、标准/ DX 和手法筛选。',
+      description: '查找、筛选、推荐或比较多张舞萌谱面，支持定数、难度、标准/DX 和手法条件。',
       parameters: {
         type: 'object',
         properties: {
@@ -22,16 +22,16 @@ const maimaiToolSchemas = [
     type: 'function',
     function: {
       name: 'maimai_chart_analyze',
-      description: '分析一张舞萌谱面的结构化特征，并返回最多三个代表原始谱面片段。',
+      description: '分析当前问题中明确写出的单张舞萌谱面，返回结构化特征和最多三个代表原始谱面片段；不得补造曲名。',
       parameters: {
         type: 'object',
         properties: {
           query: { type: 'string' },
-          title: { type: 'string' },
+          title: { type: 'string', description: '必须逐字来自当前用户问题的完整曲名' },
           chart_type: { type: 'string', enum: ['SD', 'DX'] },
           difficulty: { type: 'string' }
         },
-        required: ['query']
+        required: ['query', 'title']
       }
     }
   },

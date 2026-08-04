@@ -599,8 +599,10 @@ function createMaimaiCatalogStore(options = {}) {
   function getChartAnalysis(input = {}) {
     const active = getActiveGeneration();
     if (!active) return { status: 'unavailable', chart: null, candidates: [], segments: [] };
-    const normalizedTitle = normalizeSongTitle(input.title || input.query || '');
-    if (!normalizedTitle) return { status: 'ambiguous', chart: null, candidates: [], segments: [] };
+    const normalizedTitle = normalizeSongTitle(input.title || '');
+    if (!normalizedTitle) {
+      return { status: 'ambiguous', reason: 'missing_title', chart: null, candidates: [], segments: [] };
+    }
     const params = { generationId: active.id, normalizedTitle };
     const filters = ['s.normalized_title = @normalizedTitle', "m.status = 'confirmed'"];
     const requestedDifficulty = difficultyIndex(input.difficulty);
@@ -628,8 +630,11 @@ function createMaimaiCatalogStore(options = {}) {
       ORDER BY c.chart_type, c.difficulty_index
       LIMIT 6
     `).all(params).map(mapChartRow);
-    if (rows.length !== 1) {
-      return { status: 'ambiguous', chart: null, candidates: rows.slice(0, 5), segments: [] };
+    if (rows.length === 0) {
+      return { status: 'not_found', reason: 'no_exact_match', chart: null, candidates: [], segments: [] };
+    }
+    if (rows.length > 1) {
+      return { status: 'ambiguous', reason: 'multiple_matches', chart: null, candidates: rows.slice(0, 5), segments: [] };
     }
     const chart = rows[0];
     const segments = db.prepare(`

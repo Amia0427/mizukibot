@@ -46,7 +46,8 @@ const {
   loadSkillReference,
   resolveSkillsBaseDir
 } = require('./skillRuntime');
-const { getMaimaiRuntime } = require('../../src/features/maimai/runtime');
+const { validateMaimaiToolInvocation } = require('../../src/features/maimai/invocation-policy');
+const { getMaimaiRuntime, isMaimaiEnabled } = require('../../src/features/maimai/runtime');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -198,23 +199,39 @@ async function runFreeUrlExtract(args = {}) {
 // -------------------------
 // 1) Executor map (normalized object-style args)
 // -------------------------
+function buildBlockedMaimaiResult(reason) {
+  const messages = {
+    maimai_route_mismatch: '当前问题未确认需要舞萌谱面或成绩数据，已阻止工具调用。',
+    maimai_title_required: '请提供要分析的完整曲名、SD/DX 和难度。',
+    maimai_title_not_grounded: '谱面标题不在当前问题中，请明确要分析的完整曲名。'
+  };
+  return {
+    status: 'blocked',
+    reason,
+    answerPolicy: 'clarify',
+    message: messages[reason] || '舞萌工具调用已阻止。'
+  };
+}
+
+async function executeMaimaiTool(toolName, methodName, args = {}) {
+  if (!isMaimaiEnabled()) return { status: 'disabled', message: '舞萌功能未启用。' };
+  const validation = validateMaimaiToolInvocation(toolName, args, args.__context || {}, { enabled: true });
+  if (!validation.allowed) return buildBlockedMaimaiResult(validation.reason);
+  const runtime = getMaimaiRuntime();
+  return runtime.retrieval[methodName](args);
+}
+
 const TOOL_EXECUTORS = {
   maimai_chart_search: async (args = {}) => {
-    const runtime = getMaimaiRuntime();
-    if (!runtime) return { status: 'disabled', message: '舞萌功能未启用。' };
-    return runtime.retrieval.searchCharts(args);
+    return executeMaimaiTool('maimai_chart_search', 'searchCharts', args);
   },
 
   maimai_chart_analyze: async (args = {}) => {
-    const runtime = getMaimaiRuntime();
-    if (!runtime) return { status: 'disabled', message: '舞萌功能未启用。' };
-    return runtime.retrieval.analyzeChart(args);
+    return executeMaimaiTool('maimai_chart_analyze', 'analyzeChart', args);
   },
 
   maimai_player_analysis: async (args = {}) => {
-    const runtime = getMaimaiRuntime();
-    if (!runtime) return { status: 'disabled', message: '舞萌功能未启用。' };
-    return runtime.retrieval.playerAnalysis(args);
+    return executeMaimaiTool('maimai_player_analysis', 'playerAnalysis', args);
   },
 
   // ===== tools.js =====

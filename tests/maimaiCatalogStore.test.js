@@ -96,7 +96,8 @@ module.exports = (() => {
     assert.strictEqual(detail.status, 'ok');
     assert.strictEqual(detail.chart.chartKey, 'df:1001:SD:3');
     assert.strictEqual(detail.segments.length, 1);
-    assert.strictEqual(store.getChartAnalysis({ title: 'test song', chart_type: 'DX' }).status, 'ambiguous');
+    assert.strictEqual(store.getChartAnalysis({ title: 'test song', chart_type: 'DX' }).status, 'not_found');
+    assert.strictEqual(store.getChartAnalysis({ query: 'test song' }).reason, 'missing_title');
     assert.strictEqual(store.db.prepare('SELECT COUNT(*) FROM maimai_chart_events').pluck().get(), 1);
 
     store.setSummaryCache('hash-1:prompt-v1:model-v1', {

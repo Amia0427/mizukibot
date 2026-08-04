@@ -11,12 +11,9 @@ const { createMaimaiVectorIndex } = require('./vector-index');
 const { createMaimaiRetrievalService } = require('./retrieval-service');
 const { createMaimaiSyncWorker } = require('./sync-worker');
 const { createMaimaiSyncScheduler } = require('./sync-scheduler');
+const { isMaimaiEnabled } = require('./feature-flags');
 
 let runtime = null;
-
-function isMaimaiEnabled() {
-  return /^(1|true|yes|on)$/i.test(String(process.env.MAIMAI_ENABLED || '').trim());
-}
 
 function createMaimaiRuntime(options = {}) {
   const dataDir = path.resolve(String(options.dataDir || process.env.DATA_DIR || config.DATA_DIR));

@@ -19,9 +19,24 @@ function createMaimaiRetrievalService(options = {}) {
 
   async function searchCharts(input = {}) {
     const active = catalog.getActiveGeneration();
-    if (!active) return { status: 'unavailable', results: [], evidence: createEvidence(null, [], 'sql_only', true) };
+    if (!active) {
+      return {
+        status: 'unavailable',
+        answerPolicy: 'retry',
+        results: [],
+        evidence: createEvidence(null, [], 'sql_only', true)
+      };
+    }
     const candidates = catalog.searchCharts({ ...input, limit: 100 });
-    if (candidates.length === 0) return { status: 'ok', results: [], evidence: createEvidence(active, [], 'sql_only') };
+    if (candidates.length === 0) {
+      return {
+        status: 'not_found',
+        answerPolicy: 'clarify',
+        results: [],
+        notice: '没有找到满足条件的确认谱面，请检查曲名、定数、SD/DX 或难度。',
+        evidence: createEvidence(active, [], 'sql_only')
+      };
+    }
     const hashes = Array.from(new Set(candidates.map((row) => row.contentHash).filter(Boolean)));
     let vectorResult = { ok: false, mode: 'sql_only', rows: [] };
     if (vectorIndex && typeof vectorIndex.searchText === 'function') {
@@ -49,6 +64,7 @@ function createMaimaiRetrievalService(options = {}) {
     const retrievalMode = vectorResult.ok === true && (vectorResult.rows || []).length > 0 ? 'hybrid' : 'sql_only';
     return {
       status: 'ok',
+      answerPolicy: 'answer',
       results: ranked.slice(0, Math.max(1, Math.min(10, Number(input.limit || 10) || 10))),
       evidence: createEvidence(active, ranked, retrievalMode, retrievalMode === 'sql_only')
     };
@@ -56,11 +72,46 @@ function createMaimaiRetrievalService(options = {}) {
 
   async function analyzeChart(input = {}) {
     const active = catalog.getActiveGeneration();
+    if (!active) {
+      return {
+        status: 'unavailable',
+        answerPolicy: 'retry',
+        chart: null,
+        candidates: [],
+        segments: [],
+        evidence: createEvidence(null, [], 'sql_only', true)
+      };
+    }
+    if (!String(input.title || '').trim()) {
+      return {
+        status: 'ambiguous',
+        reason: 'missing_title',
+        answerPolicy: 'clarify',
+        chart: null,
+        candidates: [],
+        segments: [],
+        notice: '请提供要分析的完整曲名、SD/DX 和难度。',
+        evidence: createEvidence(active, [], 'sql_only', true)
+      };
+    }
     const detail = catalog.getChartAnalysis(input);
     const rows = detail.chart ? [detail.chart] : detail.candidates || [];
+    const answerPolicy = detail.status === 'ok'
+      ? 'answer'
+      : detail.status === 'unavailable'
+        ? 'retry'
+        : 'clarify';
+    const notice = detail.status === 'ambiguous'
+      ? '存在多个候选，请补充完整曲名、SD/DX 或难度。'
+      : detail.status === 'not_found'
+        ? '没有找到完全匹配的确认谱面，请检查曲名、SD/DX 和难度。'
+        : '';
     return {
       ...detail,
-      segments: (detail.segments || []).slice(0, 3),
+      answerPolicy,
+      candidates: (detail.candidates || []).slice(0, 5),
+      segments: detail.status === 'ok' ? (detail.segments || []).slice(0, 3) : [],
+      ...(notice ? { notice } : {}),
       evidence: createEvidence(active, rows, 'sql_only', !active || detail.status !== 'ok')
     };
   }
@@ -73,6 +124,7 @@ function createMaimaiRetrievalService(options = {}) {
     const records = snapshot.records || [];
     return {
       status: snapshot.status === 'missing' ? 'unavailable' : 'ok',
+      answerPolicy: snapshot.status === 'missing' ? 'clarify' : 'answer',
       snapshotStatus: snapshot.status,
       fetchedAt: snapshot.fetchedAt || '',
       records: records.slice(0, Math.max(1, Math.min(50, Number(input.limit || 10) || 10))),
