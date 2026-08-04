@@ -43,12 +43,17 @@ async function runAssertions(tempDir) {
   const blankTempEnv = applyDefaultTestEnv({ TEST_TEMP_ROOT: '   ' });
   assert.strictEqual(blankTempEnv.TEST_TEMP_ROOT, DEFAULT_TEST_TEMP_ROOT);
   assert.strictEqual(blankTempEnv.TEMP, DEFAULT_TEST_TEMP_ROOT);
+  assert.strictEqual(blankTempEnv.NAPCAT_HTTP_API_BASE_URL, 'http://127.0.0.1:1');
   const customTempRoot = path.join(tempDir, 'custom-test-temp');
-  const customTempEnv = applyDefaultTestEnv({ TEST_TEMP_ROOT: customTempRoot });
+  const customTempEnv = applyDefaultTestEnv({
+    TEST_TEMP_ROOT: customTempRoot,
+    NAPCAT_HTTP_API_BASE_URL: 'http://127.0.0.1:39001'
+  });
   assert.strictEqual(customTempEnv.TEST_TEMP_ROOT, customTempRoot);
   assert.strictEqual(customTempEnv.TEMP, customTempRoot);
   assert.strictEqual(customTempEnv.TMP, customTempRoot);
   assert.strictEqual(customTempEnv.TMPDIR, customTempRoot);
+  assert.strictEqual(customTempEnv.NAPCAT_HTTP_API_BASE_URL, 'http://127.0.0.1:39001');
   for (const [file, reason] of Object.entries(SERIAL_TEST_REASONS)) {
     assert.ok(reason.length > 0, `${file} should document its serialization reason`);
     assert.ok(fs.existsSync(path.join(rootDir, 'tests', file)), `${file} should exist`);
