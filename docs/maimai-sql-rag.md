@@ -1,9 +1,9 @@
 # 舞萌谱面 SQL/RAG
 
-更新时间：2026-08-04 11:00 +08:00
-功能提交：`5a53eb3`
+更新时间：2026-08-04 13:05 +08:00
+功能提交：`5a53eb3`；误召回收敛提交：`c82ad3d`
 
-用户入口：[使用说明](maimai-user-guide.md)；[更新公告](maimai-update-announcement-2026-08-04.md)。用户文档更新于 2026-08-04 12:19 +08:00。
+用户入口：[使用说明](maimai-user-guide.md)；[更新公告](maimai-update-announcement-2026-08-04.md)。用户文档更新于 2026-08-04 13:05 +08:00。
 
 ## 范围
 
@@ -39,13 +39,26 @@ Worker 使用 GitHub tree 增量下载变化的 `maidata.txt`，Diving-Fish 曲�
 
 离线摘要按每批 8 张、并发 1 调用现有模型 HTTP 栈。模型输出必须通过 chart key、分段数、分段 ID、数值和手法标签校验；失败后使用确定性模板。缓存键包含内容哈希、提示词版本和模型版本。配置模型后，校验通过的全局摘要和分段文本会进入向量文档；未配置或调用失败时公共查询仍可用。
 
-## 检索
+## 路由与执行保护
+
+舞萌工具使用确定性双门禁，不再由单层关键词正则授权：
+
+- 领域门禁：当前消息明确出现“舞萌”或“maimai”，或者同时出现至少两个独立专属谱面信号，例如“DX + 紫谱”“标准 + 白谱”或完整“Re:Master 谱”。“手法、交互、滑键、掉音、定数”等单个泛化词不能确认领域。
+- 数据意图门禁：消息还必须明确需要谱面检索、单谱结构分析或当前用户成绩数据。“舞萌好玩吗”“舞萌怎么入坑”等闲聊继续走普通回复。
+- 当前消息边界：只读取当前 `cleanText`，不使用 `effectiveIntentText`、引用内容、上下文摘要或上一轮舞萌结果补全领域。“这张呢”不会继承授权，需要用户重新给出完整问题。
+- 工具优先级：第一人称成绩问题走 `maimai_player_analysis`；多谱查找、范围筛选、推荐和比较走 `maimai_chart_search`；明确单谱结构分析走 `maimai_chart_analyze`；其他已确认的谱面数据查询走搜索。
+
+每次路由先移除三个舞萌工具，分类成功后只加入唯一目标工具，其他领域已授权工具保持不变。`MAIMAI_ENABLED=false` 时不会向模型暴露任何舞萌工具。
+
+执行器不信任模型生成的工具名和参数，会使用 `__context.question` 或 `cleanText` 重新运行同一分类器。分类结果与目标工具不一致时返回 `blocked: maimai_route_mismatch`，不读取 SQLite、LanceDB 或成绩库。单谱分析的 `title` 必填，并且规范化标题必须能在当前问题中找到；缺少标题、只说“这张”或模型补造标题都会直接要求澄清。
+
+## 检索与结果契约
 
 检索先由 SQL/FTS 产生最多 100 个候选，再将候选内容哈希作为 LanceDB 硬过滤条件。向量结果必须再次与 SQL 候选求交，embedding 失败时返回 `sql_only`。所有证据都包含数据版本、同步时间、映射置信度、检索模式和降级状态。
 
-工具结果不能声称知道玩家的实际掉音位置。个人弱项只使用高置信成绩映射，以 Diving-Fish `avg/std_dev` 计算残差，再计算手法强度与残差的 Spearman 相关；有效成绩不足 20 张、单项非零样本不足 8 张或相关系数高于 -0.20 时不报告该弱项。
+搜索结果是候选列表，向量分数只用于候选集内重排，不作为谱面身份确认。无结果返回 `not_found`。单谱分析区分 `ok`、`ambiguous`、`not_found`、`unavailable` 和执行器产生的 `blocked`；只有唯一确认的 `ok` 谱面可以返回完整特征和代表段。`ambiguous` 最多返回 5 个候选并设置 `answerPolicy=clarify`，主回复只能要求补充完整曲名、SD/DX 或难度。
 
-当前 Planner 对“手法、纵连、交互、滑键”等明确信号优先选择单谱分析。面向用户的多谱检索示例只组合曲名、定数、谱面类型和难度；需要按手法挑谱时，先搜索候选，再指定单谱分析。
+工具结果不能声称知道玩家的实际掉音位置。个人弱项只使用高置信成绩映射，以 Diving-Fish `avg/std_dev` 计算残差，再计算手法强度与残差的 Spearman 相关；有效成绩不足 20 张、单项非零样本不足 8 张或相关系数高于 -0.20 时不报告该弱项。
 
 ## 凭据与命令
 
@@ -80,6 +93,14 @@ MAIMAI_SUMMARY_MODEL_VERSION=
 
 ## 真实验收
 
+2026-08-04 13:05 +08:00 完成误召回收敛复核：
+
+- 固定路由矩阵包含 32 条普通聊天负例、9 条舞萌闲聊负例和 13 条正例，预期工具命中率为 100%；引用或历史中含舞萌而当前消息为普通聊天时，舞萌工具授权为 0。
+- 功能关闭、AI Router 注入舞萌工具、模型伪造工具调用和标题均在执行前阻断，SQLite、LanceDB 与成绩查询调用为 0。
+- 15 项舞萌回归通过；`npm run lint` 检查 812 个文件通过，`npm run typecheck`、`npm run check:prompts`、全仓与暂存区密钥扫描、`git diff --check` 均通过；完整 `npm test` 用时 166.9 秒并退出 0。
+- 真实活动 generation 2 只读探针中，定数 13.7 至 14.0 的 DX 紫谱返回 5 条；`PANDORA PARADOXXX` 标准白谱唯一命中 `df:834:SD:4`，定数 15.0、物量 1342、映射置信度 1.0。写作手法、UI 交互、键盘滑键、数学定数和录音掉音 5 条探针的舞萌工具授权均为 0。
+- 本轮未使用真实用户 Import-Token，不宣称完成个人成绩接口验收；同步、映射、特征、向量候选求交和玩家弱项算法未修改。
+
 2026-08-04 10:55 +08:00 对 `data/maimai-diagnostic-20260804/maimai/catalog.sqlite` 只读复核：
 
 - 活动 generation：2；同步完成时间：2026-08-04 10:08:16 +08:00。
@@ -95,13 +116,14 @@ MAIMAI_SUMMARY_MODEL_VERSION=
 实际门禁命令：
 
 ```text
-node --test tests/maimaiCatalogStore.test.js tests/maimaiChartDomain.test.js tests/maimaiCommands.test.js tests/maimaiNapcatIngressSecurity.test.js tests/maimaiPlannerRouting.test.js tests/maimaiPlayerService.test.js tests/maimaiPlayerStore.test.js tests/maimaiRetrieval.test.js tests/maimaiSourceClient.test.js tests/maimaiSummaryVector.test.js tests/maimaiSyncScheduler.test.js tests/maimaiSyncWorker.test.js tests/maimaiToolsContract.test.js
+node --test tests/maimaiCatalogStore.test.js tests/maimaiChartDomain.test.js tests/maimaiCommands.test.js tests/maimaiNapcatIngressSecurity.test.js tests/maimaiPlannerRouting.test.js tests/maimaiPlayerService.test.js tests/maimaiPlayerStore.test.js tests/maimaiRetrieval.test.js tests/maimaiSourceClient.test.js tests/maimaiSummaryVector.test.js tests/maimaiSyncScheduler.test.js tests/maimaiSyncWorker.test.js tests/maimaiToolIsolation.test.js tests/maimaiToolsContract.test.js
 npm run lint
 npm run typecheck
 npm run check:prompts
+npm run check:secrets:all
 npm run check:secrets
-git diff --cached --check
+git diff --check
 npm test
 ```
 
-前六项通过。`npm test` 在 Node `v24.14.1` 下运行 158.9 秒后退出 1；单独复现为 `localAclScriptSource.test.js` 调用 `scripts/harden-local-acl.ps1` 时 `Path` 为空。13 个舞萌测试在定向和全量运行中均通过。项目声明 Node `>=20 <21`，本次没有在 Node 20 重跑，因此保留版本偏差。
+以上门禁在误召回收敛提交上全部通过。原始功能验收时曾出现的本机 ACL 测试失败已不再复现；当前运行时仍为 Node `v24.14.1`，超出项目声明的 `>=20 <21`，保留版本偏差。
