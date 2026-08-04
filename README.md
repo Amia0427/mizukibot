@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 角色内心 reasoning 正文隔离 2026-08-04 23:56 +08:00
+
+- 所有上游模型均通过第三方 OpenAI-compatible 网关接入；网关若将 reasoning 混入 `choices[].message.content` 或流式 `delta.content`，用户可见文本边界会剥离“（心想：……）”“(内心OS：……)”等内部思考块。
+- 实现提交 `69fc96c` 同时覆盖流式、非流式、安全检查和 Runtime V2 持久化前复检；`prompts/runtime/roleplay-inner-protocol.txt` 继续只约束内部 reasoning，未被修改。
+- 验收：`npm run lint`、`npm run typecheck`、`npm run check:prompts`、完整 `npm test` 和 `git diff --check` 均退出 0；未重启服务，未推送远端。
+
 ## 主回复输出预算 2026-08-04 23:34 +08:00
 
 - 普通主回复的 `AI_MAX_TOKENS` 与代码默认值已由 `8192` 提高到 `50000`，管理员预算保持 `50000`；短期记忆、上下文窗口、快速回复及其他专用模型预算未调整。

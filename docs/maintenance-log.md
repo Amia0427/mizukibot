@@ -1923,3 +1923,11 @@
 - 修复：实现提交 `f18ae99` 在协议边界保留原 assistant 消息，并追加最小 user 续写指令，保证发送给 Anthropic Messages 的正常生成请求以 user 结束；模型、endpoint、提示词和其他 provider 均未调整。
 - 验收：Anthropic 消息顺序、provider 请求规范化及 prompt cache 三项定向测试通过；`npm run lint` 检查 812 个文件、`npm run typecheck`、`git diff --check` 均通过；完整 `npm test` 213.3 秒退出 0。
 - 提交后记录：实现提交 `f18ae99` 已完成，本小目标已完成；文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-08-04 23:56 +08:00
+
+- 根因：`prompts/runtime/roleplay-inner-protocol.txt` 有意要求内部 reasoning 使用“心想/内心OS”格式；部分第三方 OpenAI-compatible 网关未稳定提供独立 reasoning 字段，而是把内部思考混入 `choices[].message.content` 或流式 `delta.content`，导致现有正文清洗未识别该格式。
+- 修复：实现提交 `69fc96c` 在统一用户可见文本边界识别全角/半角括号、未闭合流式片段和独立“心里OS”段落；安全检查同步判定泄漏，Runtime V2 `final_validate` 在持久化前再次清洗，避免污染连续性记录。所有上游仍按 OpenAI-compatible 响应处理，不按原生 Gemini 或 Anthropic 协议分流。
+- 边界：`prompts/runtime/roleplay-inner-protocol.txt` 与 `utils/runtimePrompts.js` 未修改，内部 reasoning 的角色化约束保留；普通正文对“内心OS”一词的讨论不被误删，未修改网关配置、模型或 endpoint。
+- 验收：流式、非流式、泄漏检查和最终持久化回归通过；`npm run lint` 检查 812 个文件、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0；完整 `npm test` 172.6 秒退出 0。
+- 提交后记录：实现提交 `69fc96c` 已完成，本小目标已完成；未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未重启服务，未推送远端。
