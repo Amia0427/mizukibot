@@ -194,6 +194,47 @@ function normalizeContextStatsArgs(args = {}) {
   return next;
 }
 
+function normalizeMaimaiArgs(toolName, args = {}) {
+  const next = {};
+  const query = String(args.query || '').trim();
+  if (!query) throw new Error(`${toolName} requires query`);
+  if (query.length > 300) throw new Error(`${toolName} query too long`);
+  next.query = query;
+  if (toolName === 'maimai_chart_search') {
+    for (const [key, alias] of [['level_min', 'level_min'], ['level_max', 'level_max']]) {
+      if (args[key] === undefined) continue;
+      const value = Number(args[key]);
+      if (!Number.isFinite(value) || value < 0 || value > 20) throw new Error(`${key} must be between 0 and 20`);
+      next[alias] = value;
+    }
+    if (args.chart_type !== undefined) {
+      const chartType = String(args.chart_type).trim().toUpperCase();
+      if (!new Set(['SD', 'DX']).has(chartType)) throw new Error('chart_type must be SD or DX');
+      next.chart_type = chartType;
+    }
+    if (args.difficulty !== undefined) next.difficulty = String(args.difficulty).trim().slice(0, 20);
+  }
+  if (toolName === 'maimai_chart_analyze') {
+    if (args.title !== undefined) next.title = String(args.title).trim().slice(0, 160);
+    if (args.chart_type !== undefined) {
+      const chartType = String(args.chart_type).trim().toUpperCase();
+      if (!new Set(['SD', 'DX']).has(chartType)) throw new Error('chart_type must be SD or DX');
+      next.chart_type = chartType;
+    }
+    if (args.difficulty !== undefined) next.difficulty = String(args.difficulty).trim().slice(0, 20);
+  }
+  if (toolName === 'maimai_player_analysis' && args.focus !== undefined) {
+    next.focus = String(args.focus).trim().slice(0, 80);
+  }
+  if (args.limit !== undefined) {
+    const limit = Number(args.limit);
+    const max = toolName === 'maimai_player_analysis' ? 50 : 10;
+    if (!Number.isInteger(limit) || limit < 1 || limit > max) throw new Error(`limit must be between 1 and ${max}`);
+    next.limit = limit;
+  }
+  return next;
+}
+
 function normalizeSelfImprovementArgs(toolName, args = {}) {
   if (toolName === 'self_improvement_recent') {
     const next = {};
@@ -367,6 +408,14 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
   if (toolName === 'get_context_stats') {
     return normalizeContextStatsArgs(args);
+  }
+
+  if (
+    toolName === 'maimai_chart_search'
+    || toolName === 'maimai_chart_analyze'
+    || toolName === 'maimai_player_analysis'
+  ) {
+    return normalizeMaimaiArgs(toolName, args);
   }
 
   if (

@@ -198,6 +198,7 @@ function stripInternalRequestFields(requestBody = {}) {
   delete nextBody.__trace;
   delete nextBody.__timeoutMs;
   delete nextBody.__abortSignal;
+  delete nextBody.__disableTlsImpersonation;
   delete nextBody.__requestHeaders;
   delete nextBody.__preferredProtocol;
   delete nextBody.__provider;

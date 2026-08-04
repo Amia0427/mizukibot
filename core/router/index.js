@@ -55,6 +55,7 @@ const {
   isWeatherCloudQuery
 } = require('../../utils/environmentDataQuery');
 const { applyDeterministicToolRouting } = require('./toolRouting');
+const { applyMaimaiToolRouting } = require('../../src/features/maimai/planner-routing');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -1378,8 +1379,8 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
   };
   route = markLocalRuleRoute(route, userId);
   if (sanitizeTopRouteType(route?.topRouteType) !== 'direct_chat') return route;
-  if (!detectSafetyBoundaryCaution(intentText)) return applyDeterministicToolRouting(route);
-  return applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
+  if (!detectSafetyBoundaryCaution(intentText)) return applyMaimaiToolRouting(applyDeterministicToolRouting(route));
+  return applyMaimaiToolRouting(applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
     ...route,
     meta: {
       ...(route.meta || {}),
@@ -1387,7 +1388,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
       effectiveIntentText: intentText || cleanText,
       quotePriority
     }
-  }), userId));
+  }), userId)));
 }
 
 async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, continuitySignals = {}, effectiveIntentText = '', chatType = '' }, options = {}) {
@@ -1417,7 +1418,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
         requestTrace: options.requestTrace
       });
       if (subagentRoute && typeof subagentRoute === 'object') {
-        return applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl }));
+        return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl })));
       }
     }
 
@@ -1441,7 +1442,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
       effectiveIntentText: intentText || cleanText,
       quotePriority
     };
-    return applyDeterministicToolRouting(sanitizedRoute);
+    return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizedRoute));
   } catch (_) {
     return fallbackRoute;
   }

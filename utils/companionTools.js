@@ -6,6 +6,9 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'get_context_stats',
   'url_safety_check',
   'read_shared_link',
+  'maimai_chart_search',
+  'maimai_chart_analyze',
+  'maimai_player_analysis',
   'render_qq_visual',
   'getWeather',
   'skill_earthquake_latest',
@@ -30,7 +33,10 @@ const COMPANION_SAFE_READ_TOOLS = Object.freeze([
   'notebook_search',
   'notebook_list_docs',
   'url_safety_check',
-  'read_shared_link'
+  'read_shared_link',
+  'maimai_chart_search',
+  'maimai_chart_analyze',
+  'maimai_player_analysis'
 ]);
 
 function parseToolList(value = '') {

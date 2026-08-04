@@ -36,11 +36,13 @@ function maybeWarnFallback(error) {
 async function postModelHttp(url, body, axiosOptions = {}) {
   const useStream = axiosOptions && axiosOptions.responseType === 'stream';
   let cycleResponse = null;
-  try {
-    cycleResponse = await postWithCycleTLS(url, body, axiosOptions, { stream: useStream });
-  } catch (error) {
-    if (!shouldFallbackToAxios(error)) throw error;
-    maybeWarnFallback(error);
+  if (axiosOptions.__disableTlsImpersonation !== true) {
+    try {
+      cycleResponse = await postWithCycleTLS(url, body, axiosOptions, { stream: useStream });
+    } catch (error) {
+      if (!shouldFallbackToAxios(error)) throw error;
+      maybeWarnFallback(error);
+    }
   }
   if (cycleResponse) return cycleResponse;
   const response = await axios.post(url, body, axiosOptions);

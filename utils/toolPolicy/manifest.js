@@ -95,6 +95,12 @@ assignPolicy(TOOL_POLICIES, [
   'minecraft_status'
 ], createPolicy({ risk: 'medium', capability: 'network' }));
 
+assignPolicy(TOOL_POLICIES, [
+  'maimai_chart_search',
+  'maimai_chart_analyze',
+  'maimai_player_analysis'
+], createPolicy({ risk: 'low', capability: 'local_read' }));
+
 TOOL_POLICIES.skill_weather_cloud = createPolicy({
   risk: 'medium',
   capability: 'network',

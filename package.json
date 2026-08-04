@@ -121,6 +121,7 @@
     "mineflayer-pathfinder": "^2.4.5",
     "node-telegram-bot-api": "^1.1.0",
     "sharp": "^0.33.5",
+    "simai.js": "1.1.4",
     "vec3": "^0.1.10",
     "ws": "^8.21.0",
     "zod": "^4.4.3",

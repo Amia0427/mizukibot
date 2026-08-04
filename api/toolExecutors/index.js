@@ -46,6 +46,7 @@ const {
   loadSkillReference,
   resolveSkillsBaseDir
 } = require('./skillRuntime');
+const { getMaimaiRuntime } = require('../../src/features/maimai/runtime');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -198,6 +199,24 @@ async function runFreeUrlExtract(args = {}) {
 // 1) Executor map (normalized object-style args)
 // -------------------------
 const TOOL_EXECUTORS = {
+  maimai_chart_search: async (args = {}) => {
+    const runtime = getMaimaiRuntime();
+    if (!runtime) return { status: 'disabled', message: '舞萌功能未启用。' };
+    return runtime.retrieval.searchCharts(args);
+  },
+
+  maimai_chart_analyze: async (args = {}) => {
+    const runtime = getMaimaiRuntime();
+    if (!runtime) return { status: 'disabled', message: '舞萌功能未启用。' };
+    return runtime.retrieval.analyzeChart(args);
+  },
+
+  maimai_player_analysis: async (args = {}) => {
+    const runtime = getMaimaiRuntime();
+    if (!runtime) return { status: 'disabled', message: '舞萌功能未启用。' };
+    return runtime.retrieval.playerAnalysis(args);
+  },
+
   // ===== tools.js =====
   getLyrics: async (args = {}) => {
     const question = args.question ?? args.song ?? args.text ?? '';

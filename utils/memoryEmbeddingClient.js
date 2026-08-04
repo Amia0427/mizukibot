@@ -288,6 +288,7 @@ async function embedTexts(texts = [], options = {}) {
       {
         model,
         input,
+        __disableTlsImpersonation: true,
         __timeoutMs: Math.max(1000, Number(options.timeoutMs || config.MEMORY_EMBEDDING_TIMEOUT_MS) || 12000),
         __trace: {
           source: 'memoryEmbeddingClient',

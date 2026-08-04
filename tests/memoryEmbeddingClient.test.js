@@ -48,7 +48,8 @@ module.exports = (async () => {
   const httpClient = require('../api/httpClient');
   const originalPostWithRetry = httpClient.postWithRetry;
   let calls = 0;
-  httpClient.postWithRetry = async () => {
+  httpClient.postWithRetry = async (_url, body) => {
+    assert.strictEqual(body.__disableTlsImpersonation, true);
     calls += 1;
     const error = new Error('socket timeout');
     error.code = 'ETIMEDOUT';
