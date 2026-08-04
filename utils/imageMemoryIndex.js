@@ -8,6 +8,7 @@ const {
   getDatePartsInTz
 } = require('./time');
 const { cleanImageMemorySummary } = require('./imageMemorySummarySanitizer');
+const { sanitizePersistentModelText } = require('./promptSecurity');
 
 const DEFAULT_INDEX = Object.freeze({
   version: 1,
@@ -132,8 +133,8 @@ function normalizeObservation(input = {}) {
     imageSource: normalizeText(input.imageSource),
     label: normalizeText(input.label),
     userText: normalizeText(input.userText || input.text || input.cleanText),
-    summary: normalizeSummaryText(input.summary),
-    ocrText: normalizeText(input.ocrText || input.visibleText)
+    summary: sanitizePersistentModelText(normalizeSummaryText(input.summary)),
+    ocrText: sanitizePersistentModelText(input.ocrText || input.visibleText)
   };
   return Object.fromEntries(Object.entries(observation).filter(([, value]) => value !== '' && value !== 0));
 }
@@ -207,9 +208,9 @@ function normalizeImageRecord(input = {}) {
     createdAt,
     lastSeenAt,
     userText: normalizeText(input.userText),
-    summary: normalizeSummaryText(input.summary),
-    ocrText: normalizeText(input.ocrText),
-    visibleText: normalizeText(input.visibleText),
+    summary: sanitizePersistentModelText(normalizeSummaryText(input.summary)),
+    ocrText: sanitizePersistentModelText(input.ocrText),
+    visibleText: sanitizePersistentModelText(input.visibleText),
     observations
   };
   const visualSummaryState = normalizeVisualSummaryState(input.visualSummaryState);
@@ -513,17 +514,25 @@ function openImageMemory(refOrKey = '', context = {}) {
   };
 }
 
-function recordVisualContextImages(visualContext = {}, context = {}) {
-  const images = Array.isArray(visualContext?.images) ? visualContext.images : [];
+function buildVisualPersistenceFields(visualContext = {}) {
   const caption = visualContext?.captionJson && typeof visualContext.captionJson === 'object'
     ? visualContext.captionJson
     : {};
-  const ocrText = normalizeText([
-    caption.ocr_text,
-    caption.visible_text,
-    Array.isArray(caption.images) ? caption.images.map((item) => item?.ocr_text || item?.visible_text || '').join(' ') : ''
-  ].filter(Boolean).join(' '));
-  const summary = normalizeText(visualContext.summary || caption.summary || visualContext.shortPersistSummary);
+  return {
+    userText: normalizeText(visualContext.originalUserText),
+    summary: sanitizePersistentModelText(
+      visualContext.shortPersistSummary
+      || caption.short_persist_summary
+      || visualContext.summary
+      || caption.summary
+    ),
+    ocrText: ''
+  };
+}
+
+function recordVisualContextImages(visualContext = {}, context = {}) {
+  const images = Array.isArray(visualContext?.images) ? visualContext.images : [];
+  const persistenceFields = buildVisualPersistenceFields(visualContext);
   const results = [];
   for (const image of images) {
     const cacheKey = parseCacheRef(image.url);
@@ -539,9 +548,9 @@ function recordVisualContextImages(visualContext = {}, context = {}) {
       imageSource: image.source,
       label: image.label,
       source: 'vision',
-      userText: context.userText || visualContext.originalUserText,
-      summary,
-      ocrText
+      userText: persistenceFields.userText,
+      summary: persistenceFields.summary,
+      ocrText: persistenceFields.ocrText
     }));
   }
   return results;
@@ -549,6 +558,7 @@ function recordVisualContextImages(visualContext = {}, context = {}) {
 
 module.exports = {
   buildSearchText,
+  buildVisualPersistenceFields,
   canAccessImageRecord,
   isImageRecallQuery,
   loadImageMemoryIndex,

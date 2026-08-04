@@ -29,6 +29,7 @@ const {
 const {
   INTENT_ALIASES,
   hasExplicitActSignal,
+  hasStructuredVisualRenderIntent,
   isSimpleTransformTask,
   isSelfContainedProductivityPlan,
   isStrictTimeDirectQuestion,
@@ -49,6 +50,12 @@ const {
   WEB_LOOKUP_ALLOWED_TOOLS,
   isExplicitWebSearchRequired
 } = require('../../utils/webSearchRequirement');
+const {
+  isEarthquakeDataQuery,
+  isWeatherCloudQuery
+} = require('../../utils/environmentDataQuery');
+const { applyDeterministicToolRouting } = require('./toolRouting');
+const { applyMaimaiToolRouting } = require('../../src/features/maimai/planner-routing');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -97,6 +104,17 @@ function hasQzonePublishSignal(text = '') {
 function detectQqActionIntent(cleanText = '', imageUrl = null) {
   const text = String(cleanText || '').trim();
   if (!text || imageUrl) return null;
+
+  if (hasStructuredVisualRenderIntent(text)) {
+    return {
+      key: 'qq_render_visual',
+      allowedTools: ['render_qq_visual'],
+      reason: 'qq-render-visual',
+      toolNeed: ['image'],
+      executionMode: 'staged',
+      responseIntent: 'action_guidance'
+    };
+  }
 
   if (/(查看|列出|显示|看看|查询).{0,8}(当前|本群|定时|任务|计划任务|定时任务)/i.test(text)
     || /(定时任务|计划任务).{0,8}(列表|清单|情况)/i.test(text)) {
@@ -946,8 +964,54 @@ function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null, 
   });
 }
 
+function matchEnvironmentDataLocalRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null }) {
+  if (imageUrl) return null;
+  const queryText = String(currentTurnText || cleanText || '').trim();
+  if (isWeatherCloudQuery(queryText)) {
+    return makeRoute({
+      confidence: 0.98,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: { risk: 'medium', toolNeed: ['image'], executionMode: 'staged', needsPlanning: false, needsMemory: false },
+      facets: { modality: 'text', sourceScope: 'live', domain: 'weather', outputKind: 'answer', freshness: 'latest' },
+      meta: {
+        reason: 'weather-cloud-query',
+        localRuleId: 'weather-cloud-query',
+        qqActionKey: 'qq_weather_cloud',
+        allowedTools: ['skill_weather_cloud'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'answer'
+      }
+    });
+  }
+  if (isEarthquakeDataQuery(queryText)) {
+    return makeRoute({
+      confidence: 0.97,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: { risk: 'low', toolNeed: ['web'], executionMode: 'staged', needsPlanning: false, needsMemory: false },
+      facets: { modality: 'text', sourceScope: 'live', domain: 'general', outputKind: 'answer', freshness: 'latest' },
+      meta: {
+        reason: 'earthquake-data-query',
+        localRuleId: 'earthquake-data-query',
+        allowedTools: ['skill_earthquake_latest'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'answer'
+      }
+    });
+  }
+  return null;
+}
+
 const LOCAL_ROUTE_RULE_GROUPS = Object.freeze([
   matchTerminalLocalRoute,
+  matchEnvironmentDataLocalRoute,
   matchActionLocalRoute,
   matchDirectLocalRoute
 ]);
@@ -1153,7 +1217,7 @@ function getRouterSubagentModelConfig() {
   return {
     baseUrl: String(config.AI_ROUTER_BASE_URL || config.API_BASE_URL || '').trim(),
     apiKey: String(config.AI_ROUTER_API_KEY || config.API_KEY || '').trim(),
-    model: String(config.AI_ROUTER_MODEL || config.PLAN_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4',
+    model: String(config.AI_ROUTER_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4',
     temperature: 0.1,
     maxTokens: 700,
     retries: 0,
@@ -1315,8 +1379,8 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
   };
   route = markLocalRuleRoute(route, userId);
   if (sanitizeTopRouteType(route?.topRouteType) !== 'direct_chat') return route;
-  if (!detectSafetyBoundaryCaution(intentText)) return route;
-  return markLocalRuleRoute(makeRoute({
+  if (!detectSafetyBoundaryCaution(intentText)) return applyMaimaiToolRouting(applyDeterministicToolRouting(route));
+  return applyMaimaiToolRouting(applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
     ...route,
     meta: {
       ...(route.meta || {}),
@@ -1324,7 +1388,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
       effectiveIntentText: intentText || cleanText,
       quotePriority
     }
-  }), userId);
+  }), userId)));
 }
 
 async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, continuitySignals = {}, effectiveIntentText = '', chatType = '' }, options = {}) {
@@ -1354,7 +1418,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
         requestTrace: options.requestTrace
       });
       if (subagentRoute && typeof subagentRoute === 'object') {
-        return sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl });
+        return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl })));
       }
     }
 
@@ -1378,7 +1442,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
       effectiveIntentText: intentText || cleanText,
       quotePriority
     };
-    return sanitizedRoute;
+    return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizedRoute));
   } catch (_) {
     return fallbackRoute;
   }

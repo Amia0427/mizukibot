@@ -143,6 +143,7 @@ try {
     });
   }
   const summary = buildLangGraphV2StoreSummary({
+    storeFile: path.join(dataDir, 'diag_langgraph_v2.sqlite'),
     checkpointDir: diagCheckpointDir,
     eventDir: diagEventDir,
     now: Date.parse('2026-07-01T01:00:00.000Z'),

@@ -28,20 +28,14 @@ function hasImageInput(input = {}) {
 
 function hasAllowedTools(input = {}) {
   const routeMeta = input.route?.meta && typeof input.route.meta === 'object' ? input.route.meta : {};
-  const planner = routeMeta.toolPlanner && typeof routeMeta.toolPlanner === 'object'
-    ? routeMeta.toolPlanner
-    : (routeMeta.directChatPlanner && typeof routeMeta.directChatPlanner === 'object' ? routeMeta.directChatPlanner : null);
   const executionPlan = input.routeExecutionPlan || input.executionPlan || {};
   const candidateLists = [
     input.allowedTools,
     executionPlan.allowedTools,
-    routeMeta.allowedTools,
-    planner?.allowedToolNames,
-    planner?.allowedTools
+    routeMeta.allowedTools
   ];
   if (candidateLists.some((items) => Array.isArray(items) && items.some((item) => normalizeText(item)))) return true;
-  const plannerSteps = Array.isArray(planner?.executionPlan?.steps) ? planner.executionPlan.steps : [];
-  return plannerSteps.some((step) => normalizeText(step?.action || step?.tool) && normalizeText(step?.action || step?.tool) !== 'reply');
+  return false;
 }
 
 function getRouteExecutionPlan(input = {}) {

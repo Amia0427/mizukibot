@@ -19,8 +19,21 @@ module.exports = (async () => {
   const depCheck = await TOOL_EXECUTORS.skill_qqbot_dep_check({});
   assert.ok(String(depCheck).includes('axios:'));
 
-  const weather = await nativeWeather.getWeatherSummary({ location: 'Shanghai' });
-  assert.ok(typeof weather === 'string');
+  const weather = await nativeWeather.getWeatherSummary({ location: '上海今天天气' }, {
+    apiKey: 'test-key',
+    httpClient: {
+      async get(url, options = {}) {
+        if (url === nativeWeather.AMAP_GEOCODE_URL) {
+          return { data: { status: '1', geocodes: [{ adcode: '310000', formatted_address: '上海市' }] } };
+        }
+        if (options.params.extensions === 'base') {
+          return { data: { status: '1', lives: [{ city: '上海市', weather: '晴', temperature: '30', humidity: '50' }] } };
+        }
+        return { data: { status: '1', forecasts: [{ city: '上海市', casts: [] }] } };
+      }
+    }
+  });
+  assert.match(weather, /高德天气/);
 
   const arxivGetMissing = await nativeArxiv.getArxiv({ arxiv_id: '' });
   assert.strictEqual(arxivGetMissing, 'Missing arxiv_id.');

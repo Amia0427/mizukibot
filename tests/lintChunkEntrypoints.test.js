@@ -28,23 +28,73 @@ function collectChunks(dir) {
 const discoveredChunks = ['api', 'core', 'src', 'utils', 'web']
   .flatMap((directory) => collectChunks(path.join(root, directory)))
   .sort();
+const legacyContextChunks = [
+  'api/runtimeV2/context/service-core.chunk.js',
+  'api/runtimeV2/context/dynamic-plan.chunk.js',
+  'api/runtimeV2/context/cache-blocks.chunk.js',
+  'api/runtimeV2/context/prompt-inputs.chunk.js',
+  'api/runtimeV2/context/render-helpers.chunk.js',
+  'api/runtimeV2/context/base-dynamic-prompt.chunk.js',
+  'api/runtimeV2/context/base-dynamic-prompt-02.chunk.js',
+  'api/runtimeV2/context/dynamic-prompt.chunk.js',
+  'api/runtimeV2/context/dynamic-prompt-02.chunk.js',
+  'api/runtimeV2/context/vision.chunk.js'
+];
+const legacyMessageHandlerChunks = [
+  'core/messageHandler.imports.chunk.js',
+  'core/messageHandler.prompts.chunk.js',
+  'core/messageHandler.direct-session.chunk.js',
+  'core/messageHandler.route-capture.chunk.js',
+  'core/messageHandler.runtime.chunk.js',
+  'core/messageHandler.runtime-02.chunk.js',
+  'core/messageHandler.runtime-03.chunk.js',
+  'core/messageHandler.runtime-04.chunk.js',
+  'core/messageHandler.runtime-05.chunk.js',
+  'core/messageHandler.runtime-06.chunk.js',
+  'core/messageHandler.exports.chunk.js'
+];
+const expectedChunkRecords = [
+  'api/runtimeV2/context (legacy retained context chunks)',
+  'core (legacy retained message handler chunks)',
+  ...discoveredChunks.filter((file) => (
+    !legacyContextChunks.includes(file) && !legacyMessageHandlerChunks.includes(file)
+  ))
+].sort();
 assert.strictEqual(report.version, 1);
 assert.strictEqual(report.status, 'pass');
-assert.deepStrictEqual(report.chunks.map((item) => item.file), discoveredChunks);
+assert.deepStrictEqual(report.chunks.map((item) => item.file), expectedChunkRecords);
 assert.ok(report.chunks.every((item) => (
   item.validation === 'passed'
-  && ['entrypoint', 'standalone'].includes(item.coverage)
+  && ['entrypoint', 'standalone', 'legacy-retained-combined'].includes(item.coverage)
   && item.error === null
 )));
-assert.ok(report.entrypoints.every((entrypoint) => (
-  entrypoint.validation === 'passed'
-  && entrypoint.missingChunks.length === 0
-  && entrypoint.error === null
-)));
+const legacyRecords = report.chunks.filter((item) => item.coverage === 'legacy-retained-combined');
+assert.strictEqual(legacyRecords.length, 2);
+assert.deepStrictEqual(
+  legacyRecords.find((item) => item.file.startsWith('api/runtimeV2/context')).chunks,
+  legacyContextChunks
+);
+assert.deepStrictEqual(
+  legacyRecords.find((item) => item.file.startsWith('core ')).chunks,
+  legacyMessageHandlerChunks
+);
+assert.ok(legacyRecords.every((item) => item.execution === 'not-run'));
+assert.ok(report.entrypoints.every((entrypoint) => {
+  if (entrypoint.name === 'src/runtime-v2/context' || entrypoint.name === 'src/message/handler') {
+    return entrypoint.validation === 'not-run'
+      && entrypoint.missingChunks.length === 0
+      && entrypoint.error === null;
+  }
+  return entrypoint.validation === 'passed'
+    && entrypoint.missingChunks.length === 0
+    && entrypoint.error === null;
+}));
 assert.deepStrictEqual(report.errors, []);
-assert.strictEqual(report.summary.discoveredChunks, discoveredChunks.length);
+assert.strictEqual(report.summary.discoveredChunks, expectedChunkRecords.length);
 assert.strictEqual(
-  report.summary.entrypointCovered + report.summary.standaloneCovered,
+  report.summary.entrypointCovered
+    + report.summary.legacyRetainedCovered
+    + report.summary.standaloneCovered,
   report.summary.discoveredChunks
 );
 assert.strictEqual(report.summary.uncovered, 0);

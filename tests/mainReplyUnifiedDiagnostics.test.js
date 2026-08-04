@@ -31,7 +31,6 @@ module.exports = (async () => {
     process.env.API_PROVIDER = '';
     process.env.AI_FALLBACK_ENABLED = 'true';
     process.env.AI_FALLBACK_MODEL = 'diag-fallback-model';
-    process.env.PLANNER_SUBAGENT_ENABLED = 'false';
     process.env.ENABLE_AI_ROUTER = 'false';
     process.env.COMPANION_TOOL_MODE_ENABLED = 'false';
 
@@ -44,10 +43,7 @@ module.exports = (async () => {
       userId: 'u_diag',
       groupId: 'g_diag',
       chatType: 'group',
-      plannerMode: 'rule',
-      candidateReply: '最先要记的：役是什么。然后理解立直。还有一个坑是振听。推荐的入门路子是先打低段位再复盘。'.repeat(8)
-    }, {
-      plannerMode: 'rule'
+      candidateReply: '最先要记的：役是什么。然后理解立直。还有一个坑是振听。推荐的入门路子是先打低段位再复盘。'.repeat(200)
     });
 
     assert.strictEqual(report.schemaVersion, 'main_reply_diagnostic_v1');
@@ -79,7 +75,7 @@ module.exports = (async () => {
     assert.strictEqual(report.guards.groupDirectStyle.hit, true);
     assert.ok(report.guards.groupDirectStyle.reasons.includes('too_long'));
     assert.ok(report.guards.groupDirectStyle.reasons.includes('teaching_structure'));
-    assert.strictEqual(report.diagnostics.plannerSource, 'rule');
+    assert.strictEqual(report.diagnostics.agentSource, 'native_react');
 
     process.env.API_PROVIDER = 'openai_compatible';
     process.env.AI_MODEL = 'gemini-3-flash-preview';
@@ -90,10 +86,7 @@ module.exports = (async () => {
       requestText: '你好',
       userId: 'u_diag',
       groupId: '',
-      chatType: 'private',
-      plannerMode: 'rule'
-    }, {
-      plannerMode: 'rule'
+      chatType: 'private'
     });
     assert.strictEqual(gatewayReport.summary.provider, 'openai_compatible');
     assert.strictEqual(gatewayReport.model.provider, 'openai_compatible');

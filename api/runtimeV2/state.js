@@ -1,11 +1,10 @@
 // @ts-check
 const { Annotation } = require('@langchain/langgraph');
 const {
-  normalizePlanStep,
   normalizeArray,
-  normalizeObject,
-  validatePlannerExecutionPlan
+  normalizeObject
 } = require('./contracts');
+const { filterAllowedToolNames } = require('../../utils/localToolAccess');
 const { cloneTraceForMeta, normalizeRequestTrace } = require('../../utils/requestTrace');
 
 function appendReducer(left, right) {
@@ -31,10 +30,6 @@ const GraphStateV2 = Annotation.Root({
     value: replaceReducer,
     default: () => ({})
   }),
-  plan: Annotation({
-    value: replaceReducer,
-    default: () => ({})
-  }),
   execution: Annotation({
     value: replaceReducer,
     default: () => ({})
@@ -44,7 +39,7 @@ const GraphStateV2 = Annotation.Root({
     default: () => ({})
   }),
   messages: Annotation({
-    reducer: appendReducer,
+    value: replaceReducer,
     default: () => []
   }),
   events: Annotation({
@@ -52,77 +47,6 @@ const GraphStateV2 = Annotation.Root({
     default: () => []
   })
 });
-
-function buildInitialPlanSlice(request = {}, options = {}) {
-  const getToolPlannerExecutionPlan = typeof options.getToolPlannerExecutionPlan === 'function'
-    ? options.getToolPlannerExecutionPlan
-    : () => null;
-  const normalizeDirectChatPlannerPlanStep = typeof options.normalizeDirectChatPlannerPlanStep === 'function'
-    ? options.normalizeDirectChatPlannerPlanStep
-    : ((step, index) => normalizePlanStep(step, 'direct_chat', index));
-  const normalizeRoutePlanStep = typeof options.normalizeRoutePlanStep === 'function'
-    ? options.normalizeRoutePlanStep
-    : ((step, index) => normalizePlanStep(step, 'route', index));
-
-  const plannerExecutionPlan = getToolPlannerExecutionPlan(request.routeMeta);
-  const plannerValidation = plannerExecutionPlan
-    ? validatePlannerExecutionPlan(plannerExecutionPlan, {
-      allowedTools: request.allowedTools || request.routeMeta?.allowedTools || []
-    })
-    : {
-      ok: true,
-      status: 'not_applicable',
-      reasons: [],
-      steps: [],
-      stepCount: 0,
-      allowedToolNames: normalizeArray(request.allowedTools || request.routeMeta?.allowedTools)
-    };
-  const directPlannerSteps = plannerValidation.ok && Array.isArray(plannerExecutionPlan?.steps)
-    ? plannerValidation.steps
-    : [];
-  const legacySteps = Array.isArray(request.routeMeta?.planSteps) ? request.routeMeta.planSteps : [];
-  if (plannerExecutionPlan && !plannerValidation.ok) {
-    return {
-      status: 'idle',
-      currentStepId: '',
-      steps: [],
-      planner: {
-        legacyRoutePlanDetected: legacySteps.length > 0,
-        directChatPlannerSingleAuthority: false,
-        toolPlannerSingleAuthority: false,
-        validation: plannerValidation
-      },
-      verification: null,
-      rounds: [],
-      finalPlan: {
-        goal: String(request.question || '').trim(),
-        need_tools: false,
-        steps: []
-      },
-      finalExecLogs: [],
-      lastRepairPlan: null
-    };
-  }
-  const steps = directPlannerSteps.length > 0
-    ? directPlannerSteps.map((step, index) => normalizeDirectChatPlannerPlanStep(step, index))
-    : legacySteps.map((step, index) => normalizeRoutePlanStep(step, index));
-  return {
-    status: steps.length > 0 ? 'pending' : 'idle',
-    currentStepId: steps[0]?.id || '',
-    steps,
-    planner: {
-      legacyRoutePlanDetected: legacySteps.length > 0,
-      directChatPlannerSingleAuthority: directPlannerSteps.length > 0,
-      toolPlannerSingleAuthority: directPlannerSteps.length > 0,
-      validation: plannerValidation
-    },
-    verification: null,
-    rounds: [],
-    finalPlan: null,
-    finalExecLogs: [],
-    lastRepairPlan: null
-  };
-}
 
 function normalizeImageUrls(imageUrl = null, imageUrls = []) {
   const seen = new Set();
@@ -166,14 +90,14 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
   const createMemoryCliTurnState = typeof options.createMemoryCliTurnState === 'function'
     ? options.createMemoryCliTurnState
     : (() => ({}));
-  const buildInitialPlanSliceImpl = typeof options.buildInitialPlanSlice === 'function'
-    ? options.buildInitialPlanSlice
-    : ((request) => buildInitialPlanSlice(request, options));
   const nowTs = typeof options.nowTs === 'function'
     ? options.nowTs
     : Date.now;
 
-  const normalizedAllowedTools = normalizeToolNames(options.allowedTools);
+  const normalizedAllowedTools = filterAllowedToolNames(
+    normalizeToolNames(options.allowedTools),
+    normalizeToolNames(routeMeta?.allowedTools)
+  );
   const sessionKey = String(resolveShortTermSessionKey(userId, routeMeta) || '').trim();
   const threadId = resolveThreadId({
     userId,
@@ -220,10 +144,8 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     allowTools: options.disableTools ? false : true,
     streaming: Boolean(options.streaming),
     disableStream: Boolean(options.disableStream),
-    disableDirectToolLoop: Boolean(options.disableDirectToolLoop),
     deferPersist: Boolean(options.deferPersist),
     resumePolicy: String(options.resumePolicy || 'auto').trim().toLowerCase() || 'auto',
-    forcePlanMode: Boolean(options.forcePlanMode),
     systemInitiated: Boolean(options.systemInitiated),
     useMinecraftModel,
     modelConfig: useMinecraftModel
@@ -266,7 +188,6 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
       globalToolEvidence: '',
       globalToolResults: []
     },
-    plan: buildInitialPlanSliceImpl(request),
     execution: {
       status: 'idle',
       mode: '',
@@ -297,7 +218,19 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
       latencyBreakdown: {},
       deferredJobs: [],
       firstAssistantReused: false,
-      humanizerInvoked: false
+      humanizerInvoked: false,
+      agent: {
+        initialized: false,
+        completed: false,
+        pendingToolCalls: [],
+        toolRoundCount: 0,
+        toolCallCount: 0,
+        toolHistory: [],
+        completedToolCallIds: [],
+        forceFinal: false,
+        forceFinalAfterTools: false,
+        stopReason: ''
+      }
     },
     output: {
       draftReply: '',
@@ -377,185 +310,15 @@ function snapshotState(state) {
       pendingReplySnapshot: memory.pendingReplySnapshot || null,
       checkpointCompacted: true
     },
-    plan: state.plan,
-    execution: {
-      ...execution,
-      directChatToolCompile: execution.directChatToolCompile
-        ? {
-            enabled: Boolean(execution.directChatToolCompile.enabled),
-            assistantMessage: execution.directChatToolCompile.assistantMessage || null,
-            directContext: execution.directChatToolCompile.directContext || null
-          }
-        : undefined
-    },
+    execution,
     output: state.output,
     messages: state.messages
   };
 }
 
-function normalizePlanForResume(plan = {}) {
-  const steps = normalizeArray(plan.steps).map((step, index) => normalizePlanStep(step, String(step?.source || 'planner').trim() || 'planner', index));
-
-  return {
-    ...normalizeObject(plan, {}),
-    status: String(plan?.status || (steps.length > 0 ? 'pending' : 'idle')).trim() || 'idle',
-    currentStepId: String(plan?.currentStepId || steps[0]?.id || '').trim(),
-    steps,
-    planner: normalizeObject(plan?.planner, {}),
-    verification: plan?.verification ? normalizeObject(plan.verification, {}) : null,
-    rounds: normalizeArray(plan?.rounds),
-    finalPlan: plan?.finalPlan ? normalizeObject(plan.finalPlan, {}) : null,
-    finalExecLogs: normalizeArray(plan?.finalExecLogs),
-    lastRepairPlan: plan?.lastRepairPlan ? normalizeObject(plan.lastRepairPlan, {}) : null
-  };
-}
-
-function translatePlan(rawPlan = {}, options = {}) {
-  const normalizePlannedStep = typeof options.normalizePlannedStep === 'function'
-    ? options.normalizePlannedStep
-    : ((step, index) => normalizePlanStep(step, 'planner', index));
-  const steps = normalizeArray(rawPlan?.steps).map((step, index) => normalizePlannedStep(step, index));
-  return {
-    status: steps.length > 0 ? 'planned' : 'idle',
-    currentStepId: steps[0]?.id || '',
-    steps,
-    planner: {
-      rawPlan
-    },
-    verification: null,
-    rounds: [],
-    finalPlan: {
-      goal: String(rawPlan?.goal || '').trim(),
-      need_tools: Boolean(rawPlan?.need_tools),
-      steps: steps.map((step) => ({
-        id: step.id,
-        action: step.kind === 'reply' ? 'reply' : step.tool,
-        args: step.inputs || {},
-        purpose: step.instruction || step.successCriteria || '',
-        dependsOn: normalizeArray(step.dependsOn),
-        parallelGroup: String(step.parallelGroup || '').trim(),
-        sideEffect: Boolean(step.sideEffect),
-        evidenceRequirement: normalizeObject(step.evidenceRequirement, {}),
-        repairPolicy: normalizeObject(step.repairPolicy, {}),
-        runtimeBinding: step.runtimeBinding === null ? null : normalizeObject(step.runtimeBinding, {})
-      }))
-    },
-    finalExecLogs: [],
-    lastRepairPlan: null
-  };
-}
-
-function rebuildFinalPlanFromSteps(state) {
-  const request = normalizeObject(state.request, {});
-  const planSteps = normalizeArray(state.plan?.steps);
-  return {
-    goal: String(state.plan?.finalPlan?.goal || request.question || '').trim(),
-    need_tools: planSteps.some((step) => step.kind !== 'reply'),
-    steps: planSteps.map((step) => ({
-      id: step.id,
-      action: step.kind === 'reply' ? 'reply' : step.tool,
-      args: step.inputs || {},
-      purpose: step.instruction || step.successCriteria || '',
-      dependsOn: normalizeArray(step.dependsOn),
-      parallelGroup: String(step.parallelGroup || '').trim(),
-      sideEffect: Boolean(step.sideEffect),
-      evidenceRequirement: normalizeObject(step.evidenceRequirement, {}),
-      repairPolicy: normalizeObject(step.repairPolicy, {}),
-      runtimeBinding: step.runtimeBinding === null ? null : normalizeObject(step.runtimeBinding, {})
-    }))
-  };
-}
-
-function buildReplyOnlyPlan(question = '', planner = {}) {
-  return {
-    status: 'planned',
-    currentStepId: '',
-    steps: [],
-    planner: normalizeObject(planner, {}),
-    verification: null,
-    rounds: [],
-    finalPlan: {
-      goal: String(question || '').trim(),
-      need_tools: false,
-      steps: []
-    },
-    finalExecLogs: [],
-    lastRepairPlan: null
-  };
-}
-
-function buildExecLogsFromSteps(steps = []) {
-  const logs = [];
-  for (const step of normalizeArray(steps)) {
-    if (step.kind === 'reply') {
-      logs.push({
-        id: step.id,
-        action: 'reply',
-        args: step.inputs || {},
-        purpose: step.instruction || step.successCriteria || '',
-        ok: true,
-        result: 'No tool execution required for this step',
-        error: '',
-        batchId: String(step.batchId || '').trim(),
-        batchIndex: Number.isFinite(Number(step.batchIndex)) ? Number(step.batchIndex) : null
-      });
-      continue;
-    }
-
-    const latestEnvelope = normalizeArray(step.evidence).slice(-1)[0] || null;
-    logs.push({
-      id: step.id,
-      action: step.tool,
-      args: step.inputs || {},
-      purpose: step.instruction || step.successCriteria || '',
-      ok: latestEnvelope ? latestEnvelope.status === 'completed' : false,
-      result: latestEnvelope && latestEnvelope.status === 'completed' ? String(latestEnvelope.result || '') : '',
-      error: latestEnvelope && latestEnvelope.status !== 'completed'
-        ? String(latestEnvelope.result || step.blockingReason || 'tool failed')
-        : '',
-      unsatisfiedRequirement: String(latestEnvelope?.unsatisfiedRequirement || '').trim(),
-      runtimeBinding: latestEnvelope?.runtimeBinding === null ? null : normalizeObject(latestEnvelope?.runtimeBinding, step.runtimeBinding),
-      dependsOn: normalizeArray(step.dependsOn),
-      evidenceRequirement: normalizeObject(step.evidenceRequirement, {}),
-      repairPolicy: normalizeObject(step.repairPolicy, {}),
-      batchId: String(latestEnvelope?.batch_id || step.batchId || '').trim(),
-      batchIndex: Number.isFinite(Number(latestEnvelope?.batch_index))
-        ? Number(latestEnvelope.batch_index)
-        : (Number.isFinite(Number(step.batchIndex)) ? Number(step.batchIndex) : null)
-    });
-  }
-  return logs;
-}
-
-function findEvidenceEnvelope(step = {}, argsHash = '') {
-  const evidences = normalizeArray(step?.evidence);
-  for (let index = evidences.length - 1; index >= 0; index -= 1) {
-    const item = evidences[index];
-    if (String(item?.args_hash || '').trim() === String(argsHash || '').trim()) {
-      return item;
-    }
-  }
-  return null;
-}
-
-function isCompletedSideEffectStep(step = {}) {
-  const evidences = normalizeArray(step?.evidence);
-  if (String(step?.status || '').trim() !== 'completed' || evidences.length === 0) return false;
-  const latest = evidences[evidences.length - 1];
-  return Boolean(latest?.side_effect) && String(latest?.status || '').trim() === 'completed';
-}
-
 module.exports = {
   GraphStateV2,
   appendReducer,
-  buildInitialPlanSlice,
-  buildExecLogsFromSteps,
-  buildReplyOnlyPlan,
   createInitialState,
-  findEvidenceEnvelope,
-  isCompletedSideEffectStep,
-  normalizePlanForResume,
-  rebuildFinalPlanFromSteps,
-  snapshotState,
-  translatePlan
+  snapshotState
 };

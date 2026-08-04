@@ -85,7 +85,7 @@ function createMemoryGovernanceStore(deps = {}) {
   }
 
   function listSnapshots(limit = 30) {
-    ensureSnapshotDir();
+    if (!fs.existsSync(snapshotDir)) return [];
     const files = fs.readdirSync(snapshotDir)
       .filter((name) => /^memory_items_.*\.json$/i.test(name))
       .map((name) => {

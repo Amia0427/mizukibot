@@ -13,6 +13,7 @@ function clearProjectCache() {
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-daily-journal-sidecar-'));
 process.env.DATA_DIR = tempRoot;
 process.env.DAILY_JOURNAL_ENABLED = 'true';
+process.env.DAILY_JOURNAL_TURN_COMPACTION_ENABLED = 'false';
 process.env.HOT_STORE_DEBOUNCE_MS = '0';
 process.env.HOT_STORE_MAX_DELAY_MS = '0';
 

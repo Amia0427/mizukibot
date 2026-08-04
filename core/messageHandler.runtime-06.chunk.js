@@ -23,7 +23,7 @@
           chatType,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           topRouteType: routeExecutionPlan.topRouteType,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             threadId: String(replyOptions?.threadId || inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
             messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
             requestTrace: cloneTraceForMeta(requestTrace)
@@ -52,6 +52,9 @@
           source: 'main_reply',
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan)
         });
+        if (isPrivateChatType(chatType)) {
+          registerPrivateProactiveUserAfterReply(senderId);
+        }
         await maybeSendReasoningForward(replyEnvelope, {
           chatType,
           groupId: isPrivateChatType(chatType) ? '' : groupId,
@@ -137,6 +140,12 @@
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       maybeRunDeferredPersist(replyEnvelope);
+      if (
+        isPrivateChatType(chatType)
+        && Number(replyOptions?.streamSendStats?.sentSegments || 0) > 0
+      ) {
+        registerPrivateProactiveUserAfterReply(senderId);
+      }
       await maybeSendReasoningForward(replyEnvelope, {
         chatType,
         groupId: isPrivateChatType(chatType) ? '' : groupId,

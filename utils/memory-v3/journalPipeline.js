@@ -1,5 +1,6 @@
 const path = require('path');
 const config = require('../../config');
+const { shouldIndexJournalEpisode } = require('./journalEpisodePolicy');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -66,6 +67,7 @@ async function appendJournalEpisodeEvent(payload = {}) {
   const { appendMemoryEvent } = require('./events');
   return appendMemoryEvent({
     type: 'episode_rollup_generated',
+    ts: Number(payload.ts || 0) || undefined,
     userId,
     sessionKey: normalizeText(payload.sessionKey),
     groupId: normalizeText(payload.groupId),
@@ -97,6 +99,10 @@ async function appendJournalEpisodeEvent(payload = {}) {
       fieldKey: 'episode',
       textKind: normalizeText(payload.textKind) || `journal_${rollupLevel}`,
       sourceCompleteness: normalizeText(payload.sourceCompleteness) || 'summary',
+      batchId: normalizeText(payload.batchId),
+      startSeq: Math.max(0, Number(payload.startSeq || 0) || 0),
+      endSeq: Math.max(0, Number(payload.endSeq || 0) || 0),
+      entryCount: Math.max(0, Number(payload.entryCount || 0) || 0),
       coveredByRollups: Array.isArray(payload.coveredByRollups) ? payload.coveredByRollups : [],
       sessionKeys: Array.isArray(payload.sessionKeys) ? payload.sessionKeys.map(normalizeText).filter(Boolean) : [],
       topics: Array.isArray(payload.topics) ? payload.topics.map(normalizeText).filter(Boolean) : []
@@ -116,7 +122,7 @@ function buildJournalEpisodeDocsForUser(userId = '') {
     const eventId = normalizeText(episode.id);
     if (!text || !eventId) return null;
     const rollupLevel = normalizeRollupLevel(episode.rollupLevel || episode.type || 'daily');
-    if (rollupLevel === 'segment') return null;
+    if (!shouldIndexJournalEpisode(episode)) return null;
     return {
       id: `episode:${eventId}`,
       source: 'journal',

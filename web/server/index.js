@@ -511,7 +511,7 @@ function createWebApp(options = {}) {
         <div class="field"><label>AI_FALLBACK_FAILURE_THRESHOLD</label><input id="ai_fallback_failure_threshold" type="number" min="1" max="100" step="1" /></div>
         <div class="field"><label>AI_FALLBACK_COOLDOWN_MS</label><input id="ai_fallback_cooldown_ms" type="number" min="0" max="31536000000" step="1000" /></div>
         <div class="field" style="grid-column:1 / -1"><label>主模型降级开关</label><div class="inline-field"><input id="ai_fallback_enabled" type="checkbox" /><span>主模型失败后自动切换到备用模型</span></div></div>
-        <div class="field"><label>AI_ROUTER_MODEL</label><input id="ai_router_model" list="text-model-list" placeholder="留空则跟随 PLAN_MODEL / AI_MODEL" /></div>
+        <div class="field"><label>AI_ROUTER_MODEL</label><input id="ai_router_model" list="text-model-list" placeholder="留空则跟随 AI_MODEL" /></div>
         <div class="field" style="grid-column:1 / -1"><label>AI_ROUTER_BASE_URL</label><input id="ai_router_base_url" placeholder="留空则跟随 API_BASE_URL" /></div>
         <div class="field" style="grid-column:1 / -1"><label>AI_ROUTER_API_KEY</label><input id="ai_router_api_key" type="password" autocomplete="off" placeholder="留空则保持当前值；空值时运行时回退到 API_KEY" /><div class="hint" id="ai_router_api_key_hint">当前未设置（将回退到 API_KEY）</div></div>
         <div class="field"><label>MEMORY_MODEL</label><input id="memory_model" list="text-model-list" placeholder="gpt-5.1-codex-mini" /></div>

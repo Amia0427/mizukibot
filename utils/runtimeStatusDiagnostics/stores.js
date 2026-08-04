@@ -2,6 +2,7 @@ const path = require('path');
 const {
   classifyPostReplyJobError
 } = require('../postReplyWorker/errorClassifier');
+const { inspectCheckpointStore } = require('../langgraphV2Store');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -73,13 +74,15 @@ function sumStoreBytes(files = []) {
 }
 
 function buildLangGraphV2StoreSummary({
+  storeFile,
   checkpointDir,
   eventDir,
   now,
   staleCheckpointMs,
   safeReadDir,
   safeReadJson,
-  safeStat
+  safeStat,
+  inspectStore = inspectCheckpointStore
 }) {
   const readStat = safeStat || (() => ({ exists: false, mtimeMs: 0, size: 0 }));
   const normalizedCheckpointDir = normalizePath(checkpointDir);
@@ -87,6 +90,7 @@ function buildLangGraphV2StoreSummary({
   const deps = { safeReadDir, safeReadJson, safeStat: readStat };
   const checkpointFiles = readJsonStoreFiles(normalizedCheckpointDir, deps);
   const eventFiles = readJsonStoreFiles(normalizedEventDir, deps);
+  const sqlite = inspectStore(storeFile, { now, staleCheckpointMs });
   const checkpoints = checkpointFiles.map((file) => {
     const data = file.valid && !Array.isArray(file.data) ? file.data : {};
     const updatedAtMs = normalizeNumber(data.updatedAt, file.mtimeMs);
@@ -128,6 +132,8 @@ function buildLangGraphV2StoreSummary({
     .filter((item) => item.stale)
     .sort((a, b) => b.ageMs - a.ageMs);
   return {
+    storeFile: normalizePath(storeFile),
+    sqlite,
     checkpointDir: normalizedCheckpointDir,
     eventDir: normalizedEventDir,
     checkpointDirExists: readStat(normalizedCheckpointDir).exists,

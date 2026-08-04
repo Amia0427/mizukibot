@@ -59,7 +59,6 @@ function createDeps(overrides = {}) {
     computeEffectiveAllowedTools() {
       return [];
     },
-    runCapabilityPreflight: async () => null,
     buildDynamicPromptImpl: async () => {
       throw new Error('force soft timeout fallback');
     },
@@ -81,15 +80,6 @@ function createDeps(overrides = {}) {
     },
     classifyPromptThreat() {
       return { labels: [], reasons: [], score: 0 };
-    },
-    getToolPlannerExecutionPlan() {
-      return null;
-    },
-    isPlannerSingleAuthorityEnabled() {
-      return false;
-    },
-    normalizePlanForResume(plan = {}) {
-      return plan;
     },
     normalizeMode() {
       return 'chat';
@@ -150,7 +140,7 @@ function createDeps(overrides = {}) {
       };
     },
     getMemosRecallPromptText() {
-      return '[MemOSRecall]\nplanner 选中的远端知识。';
+      return '[MemOSRecall]\n动态上下文选中的远端知识。';
     },
     ...overrides
   };
@@ -166,26 +156,24 @@ module.exports = (async () => {
       runtimeQuestionText: '你还记得刚才要查什么吗',
       persistUserText: '你还记得刚才要查什么吗',
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            enabledBlockIds: ['memos_recall', 'openviking_recall']
-          },
-          memosRecall: {
-            used: true,
-            items: [{ id: 'm1', text: 'planner 选中的远端知识。' }],
-            promptText: '[MemOSRecall]\nplanner 选中的远端知识。'
-          },
-          openVikingRecall: {
-            used: true,
-            items: [
-              {
-                id: 'ov_timeout_dup',
-                text: '之前约定先排查 prompt 组装。',
-                score: 0.93
-              }
-            ],
-            promptText: '[OpenVikingRecall]\n1. source=openviking score=0.93 之前约定先排查 prompt 组装。'
-          }
+        dynamicPromptPlan: {
+          enabledBlockIds: ['memos_recall', 'openviking_recall']
+        },
+        memosRecall: {
+          used: true,
+          items: [{ id: 'm1', text: '动态上下文选中的远端知识。' }],
+          promptText: '[MemOSRecall]\n动态上下文选中的远端知识。'
+        },
+        openVikingRecall: {
+          used: true,
+          items: [
+            {
+              id: 'ov_timeout_dup',
+              text: '之前约定先排查 prompt 组装。',
+              score: 0.93
+            }
+          ],
+          promptText: '[OpenVikingRecall]\n1. source=openviking score=0.93 之前约定先排查 prompt 组装。'
         }
       },
       sessionKey: 's_timeout_fallback',
@@ -209,7 +197,7 @@ module.exports = (async () => {
   assert.ok(dynamicIds.includes('retrieved_memory_lite'), 'timeout fallback should inject retrieved memory block');
   assert.ok(dynamicIds.includes('daily_journal'), 'timeout fallback should inject daily journal block');
   assert.ok(dynamicIds.includes('short_term_continuity'), 'timeout fallback should inject short-term continuity block');
-  assert.ok(dynamicIds.includes('memos_recall'), 'timeout fallback should preserve planner-selected MemOS recall');
+  assert.ok(dynamicIds.includes('memos_recall'), 'timeout fallback should preserve selected MemOS recall');
   assert.ok(!dynamicIds.includes('openviking_recall'), 'timeout fallback should dedupe OpenViking against local Memory V3');
   assert.ok(promptIds.includes('retrieved_memory_lite'), 'rebuilt prompt snapshot should include fallback memory');
   assert.ok(sentText.includes('[RetrievedMemoryLite]'), 'main reply messages should include retrieved memory text');

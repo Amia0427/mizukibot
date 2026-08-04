@@ -61,6 +61,7 @@ const { createDailyJournalRollupMaintenance } = require('./rollupMaintenance');
 const { createDailyJournalSegments } = require('./segments');
 const { createDailyJournalMemorySync } = require('./memorySync');
 const { createDailyJournalSummaryRunner } = require('./summaryRunner');
+const { createDailyJournalTurnCompaction } = require('./turnCompaction');
 const { createDailyJournalViews } = require('./views');
 const {
   classifyJournalEntrySafety,
@@ -301,21 +302,39 @@ async function appendDailyJournalEntry(userId, question, reply, userInfo = {}, o
   const day = formatDateInTz(now, config.TIMEZONE);
   const record = buildJournalEntryRecord(question, reply, userInfo, now);
   if (!record) return false;
+  const turnCompactionEnabled = config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED !== false;
   const safety = classifyJournalEntrySafety(record, { question, reply });
   if (config.MEMORY_JOURNAL_UNSAFE_REPLY_FILTER !== false && !safety.safe) {
-    ensureUserJournalDir(uid);
-    appendJsonLine(getEntrySidecarFilePath(uid, day), {
-      ...buildEntrySidecarRecord(record, options, day),
-      unsafe: true,
-      unsafeReason: safety.reason,
-      journalWriteSkipped: true
-    }, { flushNow: true });
-    syncJournalEntryToProfileJournalDb(uid, day, record, options, {
+    if (!turnCompactionEnabled) {
+      ensureUserJournalDir(uid);
+      appendJsonLine(getEntrySidecarFilePath(uid, day), {
+        ...buildEntrySidecarRecord(record, options, day),
+        unsafe: true,
+        unsafeReason: safety.reason,
+        journalWriteSkipped: true
+      }, { flushNow: true });
+    }
+    const syncResult = syncJournalEntryToProfileJournalDb(uid, day, record, options, {
       status: 'unsafe',
       safety: safety.reason,
       unsafeReason: safety.reason
     });
+    if (turnCompactionEnabled && syncResult?.ok === false && options.throwOnError) {
+      throw new Error(syncResult.reason || 'profile_journal_db_write_failed');
+    }
     return false;
+  }
+
+  if (turnCompactionEnabled) {
+    const syncResult = syncJournalEntryToProfileJournalDb(uid, day, record, options, {
+      status: 'active',
+      safety: 'safe'
+    });
+    if (syncResult?.ok === false) {
+      if (options.throwOnError) throw new Error(syncResult.reason || 'profile_journal_db_write_failed');
+      return false;
+    }
+    return true;
   }
 
   ensureUserJournalDir(uid);
@@ -404,6 +423,25 @@ function buildUserSnapshot(userId) {
 }
 
 const {
+  compactPendingJournal,
+  compactPendingJournalTail,
+  maybeCompactJournalByTurnThreshold,
+  summarizeTurnBatch
+} = createDailyJournalTurnCompaction({
+  appendPerfEvent,
+  buildUserSnapshot,
+  config,
+  extractMessageContent,
+  getMemoryApiKey,
+  getMemoryChatCompletionsUrl,
+  getMemoryModelName,
+  postWithRetry,
+  scheduleDailyJournalEmbeddingBackfill,
+  strictClampText,
+  syncEpisodeMemory
+});
+
+const {
   runDailyJournalSummaries,
   shouldRunDailySummaryNow,
   summarizeJournalForDay,
@@ -413,6 +451,7 @@ const {
   atomicWriteText,
   buildUserSnapshot,
   config,
+  compactPendingJournalTail,
   extractMessageContent,
   favorites,
   formatDateInTz,
@@ -449,6 +488,9 @@ module.exports = {
   getDailyJournalRetrievalBundle,
   classifyJournalEntrySafety,
   maintainDailyJournalRollups,
+  compactPendingJournal,
+  compactPendingJournalTail,
+  maybeCompactJournalByTurnThreshold,
   runDailyJournalSummaries,
   shouldRunDailySummaryNow,
   writeDailyJournalSummary,
@@ -462,6 +504,8 @@ module.exports = {
   collectRecentEntrySidecars,
   maybeSegmentJournalByThreshold,
   _test: {
+    compactPendingJournal,
+    summarizeTurnBatch,
     syncEpisodeMemory,
     scheduleDailyJournalEmbeddingBackfill,
     getSummaryFilePath,

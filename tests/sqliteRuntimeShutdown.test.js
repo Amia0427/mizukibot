@@ -27,9 +27,20 @@ module.exports = (() => {
     const profileJournalDb = require('../utils/profileJournalDb');
     const worldbookDb = require('../utils/worldbookDb');
     const localPromptRecall = require('../utils/localPromptRecall');
+    const langgraphV2Store = require('../utils/langgraphV2Store');
     const profileDb = profileJournalDb.getDb({ force: true });
     const worldbookDbHandle = worldbookDb.getDb({ force: true });
     const promptDb = localPromptRecall.getDb({ force: true, createIfMissing: true });
+    const langgraphStoreFile = path.join(tempRoot, 'langgraph_v2.sqlite');
+    const langgraphStore = langgraphV2Store.createCheckpointStore({
+      storeFile: langgraphStoreFile
+    });
+    langgraphStore.saveCheckpoint('close-test', {
+      status: 'completed',
+      node: 'persist',
+      updatedAt: 1,
+      state: { value: 'close test value' }
+    });
     profileJournalDb.upsertProfileFact({
       id: 'close-test',
       userId: 'u-close',
@@ -45,6 +56,7 @@ module.exports = (() => {
 
     const { closeLoadedSqliteConnections } = require('../utils/sqliteRuntime');
     assert.deepStrictEqual(closeLoadedSqliteConnections().sort(), [
+      'langgraphV2Store',
       'localPromptRecall',
       'profileJournalDb',
       'worldbookDb'
@@ -52,10 +64,16 @@ module.exports = (() => {
     assert.strictEqual(profileDb.open, false);
     assert.strictEqual(worldbookDbHandle.open, false);
     assert.strictEqual(promptDb.open, false);
+    assert.throws(() => langgraphStore.loadCheckpoint('close-test'), /not open|closed/i);
 
     const reopened = profileJournalDb.getDb({ force: true });
     assert.notStrictEqual(reopened, profileDb);
     assert.strictEqual(reopened.prepare('SELECT value FROM profile_facts WHERE id = ?').pluck().get('close-test'), 'close test value');
+    const reopenedLanggraphStore = langgraphV2Store.createCheckpointStore({
+      storeFile: langgraphStoreFile
+    });
+    assert.strictEqual(reopenedLanggraphStore.loadCheckpoint('close-test').state.value, 'close test value');
+    reopenedLanggraphStore.close();
     profileJournalDb.closeDb();
     return true;
   } finally {

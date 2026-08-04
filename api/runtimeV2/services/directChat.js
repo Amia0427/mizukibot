@@ -1,4 +1,4 @@
-const { normalizePlanStep, normalizeArray, normalizeObject } = require('../contracts');
+const { normalizeToolStep, normalizeArray, normalizeObject } = require('../contracts');
 
 const DIRECT_CHAT_EXCLUDED_TOOL_NAMES = new Set([
   'assistant_task_breakdown'
@@ -12,18 +12,29 @@ function isExcludedDirectChatToolName(toolName = '') {
 }
 
 function parseToolCallArgs(toolCall = {}) {
+  return parseToolCallArgsResult(toolCall).args;
+}
+
+function parseToolCallArgsResult(toolCall = {}) {
+  const raw = String(toolCall?.function?.arguments || '{}');
   try {
-    return JSON.parse(String(toolCall?.function?.arguments || '{}'));
-  } catch (_) {
-    return {};
+    const args = JSON.parse(raw);
+    if (!args || typeof args !== 'object' || Array.isArray(args)) {
+      return { args: {}, error: 'tool arguments must be a JSON object' };
+    }
+    return { args, error: '' };
+  } catch (error) {
+    return { args: {}, error: `invalid tool arguments: ${String(error?.message || 'invalid JSON')}` };
   }
 }
 
 function buildDirectChatToolStep(toolCall = {}, attemptIndex = 1) {
-  const parsedArgs = parseToolCallArgs(toolCall);
+  const parsed = parseToolCallArgsResult(toolCall);
+  const parsedArgs = parsed.args;
   const toolName = String(toolCall?.function?.name || '').trim();
   return {
     parsedArgs,
+    parseError: parsed.error,
     toolName,
     step: {
       id: `direct_${toolName || 'tool'}_${attemptIndex}`,
@@ -97,72 +108,11 @@ function buildDirectChatExecutionBatches(items = [], stepSelector = (item) => it
   return batches;
 }
 
-function compileDirectChatToolCallsToPlan(toolCalls = [], existingPlan = null, options = {}) {
-  const append = Boolean(options.append);
-  const allowedTools = normalizeArray(options.allowedTools);
-  const existingSteps = append
-    ? normalizeArray(existingPlan?.steps).map((item) => ({ ...normalizeObject(item, {}) }))
-    : [];
-  const startIndex = existingSteps.length;
-  const toolCallItems = normalizeArray(toolCalls).map((toolCall, index) => {
-    const built = buildDirectChatToolStep(toolCall, index + 1);
-    const allowed = !isExcludedDirectChatToolName(built.toolName) && allowedTools.includes(built.toolName);
-    return {
-      toolCall,
-      parsedArgs: built.parsedArgs,
-      toolName: built.toolName,
-      step: normalizePlanStep({
-        id: `direct_${built.toolName || 'tool'}_${startIndex + index + 1}`,
-        action: built.toolName,
-        args: built.parsedArgs,
-        purpose: built.step.instruction,
-        successCriteria: built.step.successCriteria,
-        attempts: 0,
-        evidence: [],
-        blockingReason: '',
-        toolCallId: String(toolCall?.id || '').trim(),
-        ...(allowed ? {} : { preblocked: true, blockingReason: 'tool_not_allowed' })
-      }, 'direct_chat', index)
-    };
-  });
-  const batches = buildDirectChatExecutionBatches(toolCallItems, (item) => item.step);
-  const compiledSteps = [];
-  for (const batch of batches) {
-    const batchId = String(batch?.batchId || '').trim();
-    const batchIndex = Number.isFinite(Number(batch?.batchIndex)) ? Number(batch.batchIndex) : null;
-    for (const item of normalizeArray(batch?.items)) {
-      compiledSteps.push({
-        ...normalizeObject(item?.step, {}),
-        ...(batchId ? { batchId } : {}),
-        ...(batchIndex !== null ? { batchIndex } : {}),
-        directToolCallId: String(item?.toolCall?.id || '').trim()
-      });
-    }
-  }
-  const steps = existingSteps.concat(compiledSteps);
-
-  const planner = normalizeObject(existingPlan?.planner, {});
-  return {
-    status: steps.length > 0 ? 'planned' : 'idle',
-    currentStepId: steps.find((item) => String(item?.status || '').trim() !== 'completed')?.id || steps[0]?.id || '',
-    steps,
-    planner: {
-      ...planner,
-      directChatCompiledToolCalls: true
-    },
-    verification: null,
-    rounds: normalizeArray(existingPlan?.rounds),
-    finalPlan: null,
-    finalExecLogs: [],
-    lastRepairPlan: null
-  };
-}
-
 module.exports = {
   buildDirectChatExecutionBatches,
   buildDirectChatToolStep,
-  compileDirectChatToolCallsToPlan,
   isDirectChatRuntimeDependentStep,
   isExcludedDirectChatToolName,
-  parseToolCallArgs
+  parseToolCallArgs,
+  parseToolCallArgsResult
 };

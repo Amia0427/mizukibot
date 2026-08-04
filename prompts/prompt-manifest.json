@@ -607,13 +607,6 @@
         "include_in_system_prompt": false
       },
       {
-        "id": "runtime_direct_chat_planner",
-        "path": "runtime/direct-chat-planner.txt",
-        "required": false,
-        "kind": "runtime_template",
-        "include_in_system_prompt": false
-      },
-      {
         "id": "runtime_streaming_segmentation",
         "path": "runtime/streaming-segmentation.txt",
         "required": false,

@@ -35,7 +35,7 @@ function compactProjectionFreshness(freshness = {}, sessionKey = '') {
 }
 
 function buildGuardSummary(context = {}, route = {}, executionPlan = {}) {
-  const routeMeta = buildRouteMetaEnvelope(route, executionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+  const routeMeta = buildRouteMetaEnvelope(route, executionPlan, null, {
     groupId: context.groupId,
     chatType: context.chatType
   });
@@ -67,38 +67,7 @@ function buildGuardSummary(context = {}, route = {}, executionPlan = {}) {
   };
 }
 
-function buildPlannerSummary(plannerDecision = null, source = '') {
-  const decision = normalizeObject(plannerDecision, null);
-  if (!decision) {
-    return {
-      source,
-      mode: '',
-      taskShape: '',
-      decisionSource: '',
-      fallbackUsed: false,
-      reason: '',
-      allowedToolNames: [],
-      needsBackground: false,
-      backgroundResearchRequested: false
-    };
-  }
-  const decisionV2 = normalizeObject(decision.plannerDecisionV2);
-  const meta = normalizeObject(decisionV2.plannerMeta);
-  return {
-    source,
-    mode: normalizeText(decisionV2.mode || (decision.shouldUseTools ? 'tool_plan' : 'chat_only')),
-    taskShape: normalizeText(decision.taskShape || decisionV2.taskShape),
-    decisionSource: normalizeText(decision.decisionSource || meta.decisionSource),
-    fallbackUsed: decision.plannerFallbackUsed === true || meta.fallbackUsed === true,
-    reason: normalizeText(decision.reason || meta.reason),
-    allowedToolNames: normalizeArray(decision.allowedToolNames || decisionV2.allowedToolNames).map((item) => normalizeText(item)).filter(Boolean),
-    needsBackground: decision.needsBackground === true,
-    backgroundResearchRequested: decision.backgroundResearchRequested === true || meta.backgroundResearchRequested === true
-  };
-}
-
 module.exports = {
   buildGuardSummary,
-  buildPlannerSummary,
   compactProjectionFreshness
 };

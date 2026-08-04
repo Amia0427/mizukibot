@@ -5,9 +5,18 @@ const {
   normalizeArxivGetArgs,
   normalizeArxivLatestArgs,
   normalizeArxivSearchArgs,
-  normalizeWeatherArgs
+  normalizeEarthquakeArgs,
+  normalizeWeatherArgs,
+  normalizeWeatherCloudArgs
 } = require('./skillArgs');
 const { createDynamicMcpArgNormalizer } = require('./dynamicMcp');
+const {
+  POLICY_VERSION,
+  TOOL_POLICIES,
+  getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy
+} = require('./manifest');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 
@@ -20,63 +29,6 @@ const {
 } = createDynamicMcpArgNormalizer({
   getToolRegistry
 });
-
-const TOOL_POLICIES = {
-  notebook_reindex_folder: { risk: 'high', capability: 'fs_read' },
-  notebook_add_document: { risk: 'medium', capability: 'fs_write' },
-  notebook_list_docs: { risk: 'medium', capability: 'fs_read' },
-  notebook_search: { risk: 'medium', capability: 'fs_read' },
-  memory_cli: { risk: 'medium', capability: 'memory_read' },
-  get_context_stats: { risk: 'low', capability: 'general' },
-  self_improvement_recent: { risk: 'low', capability: 'memory_read' },
-  self_improvement_search: { risk: 'low', capability: 'memory_read' },
-  self_improvement_patterns: { risk: 'low', capability: 'memory_read' },
-  self_improvement_rules: { risk: 'low', capability: 'memory_read' },
-  self_improvement_guides: { risk: 'low', capability: 'memory_read' },
-  web_search: { risk: 'medium', capability: 'network' },
-  web_fetch: { risk: 'medium', capability: 'network' },
-  read_shared_link: { risk: 'medium', capability: 'network' },
-  get_current_time: { risk: 'low', capability: 'general' },
-  skill_weather: { risk: 'medium', capability: 'network' },
-  notebook_append_journal: { risk: 'medium', capability: 'fs_write' },
-  notebook_read_recent_journal: { risk: 'low', capability: 'fs_read' },
-  skill_summarize: { risk: 'medium', capability: 'network_or_file' },
-  skill_youtube_transcript: { risk: 'medium', capability: 'network' },
-  skill_web_search: { risk: 'medium', capability: 'network' },
-  skill_arxiv_search: { risk: 'medium', capability: 'network' },
-  skill_arxiv_get: { risk: 'medium', capability: 'network' },
-  skill_arxiv_latest: { risk: 'medium', capability: 'network' },
-  skill_brave_search: { risk: 'medium', capability: 'network' },
-  skill_tavily_search: { risk: 'medium', capability: 'network' },
-  skill_brave_extract: { risk: 'medium', capability: 'network' },
-  skill_tavily_extract: { risk: 'medium', capability: 'network' },
-  skill_stock_price_query: { risk: 'medium', capability: 'network' },
-  skill_ontology_graph: { risk: 'medium', capability: 'fs_write' },
-  qzone_draft: { risk: 'medium', capability: 'local_write' },
-  publish_qzone: { risk: 'medium', capability: 'local_write' },
-  schedule_group_message: { risk: 'medium', capability: 'local_write' },
-  create_qzone_auto_task: { risk: 'high', capability: 'local_write' },
-  create_scheduled_command: { risk: 'medium', capability: 'local_write' },
-  list_scheduled_tasks: { risk: 'medium', capability: 'local_read' },
-  cancel_scheduled_task: { risk: 'medium', capability: 'local_write' },
-  delete_scheduled_task: { risk: 'medium', capability: 'local_write' },
-  skill_image_generate_pro: { risk: 'high', capability: 'fs_write' },
-  minecraft_connect: { risk: 'high', capability: 'network' },
-  minecraft_disconnect: { risk: 'medium', capability: 'network' },
-  minecraft_status: { risk: 'low', capability: 'network' },
-  minecraft_chat: { risk: 'medium', capability: 'network' },
-  minecraft_move_to: { risk: 'medium', capability: 'network' },
-  minecraft_follow_player: { risk: 'medium', capability: 'network' },
-  minecraft_look_at: { risk: 'low', capability: 'network' },
-  minecraft_stop: { risk: 'low', capability: 'network' }
-};
-
-function getPolicy(toolName) {
-  if (String(toolName || '').startsWith('mcp_')) {
-    return { risk: 'medium', capability: 'network' };
-  }
-  return TOOL_POLICIES[toolName] || { risk: 'low', capability: 'general' };
-}
 
 function resolveNotebookUserId(args = {}, context = {}) {
   const requested = sanitizeUserId(args.userId ?? args.user_id);
@@ -177,6 +129,40 @@ function normalizeWebFetchArgs(args = {}) {
   return next;
 }
 
+function normalizeVisualRenderArgs(args = {}) {
+  const renderer = String(args.renderer || '').trim().toLowerCase();
+  const markup = String(args.markup || '').trim();
+  if (!new Set(['svg', 'html']).has(renderer)) throw new Error('render_qq_visual renderer must be svg or html');
+  if (!markup) throw new Error('render_qq_visual requires markup');
+  if (markup.length > 100000) throw new Error('render_qq_visual markup too large');
+
+  const normalized = { renderer, markup };
+  if (args.width !== undefined) {
+    const width = Number(args.width);
+    if (!Number.isInteger(width) || width < 320 || width > 1200) {
+      throw new Error('render_qq_visual width must be an integer between 320 and 1200');
+    }
+    normalized.width = width;
+  }
+  if (args.max_height !== undefined) {
+    const maxHeight = Number(args.max_height);
+    if (!Number.isInteger(maxHeight) || maxHeight < 200 || maxHeight > 2000) {
+      throw new Error('render_qq_visual max_height must be an integer between 200 and 2000');
+    }
+    normalized.max_height = maxHeight;
+  }
+  return normalized;
+}
+
+function sanitizeToolArgsForLog(toolName = '', args = {}) {
+  const sanitized = { ...(args && typeof args === 'object' ? args : {}) };
+  delete sanitized.__context;
+  if (String(toolName || '').trim() === 'render_qq_visual' && Object.prototype.hasOwnProperty.call(sanitized, 'markup')) {
+    sanitized.markup = `[redacted markup ${String(sanitized.markup || '').length} chars]`;
+  }
+  return sanitized;
+}
+
 function normalizeSharedLinkArgs(args = {}) {
   const { parseSharedLinkUrl } = require('../../api/skills_native/sharedLink/url');
   const parsed = parseSharedLinkUrl(args.url);
@@ -205,6 +191,47 @@ function normalizeContextStatsArgs(args = {}) {
     throw new Error('get_context_stats format must be text');
   }
   next.format = format;
+  return next;
+}
+
+function normalizeMaimaiArgs(toolName, args = {}) {
+  const next = {};
+  const query = String(args.query || '').trim();
+  if (!query) throw new Error(`${toolName} requires query`);
+  if (query.length > 300) throw new Error(`${toolName} query too long`);
+  next.query = query;
+  if (toolName === 'maimai_chart_search') {
+    for (const [key, alias] of [['level_min', 'level_min'], ['level_max', 'level_max']]) {
+      if (args[key] === undefined) continue;
+      const value = Number(args[key]);
+      if (!Number.isFinite(value) || value < 0 || value > 20) throw new Error(`${key} must be between 0 and 20`);
+      next[alias] = value;
+    }
+    if (args.chart_type !== undefined) {
+      const chartType = String(args.chart_type).trim().toUpperCase();
+      if (!new Set(['SD', 'DX']).has(chartType)) throw new Error('chart_type must be SD or DX');
+      next.chart_type = chartType;
+    }
+    if (args.difficulty !== undefined) next.difficulty = String(args.difficulty).trim().slice(0, 20);
+  }
+  if (toolName === 'maimai_chart_analyze') {
+    if (args.title !== undefined) next.title = String(args.title).trim().slice(0, 160);
+    if (args.chart_type !== undefined) {
+      const chartType = String(args.chart_type).trim().toUpperCase();
+      if (!new Set(['SD', 'DX']).has(chartType)) throw new Error('chart_type must be SD or DX');
+      next.chart_type = chartType;
+    }
+    if (args.difficulty !== undefined) next.difficulty = String(args.difficulty).trim().slice(0, 20);
+  }
+  if (toolName === 'maimai_player_analysis' && args.focus !== undefined) {
+    next.focus = String(args.focus).trim().slice(0, 80);
+  }
+  if (args.limit !== undefined) {
+    const limit = Number(args.limit);
+    const max = toolName === 'maimai_player_analysis' ? 50 : 10;
+    if (!Number.isInteger(limit) || limit < 1 || limit > max) throw new Error(`limit must be between 1 and ${max}`);
+    next.limit = limit;
+  }
   return next;
 }
 
@@ -351,6 +378,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
     return normalizeImageArgs(args);
   }
 
+  if (toolName === 'render_qq_visual') {
+    return normalizeVisualRenderArgs(args);
+  }
+
   if (toolName === 'memory_cli') {
     return normalizeMemoryCliArgs(args, context);
   }
@@ -380,6 +411,14 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
   }
 
   if (
+    toolName === 'maimai_chart_search'
+    || toolName === 'maimai_chart_analyze'
+    || toolName === 'maimai_player_analysis'
+  ) {
+    return normalizeMaimaiArgs(toolName, args);
+  }
+
+  if (
     toolName === 'self_improvement_recent'
     || toolName === 'self_improvement_search'
     || toolName === 'self_improvement_patterns'
@@ -406,6 +445,14 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
     return normalizeWeatherArgs(args);
   }
 
+  if (toolName === 'skill_earthquake_latest') {
+    return normalizeEarthquakeArgs(args);
+  }
+
+  if (toolName === 'skill_weather_cloud') {
+    return normalizeWeatherCloudArgs(args);
+  }
+
   if (toolName === 'skill_arxiv_search') {
     return normalizeArxivSearchArgs(args);
   }
@@ -427,8 +474,12 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
 module.exports = {
   NOTEBOOK_ROOT,
+  POLICY_VERSION,
   TOOL_POLICIES,
   getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy,
+  sanitizeToolArgsForLog,
   sanitizeUserId,
   enforceToolPolicy,
   mustStayInside,

@@ -1,6 +1,13 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const {
+  createLangGraphV2Database,
+  inspectLangGraphV2Database
+} = require('./langgraphV2StoreDatabase');
+
+const openStores = new Set();
 
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -151,71 +158,206 @@ function compactStateForCheckpoint(state = {}) {
   };
 }
 
-// V2 persistence intentionally stays on local JSON files under `data` so the
-// runtime can gain resume/event semantics without introducing a database.
-function createCheckpointStore(options = {}) {
-  const checkpointDir = String(options.checkpointDir || config.LANGGRAPH_V2_CHECKPOINT_DIR || '').trim();
-  const eventDir = String(options.eventDir || config.LANGGRAPH_V2_EVENT_DIR || '').trim();
-
-  ensureDir(checkpointDir);
-  ensureDir(eventDir);
-
-  function checkpointFile(threadId) {
-    return path.join(checkpointDir, `${sanitizeThreadId(threadId)}.json`);
+function createCheckpointStore(options = {}, dependencies = {}) {
+  const hasCustomLegacyPath = Boolean(options.checkpointDir || options.eventDir);
+  if (hasCustomLegacyPath && !options.storeFile) {
+    const error = new Error('storeFile is required when overriding LangGraph V2 legacy directories');
+    error.code = 'LANGGRAPH_V2_STORE_FILE_REQUIRED';
+    throw error;
   }
 
-  function eventFile(threadId) {
-    return path.join(eventDir, `${sanitizeThreadId(threadId)}.json`);
+  const storeFile = String(options.storeFile || config.LANGGRAPH_V2_STORE_FILE || '').trim();
+  const checkpointDir = String(options.checkpointDir || config.LANGGRAPH_V2_CHECKPOINT_DIR || '').trim();
+  const eventDir = String(options.eventDir || config.LANGGRAPH_V2_EVENT_DIR || '').trim();
+  const database = createLangGraphV2Database(storeFile, dependencies);
+
+  function legacyFile(dir, threadId) {
+    return path.join(dir, `${sanitizeThreadId(threadId)}.json`);
+  }
+
+  function readLegacy(filePath, threadId, sourceKind, isValid, fallback) {
+    let raw;
+    try {
+      raw = fs.readFileSync(filePath);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return fallback;
+      database.insertQuarantine({
+        sourceKind,
+        sourceKey: `${path.resolve(filePath)}:read:${error?.code || 'unknown'}`,
+        threadId,
+        rawPayload: null,
+        error: String(error?.message || error),
+        quarantinedAt: Date.now()
+      });
+      return fallback;
+    }
+
+    try {
+      const value = JSON.parse(raw.toString('utf8'));
+      if (!isValid(value)) throw new TypeError(`invalid ${sourceKind} payload shape`);
+      return value;
+    } catch (error) {
+      const digest = crypto.createHash('sha256').update(raw).digest('hex');
+      database.insertQuarantine({
+        sourceKind,
+        sourceKey: `${path.resolve(filePath)}:${digest}`,
+        threadId,
+        rawPayload: null,
+        error: String(error?.message || error),
+        quarantinedAt: Date.now()
+      });
+      return fallback;
+    }
   }
 
   function loadCheckpoint(threadId) {
-    return safeReadJson(checkpointFile(threadId), null);
+    const normalizedThreadId = sanitizeThreadId(threadId);
+    const row = database.getCheckpoint(normalizedThreadId);
+    if (row) {
+      try {
+        const state = JSON.parse(row.state_json);
+        if (!state || typeof state !== 'object' || Array.isArray(state)) {
+          throw new TypeError('checkpoint state_json must contain an object');
+        }
+        return {
+          threadId: row.thread_id,
+          status: row.status,
+          node: row.node,
+          updatedAt: row.updated_at,
+          state
+        };
+      } catch (error) {
+        database.isolateCheckpoint(row, String(error?.message || error), Date.now());
+        return null;
+      }
+    }
+    if (database.hasLegacyTombstone(normalizedThreadId)) return null;
+    return readLegacy(
+      legacyFile(checkpointDir, normalizedThreadId),
+      normalizedThreadId,
+      'legacy_checkpoint',
+      (value) => value && typeof value === 'object' && !Array.isArray(value),
+      null
+    );
   }
 
-  function saveCheckpoint(threadId, payload = {}) {
-    const normalized = {
+  function normalizeCheckpoint(threadId, payload = {}) {
+    return {
       threadId: sanitizeThreadId(threadId),
       status: String(payload.status || 'running').trim() || 'running',
       node: String(payload.node || '').trim(),
       updatedAt: Number.isFinite(Number(payload.updatedAt)) ? Number(payload.updatedAt) : Date.now(),
       state: sanitizeForJson(compactStateForCheckpoint(payload.state || {}))
     };
-    atomicWriteJson(checkpointFile(threadId), normalized);
+  }
+
+  function checkpointRow(checkpoint) {
+    return {
+      threadId: checkpoint.threadId,
+      status: checkpoint.status,
+      node: checkpoint.node,
+      updatedAt: checkpoint.updatedAt,
+      stateJson: JSON.stringify(checkpoint.state)
+    };
+  }
+
+  function normalizeEvents(threadId, events = []) {
+    const normalizedThreadId = sanitizeThreadId(threadId);
+    return (Array.isArray(events) ? events : [])
+      .map((item) => sanitizeForJson(item))
+      .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      .map((event) => ({
+        event,
+        row: {
+          threadId: normalizedThreadId,
+          timestamp: Number.isFinite(Number(event.ts)) ? Number(event.ts) : Date.now(),
+          eventType: String(event.type || '').trim(),
+          eventJson: JSON.stringify(event)
+        }
+      }));
+  }
+
+  function saveCheckpoint(threadId, payload = {}) {
+    const normalized = normalizeCheckpoint(threadId, payload);
+    database.saveCheckpoint(checkpointRow(normalized));
     return normalized;
   }
 
   function loadEvents(threadId) {
-    return safeReadJson(eventFile(threadId), []);
+    const normalizedThreadId = sanitizeThreadId(threadId);
+    const current = [];
+    for (const row of database.getEvents(normalizedThreadId)) {
+      try {
+        const event = JSON.parse(row.event_json);
+        if (!event || typeof event !== 'object' || Array.isArray(event)) {
+          throw new TypeError('event_json must contain an object');
+        }
+        current.push(event);
+      } catch (error) {
+        database.isolateEvent(row, String(error?.message || error), Date.now());
+      }
+    }
+    if (database.hasLegacyTombstone(normalizedThreadId)) return current;
+    const legacy = readLegacy(
+      legacyFile(eventDir, normalizedThreadId),
+      normalizedThreadId,
+      'legacy_events',
+      Array.isArray,
+      []
+    );
+    return legacy.concat(current);
   }
 
   function appendEvents(threadId, events = []) {
-    const nextEvents = Array.isArray(events)
-      ? events.map((item) => sanitizeForJson(item)).filter(Boolean)
-      : [];
-    if (nextEvents.length === 0) return [];
-    const existing = loadEvents(threadId);
-    const merged = Array.isArray(existing) ? existing.concat(nextEvents) : nextEvents;
-    atomicWriteJson(eventFile(threadId), merged);
-    return nextEvents;
+    const normalized = normalizeEvents(threadId, events);
+    if (normalized.length === 0) return [];
+    database.appendEvents(normalized.map((item) => item.row));
+    return normalized.map((item) => item.event);
+  }
+
+  function saveTransition(threadId, checkpoint = {}, events = []) {
+    const normalizedCheckpoint = normalizeCheckpoint(threadId, checkpoint);
+    const normalizedEvents = normalizeEvents(threadId, events);
+    database.saveTransition(
+      checkpointRow(normalizedCheckpoint),
+      normalizedEvents.map((item) => item.row)
+    );
+    return {
+      checkpoint: normalizedCheckpoint,
+      events: normalizedEvents.map((item) => item.event)
+    };
   }
 
   function clear(threadId) {
-    for (const filePath of [checkpointFile(threadId), eventFile(threadId)]) {
-      try {
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      } catch (_) {}
-    }
+    database.clear(sanitizeThreadId(threadId), Date.now());
   }
 
-  return {
+  let store;
+  store = {
     checkpointDir,
+    close() {
+      database.close();
+      openStores.delete(store);
+    },
+    clear,
     eventDir,
     loadCheckpoint,
-    saveCheckpoint,
     loadEvents,
     appendEvents,
-    clear
+    saveCheckpoint,
+    saveTransition,
+    storeFile
   };
+  openStores.add(store);
+  return store;
+}
+
+function closeDb() {
+  for (const store of [...openStores]) store.close();
+}
+
+function inspectCheckpointStore(storeFile, options = {}) {
+  return inspectLangGraphV2Database(storeFile, options);
 }
 
 // Thread ids must remain deterministic across retries and restarts so `auto`
@@ -253,7 +395,9 @@ module.exports = {
   atomicWriteJson,
   compactStateForCheckpoint,
   compactStableProfileForCheckpoint,
+  closeDb,
   createCheckpointStore,
+  inspectCheckpointStore,
   resolveThreadId,
   safeReadJson,
   sanitizeForJson,

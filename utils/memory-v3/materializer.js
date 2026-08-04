@@ -1,6 +1,6 @@
 const config = require('../../config');
 const { getBackgroundPressureDelayMs, appendPerfEvent } = require('../perfRuntime');
-const { getUserAffinityState } = require('../memory');
+const { getUserAffinityState } = require('../memoryAffinityState');
 const {
   ensureDir,
   atomicWriteJson,
@@ -26,6 +26,7 @@ const {
 const { collectEmbeddingBackfillNodes, enqueueMissingEmbeddings } = require('./embeddingIndex');
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
 const { isMemoryNotRecallable } = require('./recallFilter');
+const { shouldVectorizeMemoryNode } = require('./embeddingPolicy');
 const {
   applyNearDuplicateMerges,
   applyProfileLifecycle,
@@ -591,7 +592,8 @@ function materializeMemoryViews(options = {}) {
   atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, outputEpisodeProjection);
   writeJsonLines(config.MEMORY_V3_NODES_FILE, outputNodes);
   clearProjectionReadCache();
-  const embeddingNodes = incrementalMode ? resolvedNodes : collectEmbeddingBackfillNodes();
+  const embeddingNodes = (incrementalMode ? resolvedNodes : collectEmbeddingBackfillNodes())
+    .filter(shouldVectorizeMemoryNode);
   const embeddingIndex = enqueueMissingEmbeddings(embeddingNodes, {
     fullReconcile: !incrementalMode,
     schedule: options.scheduleEmbeddingBackfill !== false,

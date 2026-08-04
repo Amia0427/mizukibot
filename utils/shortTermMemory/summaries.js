@@ -1,4 +1,5 @@
 function createShortTermSummaryHelpers(deps = {}) {
+  const { wrapUntrustedPromptContent } = require('../promptSecurity');
   const {
     config,
     getRecentSessionContextSummaries,
@@ -113,12 +114,12 @@ function createShortTermSummaryHelpers(deps = {}) {
     if (!text) return null;
 
     return {
-      role: 'system',
-      content: [
+      role: 'assistant',
+      content: wrapUntrustedPromptContent([
         '[ShortTermSummary]',
         'Compressed summary of earlier conversation. Treat this as recent context, not long-term memory.',
         text
-      ].join('\n')
+      ].join('\n'))
     };
   }
 
@@ -194,7 +195,7 @@ function createShortTermSummaryHelpers(deps = {}) {
     ].join('\n');
 
     return {
-      sessionSummaryMessages: [{ role: 'system', content }],
+      sessionSummaryMessages: [{ role: 'assistant', content: wrapUntrustedPromptContent(content) }],
       recentSessionSummaries: filteredSessionSummaries
     };
   }

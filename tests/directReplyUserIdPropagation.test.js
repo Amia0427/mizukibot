@@ -1,131 +1,59 @@
 const assert = require('assert');
 
-const { createDirectReplyNode } = require('../api/runtimeV2/nodes/directReply');
+const { createAgentDecideNode } = require('../api/runtimeV2/nodes/agentDecide');
 
 module.exports = (async () => {
   let capturedContext = null;
-
-  const directReplyNode = createDirectReplyNode({
-    normalizeObject(value, fallback = {}) {
-      return value && typeof value === 'object' ? value : fallback;
-    },
-    normalizeArray(value) {
-      return Array.isArray(value) ? value : [];
-    },
-    createEvent(type, payload = {}) {
-      return { type, ...payload };
-    },
-    isReviewMode() {
-      return false;
-    },
-    shouldBypassHumanizerForPolicy() {
-      return false;
-    },
-    computeEffectiveAllowedTools() {
-      return [];
-    },
-    getToolPlannerExecutionPlan() {
-      return null;
-    },
-    isPlannerSingleAuthorityEnabled() {
-      return false;
-    },
-    getRouteToolPlanner() {
-      return null;
-    },
-    buildVisionMessageContent(text) {
-      return text;
-    },
-    stripMemoryCliInstruction(text) {
-      return String(text || '');
-    },
-    getMainConversationSystemMessages() {
-      return [];
-    },
-    buildDirectReplyMessages(_state, messageContent) {
-      return { messages: [{ role: 'user', content: String(messageContent || '') }] };
-    },
-    buildLiveMainConversationSnapshot() {
-      return null;
-    },
-    ensureOutputStream(output = {}, mode = 'direct') {
-      return { ...(output.stream || {}), mode, hadOutput: false, completed: false };
-    },
-    createMemoryCliTurnState(value) {
-      return value || {};
-    },
-    cloneDirectToolLoopState(value) {
-      return { ...(value || {}) };
-    },
-    normalizeMessageForToolLoop(message) {
-      return message;
-    },
-    async requestAssistantMessageImpl() {
-      throw new Error('tool loop should not run');
-    },
-    compileDirectChatToolCallsToPlan(toolCalls, plan) {
-      return { ...(plan || {}), steps: toolCalls };
-    },
-    saveAndEmit(state) {
-      return state;
-    },
-    mirrorStreamingFlags() {
-      return {};
-    },
-    isPureToolCallMarkup() {
-      return false;
-    },
-    async streamDirectReply() {
+  const agentDecide = createAgentDecideNode({
+    createEvent: (type, payload = {}) => ({ type, ...payload }),
+    saveAndEmit: (state) => state,
+    buildVisionMessageContent: (text) => text,
+    getMainConversationSystemMessages: () => [],
+    buildDirectReplyMessages: (_state, content) => ({
+      messages: [{ role: 'user', content }]
+    }),
+    isReviewMode: () => false,
+    streamDirectReply: async () => {
       throw new Error('stream path should not run');
     },
-    async requestReplyImpl(_messages, context) {
+    requestReplyImpl: async (_messages, context) => {
       capturedContext = context;
       return 'ok';
     },
-    classifyDirectReplyError() {
-      return 'generic_model_failure';
+    requestAssistantMessageImpl: async () => {
+      throw new Error('tool path should not run');
     },
-    summarizeDirectReplyError(error) {
-      return String(error?.message || error || '');
-    },
-    async attemptDirectMemoryRecovery() {
-      return null;
-    },
-    getControlledFailureReply() {
-      return 'controlled failure';
-    },
-    updateMemoryCliTurnStateAfterError(state = {}) {
-      return state;
-    },
-    classifyReplyFailure() {
-      return { type: 'none' };
-    }
+    ensureOutputStream: () => ({ mode: 'none' }),
+    classifyDirectReplyError: () => 'generic_model_failure',
+    summarizeDirectReplyError: (error) => String(error?.message || error || ''),
+    getControlledFailureReply: () => 'controlled failure'
   });
 
-  await directReplyNode({
+  const result = await agentDecide({
     request: {
       question: 'hello',
       userId: '1960901788',
       routePolicyKey: 'direct_chat/default',
-      routeMeta: { chatType: 'group', groupId: '1083095371' },
+      routeMeta: {
+        chatType: 'group',
+        groupId: '1083095371',
+        allowedTools: []
+      },
       topRouteType: 'direct_chat',
-      customPrompt: '',
-      allowTools: true,
       allowedTools: [],
-      modelConfig: {},
-      imageUrl: '',
-      streaming: false,
-      reviewMode: ''
+      streaming: false
     },
-    execution: { mode: 'chat', memoryCliTurn: null },
-    memory: { dynamicPrompt: '', affinity: null },
+    execution: { agent: {} },
+    memory: { dynamicPrompt: '' },
     output: { stream: {} },
-    plan: {}
+    messages: [],
+    events: []
   });
 
-  assert.ok(capturedContext, 'expected requestReplyImpl context to be captured');
+  assert.ok(capturedContext);
   assert.strictEqual(capturedContext.userId, '1960901788');
   assert.strictEqual(capturedContext.routeMeta.groupId, '1083095371');
+  assert.strictEqual(result.output.draftReply, 'ok');
 
   console.log('directReplyUserIdPropagation.test.js passed');
 })().catch((error) => {

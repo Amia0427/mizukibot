@@ -20,7 +20,7 @@ function resolveDispatchBranch(executionPlan = {}) {
   const finalBranch = resolveFinalBranch(executionPlan);
   if (finalBranch === 'unavailable') return 'unavailable';
   if (executionPlan.executor === 'background_direct') return 'background_direct';
-  if (executionPlan.allowTools === true) return 'tool_plan';
+  if (executionPlan.allowTools === true) return 'agent';
   if (executionPlan.executor === 'direct') return 'direct_reply';
   return normalizeText(executionPlan.executor) || finalBranch;
 }

@@ -1,6 +1,4 @@
 const config = require('../config');
-const { postWithRetry } = require('./httpClient');
-const { extractMessageContent, safeParseArgs } = require('./parser');
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { enforceToolPolicy } = require('../utils/toolPolicy');
 const {
@@ -79,6 +77,15 @@ const GLOBAL_TOOL_REGISTRY = [
     readOnly: true
   },
   {
+    toolName: 'skill_earthquake_latest',
+    executorName: 'skill_earthquake_latest',
+    schemaName: 'skill_earthquake_latest',
+    maxCallsPerTurn: 1,
+    allowedInRoutes: ['chat', 'lookup', 'transform', 'plan', 'act', 'admin', 'direct_chat'],
+    resultFormatter: formatPlainEvidence,
+    readOnly: true
+  },
+  {
     toolName: 'skill_arxiv_search',
     executorName: 'skill_arxiv_search',
     schemaName: 'skill_arxiv_search',
@@ -111,13 +118,6 @@ const GLOBAL_TOOL_NAME_SET = new Set(GLOBAL_TOOL_REGISTRY.map((item) => item.too
 const GLOBAL_TOOL_REGISTRY_BY_NAME = new Map(GLOBAL_TOOL_REGISTRY.map((item) => [item.toolName, item]));
 const DEFAULT_ALLOWED_TOP_ROUTE_TYPES = new Set(['chat', 'lookup', 'transform', 'plan', 'act', 'admin', 'direct_chat']);
 const BLOCKED_TOP_ROUTE_TYPES = new Set(['refuse', 'clarify', 'ignore']);
-
-function ensureChatCompletionsUrl(url) {
-  const u = String(url || '').replace(/\/+$/, '');
-  if (/\/chat\/completions$/i.test(u)) return u;
-  if (/\/v\d+$/i.test(u)) return `${u}/chat/completions`;
-  return u;
-}
 
 function nowIso() {
   return new Date().toISOString();
@@ -204,37 +204,6 @@ function stripGlobalToolsFromAllowedTools(allowedTools = []) {
   return normalizeToolNames(allowedTools).filter((toolName) => !GLOBAL_TOOL_NAME_SET.has(toolName));
 }
 
-function buildRoutePlannerPreflightDecision(executionPlan = null, context = {}) {
-  if (!executionPlan || typeof executionPlan !== 'object' || Array.isArray(executionPlan)) return null;
-  if (!Array.isArray(executionPlan.steps)) return null;
-  const validation = normalizeObject(context.routePlannerValidation, null);
-  if (validation && validation.ok === false) return null;
-  const allowedGlobalTools = normalizeToolNames(context.allowedGlobalTools);
-  const steps = normalizeArray(executionPlan.steps)
-    .map((step, index) => {
-      const normalized = normalizeObject(step, {});
-      const toolName = String(normalized.tool || normalized.action || normalized.toolName || '').trim();
-      return {
-        id: String(normalized.id || normalized.step || `route_planner_step_${index + 1}`).trim(),
-        tool: toolName,
-        args: normalizeObject(normalized.args ?? normalized.inputs, {}),
-        purpose: String(normalized.purpose || normalized.successCriteria || normalized.instruction || '').trim()
-      };
-    })
-    .filter((step) => GLOBAL_TOOL_NAME_SET.has(step.tool))
-    .filter((step) => allowedGlobalTools.includes(step.tool));
-
-  return {
-    mode: steps.length > 0 ? 'tool_plan' : 'chat_only',
-    steps,
-    allowedToolNames: allowedGlobalTools,
-    plannerMeta: {
-      decisionSource: 'route_planner_execution_plan',
-      reason: 'dispatch preflight reused the route planner executionPlan'
-    }
-  };
-}
-
 function formatArgsSummary(toolName, args = {}) {
   const normalizedArgs = normalizeObject(args, {});
   if (toolName === 'memory_cli') {
@@ -256,6 +225,9 @@ function formatArgsSummary(toolName, args = {}) {
   }
   if (toolName === 'skill_weather') {
     return `location=${JSON.stringify(String(normalizedArgs.location || '').trim())}`;
+  }
+  if (toolName === 'skill_earthquake_latest') {
+    return `scope=${JSON.stringify(String(normalizedArgs.scope || 'global').trim())}, time_window=${JSON.stringify(String(normalizedArgs.time_window || 'day').trim())}, min_magnitude=${Number(normalizedArgs.min_magnitude ?? 4.5)}, limit=${Number(normalizedArgs.limit ?? 5)}`;
   }
   if (toolName === 'skill_arxiv_search') {
     return `query=${JSON.stringify(String(normalizedArgs.query || '').trim())}`;
@@ -408,93 +380,12 @@ function shouldPreferWebFetchFollowup(question = '', results = []) {
   });
 }
 
-function buildPlannerSystemPrompt(allowedToolNames = [], options = {}) {
-  const followupOnly = Boolean(options.followupOnlyMemoryOpen);
-  const preferOpen = Boolean(options.preferMemoryOpen);
-  const toolList = normalizeToolNames(allowedToolNames).join(', ');
-  const extraRules = followupOnly
-    ? [
-        options.followupOnlyWebFetch
-          ? 'You are in follow-up mode after a successful web search.'
-          : 'You are in follow-up mode after a successful memory search.',
-        ...(options.followupOnlyWebFetch
-          ? [
-              'Only call web_fetch when reading the selected landing page is necessary.',
-              'Do not stop at search snippets when the user asked for detailed page content, docs, official guidance, or sourced detail.'
-            ]
-          : [
-              'Only call memory_cli when one mem open is necessary to inspect a specific hit.',
-              ...(preferOpen ? ['Prefer `mem open --ref "..."` when the top hit is recent, task, or journal continuity evidence.'] : [])
-            ]),
-        'If the search digest is already enough, do not call any tool.'
-      ]
-    : [
-        'Decide whether external evidence is needed before the main answer.',
-        'Only call tools when they materially improve accuracy.',
-        'Use a single planner round. Do not rely on follow-up planner calls.',
-        'Do not use more than one call per tool.',
-        'Do not stop at search snippets when the user wants detailed information, webpage content, official guidance, documentation detail, or source-backed explanation.',
-        'When detailed web content is needed, plan search and fetch together in this one round.'
-      ];
-
-  return [
-    'You are the global tool planner.',
-    'Use tools only from this allowlist:',
-    toolList || '(none)',
-    'Do not answer the user directly.',
-    'If no tool is needed, return no tool calls.',
-    ...extraRules
-  ].join('\n');
-}
-
-function buildPlannerMessages(question = '', context = {}) {
-  const messages = [];
-  const routePolicyKey = String(context.routePolicyKey || '').trim();
-  const topRouteType = String(context.topRouteType || '').trim();
-  const routePrompt = String(context.routePrompt || '').trim();
-  const followupEvidence = String(context.followupEvidence || '').trim();
-  const systemPrompt = buildPlannerSystemPrompt(context.allowedGlobalTools, {
-    followupOnlyMemoryOpen: Boolean(context.followupOnlyMemoryOpen),
-    preferMemoryOpen: Boolean(context.preferMemoryOpen),
-    followupOnlyWebFetch: Boolean(context.followupOnlyWebFetch)
-  });
-  messages.push({ role: 'system', content: systemPrompt });
-  if (routePolicyKey || topRouteType) {
-    messages.push({
-      role: 'system',
-      content: `Route context: policy=${routePolicyKey || 'unknown'}, topRouteType=${topRouteType || 'unknown'}`
-    });
-  }
-  if (routePrompt) {
-    messages.push({
-      role: 'system',
-      content: `[RoutePrompt]\n${routePrompt}`
-    });
-  }
-  if (followupEvidence) {
-    messages.push({
-      role: 'system',
-      content: `[ExistingToolEvidence]\n${followupEvidence}`
-    });
-  }
-  messages.push({
-    role: 'user',
-    content: String(question || '')
-  });
-  return messages;
-}
-
 function logGlobalTools(message, context = {}, extra = {}) {
-  const modelConfig = getGlobalToolModelConfig();
   console.log(`[global_tools] ${message}`, {
     userId: String(context.userId || '').trim(),
     topRouteType: String(context.topRouteType || '').trim(),
     routePolicyKey: String(context.routePolicyKey || '').trim(),
     allowedGlobalTools: normalizeToolNames(context.allowedGlobalTools),
-    toolModel: modelConfig.model,
-    toolModelSource: modelConfig.modelSource,
-    toolApiBaseUrlSource: modelConfig.apiBaseUrlSource,
-    toolApiBaseUrlSummary: modelConfig.apiBaseUrlSummary,
     toolCount: Number(extra.toolCount || 0),
     durationMs: Number(extra.durationMs || 0),
     ...extra
@@ -509,76 +400,6 @@ function buildToolContext(context = {}) {
     routeMeta: normalizeObject(context.routeMeta, {}),
     reviewMode: String(context.reviewMode || '').trim()
   };
-}
-
-async function runGlobalToolPlannerRound(messages = [], context = {}) {
-  const startedAt = Date.now();
-  const modelConfig = getGlobalToolModelConfig();
-  const tools = getGlobalToolSchemas(context.allowedGlobalTools);
-  const postWithRetryImpl = typeof context.postWithRetry === 'function'
-    ? context.postWithRetry
-    : postWithRetry;
-  if (!modelConfig.enabled || !modelConfig.apiBaseUrl || !modelConfig.apiKey || tools.length === 0) {
-    return {
-      ok: false,
-      toolCalls: [],
-      rawMessage: null,
-      durationMs: Date.now() - startedAt,
-      skippedReason: 'planner-disabled'
-    };
-  }
-
-  logGlobalTools(
-    context.followupOnlyMemoryOpen || context.followupOnlyWebFetch ? 'followup planner invoked' : 'planner invoked',
-    context,
-    { toolCount: 0, durationMs: 0 }
-  );
-
-  try {
-    const resp = await postWithRetryImpl(
-      ensureChatCompletionsUrl(modelConfig.apiBaseUrl),
-      {
-        model: modelConfig.model,
-        temperature: modelConfig.temperature,
-        top_p: modelConfig.topP,
-        messages,
-        tools,
-        tool_choice: 'auto',
-        max_tokens: 900,
-        stream: false
-      },
-      1,
-      modelConfig.apiKey
-    );
-    const rawMessage = extractMessageContent(resp);
-    const rawToolCalls = normalizeArray(rawMessage?.tool_calls);
-    const toolCalls = rawToolCalls
-      .map((item) => ({
-        id: String(item?.id || '').trim(),
-        toolName: String(item?.function?.name || '').trim(),
-        args: safeParseArgs(item?.function?.arguments)
-      }))
-      .filter((item) => GLOBAL_TOOL_NAME_SET.has(item.toolName))
-      .filter((item) => normalizeToolNames(context.allowedGlobalTools).includes(item.toolName));
-    const durationMs = Date.now() - startedAt;
-    if (toolCalls.length === 0) {
-      logGlobalTools('planner returned no tool calls', context, { toolCount: 0, durationMs });
-    }
-    return {
-      ok: true,
-      toolCalls,
-      rawMessage,
-      durationMs
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      toolCalls: [],
-      rawMessage: null,
-      durationMs: Date.now() - startedAt,
-      error
-    };
-  }
 }
 
 async function executeGlobalToolBatch(toolCalls = [], context = {}) {
@@ -730,144 +551,16 @@ function buildGlobalToolEvidenceMessage(results = [], context = {}) {
     : text;
 }
 
-async function maybeRunGlobalToolRuntime(question = '', context = {}) {
+async function maybeRunGlobalToolRuntime(_question = '', context = {}) {
   const policy = normalizeObject(context.policy, {});
-  const allowedGlobalTools = normalizeToolNames(policy.allowedGlobalTools || context.allowedGlobalTools);
-  const runtimeContext = {
-    ...context,
-    allowedGlobalTools
-  };
-  const modelConfig = getGlobalToolModelConfig();
-
-  if (!policy.allowGlobalTools) {
-    logGlobalTools('skipped', runtimeContext, { reason: 'policy-disabled' });
-    return {
-      skipped: true,
-      reason: 'policy-disabled',
-      results: [],
-      evidenceMessage: '',
-      memoryCliTurn: createMemoryCliTurnState(context.memoryCliTurn)
-    };
-  }
-
-  if (!modelConfig.enabled) {
-    logGlobalTools('skipped', runtimeContext, { reason: 'feature-disabled' });
-    return {
-      skipped: true,
-      reason: 'feature-disabled',
-      results: [],
-      evidenceMessage: '',
-      memoryCliTurn: createMemoryCliTurnState(context.memoryCliTurn)
-    };
-  }
-
-  let planned = null;
-  planned = buildRoutePlannerPreflightDecision(runtimeContext.routePlannerExecutionPlan, runtimeContext);
-  if (planned) {
-    logGlobalTools('route planner executionPlan reused', runtimeContext, {
-      toolCount: normalizeArray(planned.steps).length,
-      durationMs: 0
-    });
-  }
-
-  try {
-    if (!planned) {
-      const planningService = require('./runtimeV2/planning/service');
-      planned = await planningService.planRequestV2({
-        question,
-        cleanText: question,
-        topRouteType: runtimeContext.topRouteType || 'direct_chat',
-        routeMeta: runtimeContext.routeMeta || {},
-        route: {
-          question,
-          cleanText: question,
-          topRouteType: runtimeContext.topRouteType || 'direct_chat',
-          meta: runtimeContext.routeMeta || {},
-          intent: {
-            executionMode: 'staged',
-            needsMemory: /(?:记得|记不记得|之前|回忆|日志|记录|remember|recall|log|history)/i.test(String(question || ''))
-          },
-          facets: {
-            sourceScope: /(?:官网|官方|文档|来源|网页|official|docs?|documentation|source|page|article|latest|最新|news)/i.test(String(question || ''))
-              ? 'web'
-              : '',
-            freshness: /(?:latest|最新|news|新闻)/i.test(String(question || '')) ? 'latest' : '',
-            domain: /(?:时间|几点|日期|time|date)/i.test(String(question || '')) ? 'time' : ''
-          }
-        },
-        allowedTools: allowedGlobalTools,
-        toolCatalog: planningService.collectAvailableToolSummary({
-          question,
-          cleanText: question,
-          meta: runtimeContext.routeMeta || {},
-          facets: {},
-          intent: {}
-        }, {
-          userId: runtimeContext.userId,
-          allowedTools: allowedGlobalTools
-        }).toolCatalog,
-        contextSummary: runtimeContext.routePrompt || '',
-        contextEvidence: true,
-        constraints: {
-          preflightOnly: true,
-          allowBackground: false
-        }
-      });
-    }
-  } catch (error) {
-    logGlobalTools('skipped', runtimeContext, { reason: 'planner-failed', error: error?.message || String(error) });
-    return {
-      skipped: true,
-      reason: 'planner-failed',
-      results: [],
-      evidenceMessage: '',
-      memoryCliTurn: createMemoryCliTurnState(context.memoryCliTurn),
-      error
-    };
-  }
-
-  const preflightSteps = normalizeArray(planned?.steps)
-    .filter((step) => normalizeToolNames([step?.tool]).every((toolName) => allowedGlobalTools.includes(toolName)))
-    .map((step) => ({
-      toolName: String(step?.tool || '').trim(),
-      args: step?.args && typeof step.args === 'object' && !Array.isArray(step.args) ? step.args : {}
-    }));
-
-  if (preflightSteps.length === 0) {
-    logGlobalTools('planner returned no tool calls', runtimeContext, { toolCount: 0, durationMs: 0 });
-    return {
-      skipped: false,
-      reason: '',
-      results: [],
-      evidenceMessage: '',
-      memoryCliTurn: createMemoryCliTurnState(context.memoryCliTurn),
-      plannerDecisionV2: planned || null
-    };
-  }
-
-  const batch = await executeGlobalToolBatch(preflightSteps, {
-    ...runtimeContext,
-    question,
-    memoryCliTurn: context.memoryCliTurn
-  });
-  const results = [...batch.results];
-  const nextMemoryCliTurn = createMemoryCliTurnState(batch.memoryCliTurn);
-
-  const evidenceMessage = buildGlobalToolEvidenceMessage(results, runtimeContext);
-  if (evidenceMessage) {
-    logGlobalTools('evidence injected', runtimeContext, {
-      toolCount: results.length,
-      durationMs: 0
-    });
-  }
-
+  const reason = policy.allowGlobalTools ? 'agent-owned' : 'policy-disabled';
+  logGlobalTools('skipped', context, { reason });
   return {
-    skipped: false,
-    reason: '',
-    results,
-    evidenceMessage,
-    memoryCliTurn: nextMemoryCliTurn,
-    plannerDecisionV2: planned || null
+    skipped: true,
+    reason,
+    results: [],
+    evidenceMessage: '',
+    memoryCliTurn: createMemoryCliTurnState(context.memoryCliTurn)
   };
 }
 
@@ -882,6 +575,5 @@ module.exports = {
   maybeRunGlobalToolRuntime,
   buildGlobalToolEvidenceMessage,
   executeGlobalToolBatch,
-  runGlobalToolPlannerRound,
   stripGlobalToolsFromAllowedTools
 };

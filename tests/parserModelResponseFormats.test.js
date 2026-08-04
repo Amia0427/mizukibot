@@ -118,6 +118,27 @@ module.exports = (() => {
   assert.strictEqual(openAiReasoningMessage.content, 'visible answer');
   assert.strictEqual(openAiReasoningMessage.reasoningText, 'explicit reasoning');
 
+  const openAiToolCall = extractMessageContent({
+    data: {
+      choices: [{
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'call_openai_1',
+            type: 'function',
+            function: { name: 'lookup', arguments: '{"q":"openai"}' }
+          }]
+        }
+      }]
+    }
+  });
+  assert.deepStrictEqual(openAiToolCall.tool_calls, [{
+    id: 'call_openai_1',
+    type: 'function',
+    function: { name: 'lookup', arguments: '{"q":"openai"}' }
+  }]);
+
   const anthropicThinkingMessage = extractMessageContent({
     data: {
       type: 'message',
@@ -133,6 +154,24 @@ module.exports = (() => {
     content: 'anthropic visible',
     reasoningText: 'anthropic thinking'
   });
+  const anthropicToolCall = extractMessageContent({
+    data: {
+      type: 'message',
+      role: 'assistant',
+      content: [{
+        type: 'tool_use',
+        id: 'toolu_anthropic_1',
+        name: 'lookup',
+        input: { q: 'anthropic' }
+      }]
+    }
+  });
+  assert.strictEqual(anthropicToolCall.content, '');
+  assert.deepStrictEqual(anthropicToolCall.tool_calls, [{
+    id: 'toolu_anthropic_1',
+    type: 'function',
+    function: { name: 'lookup', arguments: '{"q":"anthropic"}' }
+  }]);
   const geminiText = extractMessageContent({
     data: {
       candidates: [

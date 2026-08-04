@@ -9,7 +9,6 @@ const {
 } = require('../src/model/http/gemini-native.chunk');
 const {
   buildMainStableSystemBlocks,
-  buildPlannerStageSystemPrompt,
   buildReviewStageSystemPrompt
 } = require('../utils/stagePromptContracts');
 const { buildPromptSnapshot } = require('../utils/promptCompiler');
@@ -250,16 +249,14 @@ module.exports = (async () => {
           addressee: { senderName: 'A', userId: '1', kind: 'user', confidence: 0.9 },
           quote: { senderName: 'B', text: '刚才那句不是这个意思' }
         },
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'directed_context', decision: 'skip', confidence: 0.8, priority: 10, reason: 'planner miss' }
-            ],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'directed_context', decision: 'skip', confidence: 0.8, priority: 10, reason: 'dynamic plan miss' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }
@@ -294,19 +291,17 @@ module.exports = (async () => {
         summary: '正在实现 planner 主导的动态上下文选择。'
       },
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: ['retrieved_memory_lite', 'long_term_profile', 'impression', 'summary'],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'include', confidence: 0.9, priority: 20, reason: 'specific prior plan' },
-              { blockId: 'long_term_profile', decision: 'include', confidence: 0.8, priority: 30, reason: 'stable preference matters' },
-              { blockId: 'impression', decision: 'include', confidence: 0.8, priority: 40, reason: 'parallel work caution matters' },
-              { blockId: 'summary', decision: 'include', confidence: 0.8, priority: 50, reason: 'continuity summary matters' }
-            ],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: ['retrieved_memory_lite', 'long_term_profile', 'impression', 'summary'],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'include', confidence: 0.9, priority: 20, reason: 'specific prior plan' },
+            { blockId: 'long_term_profile', decision: 'include', confidence: 0.8, priority: 30, reason: 'stable preference matters' },
+            { blockId: 'impression', decision: 'include', confidence: 0.8, priority: 40, reason: 'parallel work caution matters' },
+            { blockId: 'summary', decision: 'include', confidence: 0.8, priority: 50, reason: 'continuity summary matters' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }
@@ -331,19 +326,17 @@ module.exports = (async () => {
         summary: ''
       },
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: ['retrieved_memory_lite', 'long_term_profile', 'impression', 'summary'],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'include', confidence: 0.9, priority: 20, reason: 'should be rejected empty' },
-              { blockId: 'long_term_profile', decision: 'include', confidence: 0.8, priority: 30, reason: 'should be rejected empty' },
-              { blockId: 'impression', decision: 'include', confidence: 0.8, priority: 40, reason: 'should be rejected empty' },
-              { blockId: 'summary', decision: 'include', confidence: 0.8, priority: 50, reason: 'should be rejected empty' }
-            ],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: ['retrieved_memory_lite', 'long_term_profile', 'impression', 'summary'],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'include', confidence: 0.9, priority: 20, reason: 'should be rejected empty' },
+            { blockId: 'long_term_profile', decision: 'include', confidence: 0.8, priority: 30, reason: 'should be rejected empty' },
+            { blockId: 'impression', decision: 'include', confidence: 0.8, priority: 40, reason: 'should be rejected empty' },
+            { blockId: 'summary', decision: 'include', confidence: 0.8, priority: 50, reason: 'should be rejected empty' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }
@@ -390,18 +383,16 @@ module.exports = (async () => {
         summary: 'irrelevant summary should not load'
       },
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.9, priority: 20, reason: 'self-contained' },
-              { blockId: 'long_term_profile', decision: 'skip', confidence: 0.9, priority: 30, reason: 'self-contained' },
-              { blockId: 'summary', decision: 'skip', confidence: 0.9, priority: 40, reason: 'self-contained' }
-            ],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.9, priority: 20, reason: 'self-contained' },
+            { blockId: 'long_term_profile', decision: 'skip', confidence: 0.9, priority: 30, reason: 'self-contained' },
+            { blockId: 'summary', decision: 'skip', confidence: 0.9, priority: 40, reason: 'self-contained' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }
@@ -430,20 +421,18 @@ module.exports = (async () => {
         promptSummaryText: ''
       },
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'unrelated noisy memory' },
-              { blockId: 'memory_recall_policy', decision: 'skip', confidence: 0.98, priority: 21, reason: 'no usable evidence' },
-              { blockId: 'daily_journal', decision: 'skip', confidence: 0.98, priority: 22, reason: 'not a recall turn' }
-            ],
-            rationaleByBlock: {},
-            source: 'planner',
-            _source: 'planner'
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'unrelated noisy memory' },
+            { blockId: 'memory_recall_policy', decision: 'skip', confidence: 0.98, priority: 21, reason: 'no usable evidence' },
+            { blockId: 'daily_journal', decision: 'skip', confidence: 0.98, priority: 22, reason: 'not a recall turn' }
+          ],
+          rationaleByBlock: {},
+          source: 'dynamic_context',
+          _source: 'dynamic_context'
         }
       }
     }
@@ -481,18 +470,16 @@ module.exports = (async () => {
         }
       },
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'new self-contained topic' }
-            ],
-            rationaleByBlock: {},
-            source: 'planner',
-            _source: 'planner'
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'new self-contained topic' }
+          ],
+          rationaleByBlock: {},
+          source: 'dynamic_context',
+          _source: 'dynamic_context'
         }
       }
     }
@@ -516,18 +503,16 @@ module.exports = (async () => {
         memoryBudgetMs: 5000
       },
       routeMeta: {
-        directChatPlanner: {
-          maxActiveModules: 1,
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: ['care_light', 'deep_pain'],
-            blockDecisions: [
-              { moduleId: 'care_light', decision: 'include', confidence: 0.9, priority: 20, reason: 'light care' },
-              { moduleId: 'deep_pain', decision: 'include', confidence: 0.8, priority: 30, reason: 'conflicting heavy tone' }
-            ],
-            rationaleByBlock: {}
-          }
+        maxActiveModules: 1,
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: ['care_light', 'deep_pain'],
+          blockDecisions: [
+            { moduleId: 'care_light', decision: 'include', confidence: 0.9, priority: 20, reason: 'light care' },
+            { moduleId: 'deep_pain', decision: 'include', confidence: 0.8, priority: 30, reason: 'conflicting heavy tone' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }
@@ -539,14 +524,10 @@ module.exports = (async () => {
   }
 
   const reviewPrompt = buildReviewStageSystemPrompt();
-  const plannerPrompt = buildPlannerStageSystemPrompt([{ name: 'web_search', description: 'search web' }]);
 
   assert.ok(!reviewPrompt.includes('你是晓山瑞希风格的聊天伙伴'));
   assert.ok(!reviewPrompt.includes('[RoleplayInnerProtocol]'));
-  assert.ok(!plannerPrompt.includes('你是晓山瑞希风格的聊天伙伴'));
-  assert.ok(!plannerPrompt.includes('[RoleplayInnerProtocol]'));
   assert.ok(reviewPrompt.includes('Do not add new facts'));
-  assert.ok(plannerPrompt.includes('task judgment'));
 
   const branchPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 20 },
@@ -560,9 +541,7 @@ module.exports = (async () => {
         directedContext: {
           addressee: { senderName: 'Yuki', userId: 'mafuyu', kind: 'user', confidence: 0.96 }
         },
-        directChatPlanner: {
-          personaModules: ['mafuyu_branch', 'care_light']
-        }
+        personaModules: ['mafuyu_branch', 'care_light']
       }
     }
   );
@@ -583,9 +562,7 @@ module.exports = (async () => {
       routePolicyKey: 'chat/default',
       topRouteType: 'direct_chat',
       routeMeta: {
-        directChatPlanner: {
-          personaModules: ['cute_obsession', 'scene_shopping_walk']
-        }
+        personaModules: ['cute_obsession', 'scene_shopping_walk']
       }
     }
   );
@@ -607,9 +584,7 @@ module.exports = (async () => {
       topRouteType: 'direct_chat',
       chatType: 'private',
       routeMeta: {
-        directChatPlanner: {
-          personaModules: ['scene_private_chat', 'care_light']
-        }
+        personaModules: ['scene_private_chat', 'care_light']
       }
     }
   );
@@ -661,9 +636,7 @@ module.exports = (async () => {
       routePolicyKey: 'chat/default',
       topRouteType: 'direct_chat',
       routeMeta: {
-        directChatPlanner: {
-          personaModules: ['roleplay_friend_bit']
-        }
+        personaModules: ['roleplay_friend_bit']
       }
     }
   );
@@ -684,19 +657,17 @@ module.exports = (async () => {
       topRouteType: 'direct_chat',
       sessionKey: 'worldbook_future_two_tracks_prompt_test',
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: ['continuity_state'],
-            personaModules: ['wb_mizuki_future_two_tracks'],
-            blockDecisions: [
-              { blockId: 'continuity_state', decision: 'include', confidence: 0.9, priority: 20, reason: 'future two tracks continuity' },
-              { moduleId: 'wb_mizuki_future_two_tracks', decision: 'include', confidence: 0.95, priority: 40, reason: 'strong worldbook future two tracks request' }
-            ],
-            rationaleByBlock: {
-              continuity_state: 'future two tracks continuity',
-              wb_mizuki_future_two_tracks: 'strong worldbook future two tracks request'
-            }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: ['continuity_state'],
+          personaModules: ['wb_mizuki_future_two_tracks'],
+          blockDecisions: [
+            { blockId: 'continuity_state', decision: 'include', confidence: 0.9, priority: 20, reason: 'future two tracks continuity' },
+            { moduleId: 'wb_mizuki_future_two_tracks', decision: 'include', confidence: 0.95, priority: 40, reason: 'strong worldbook future two tracks request' }
+          ],
+          rationaleByBlock: {
+            continuity_state: 'future two tracks continuity',
+            wb_mizuki_future_two_tracks: 'strong worldbook future two tracks request'
           }
         }
       },

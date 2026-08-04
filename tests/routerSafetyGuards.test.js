@@ -104,7 +104,7 @@ const sanitizedRoute = sanitizeAiRoute({
 assert.strictEqual(sanitizedRoute.topRouteType, 'direct_chat');
 assert.strictEqual(sanitizedRoute.meta.toolIntent, 'none');
 assert.strictEqual(sanitizedRoute.meta.responseIntent, 'answer');
-assert.strictEqual(sanitizedRoute.meta.allowedTools, undefined);
+assert.deepStrictEqual(sanitizedRoute.meta.allowedTools, []);
 
 const explicitActFallbackRoute = detectIntent({
   rawText: '帮我执行命令重启服务',

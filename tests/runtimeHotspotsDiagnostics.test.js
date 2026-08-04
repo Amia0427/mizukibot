@@ -96,22 +96,22 @@ module.exports = (() => {
     appendJsonLine(perfFile, {
       recordedAt: '2026-05-03T00:17:00.000Z',
       category: 'reply_event',
-      type: 'planner_done',
-      module: 'planner'
+      type: 'agent_decision',
+      module: 'agent_decide'
     });
     appendJsonLine(perfFile, {
       recordedAt: '2026-05-03T00:18:00.000Z',
       category: 'reply_event',
-      type: 'planner_done',
-      module: 'planner'
+      type: 'agent_decision',
+      module: 'agent_decide'
     });
 
     const { appendPerfEvent } = require('../utils/perfRuntime');
     appendPerfEvent({
       recordedAt: '2026-05-03T00:19:00.000Z',
       category: 'reply_event',
-      type: 'planner_done',
-      module: 'planner'
+      type: 'agent_decision',
+      module: 'agent_decide'
     });
 
     const { buildRuntimeHotspotsDiagnostic, buildRuntimeHotspotsText } = require('../utils/runtimeHotspotsDiagnostics');
@@ -169,7 +169,7 @@ module.exports = (() => {
     assert.strictEqual(report.summary.workerThreads.timeout, 1);
     assert.strictEqual(report.summary.subagents, undefined);
     assert.strictEqual(report.processes.subagents, undefined);
-    assert.ok(report.summary.topModules.some((item) => item.key === 'planner' && item.count === 3));
+    assert.ok(report.summary.topModules.some((item) => item.key === 'agent_decide' && item.count === 3));
     assert.ok(report.inputs.resourceSnapshotFile.includesCurrentProcessSample);
 
     const signalCodes = report.signals.map((item) => item.code);

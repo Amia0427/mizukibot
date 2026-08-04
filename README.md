@@ -1,8 +1,187 @@
 # MizukiBot
 
+## 舞萌误召回收敛 2026-08-04 13:05 +08:00
+
+- 功能提交 `c82ad3d` 将舞萌工具授权收紧为“确认舞萌领域 + 确认需要谱面或成绩数据”双门禁；普通的写作手法、UI 交互、键盘滑键、蓝牙掉音、数学定数及舞萌闲聊均不再暴露舞萌工具。
+- 路由仅判断当前消息，并在执行工具前使用同一分类器复核；工具不匹配、标题缺失或模型补造标题会在读取 SQLite、LanceDB 或成绩库前阻断。单谱歧义只返回候选并要求补充曲名、SD/DX 或难度。
+- 32 条普通聊天负例、9 条舞萌闲聊负例和 13 条正例全部命中预期；真实 generation 2 只读搜索与 `PANDORA PARADOXXX` 标准白谱分析通过，5 条普通聊天探针的舞萌工具授权均为 0。15 项舞萌回归、812 文件 lint、typecheck、Prompt、两种密钥扫描、diff check 和 166.9 秒完整测试全部通过。
+- 使用方式见[舞萌谱面查询与成绩分析使用说明](docs/maimai-user-guide.md)，实现与验收见[舞萌谱面 SQL/RAG 开发文档](docs/maimai-sql-rag.md)；未修改同步、映射、特征、向量候选求交和个人弱项算法，未推送远端。
+
+## Memory V3 部署代码合并 2026-08-04 12:42 +08:00
+
+- 合并提交 `7c23451` 以部署提交 `0b6d779` 和收敛提交 `eef03db` 为双父，完整保留部署分支领先的 ReAct、舞萌及文档提交；`.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js` 未纳入提交。
+- 合并后 21 项 Memory/ReAct/舞萌交叉回归、172.1 秒全量测试、lint、typecheck、Prompt、全仓密钥与 diff 门禁通过；coverage 基线为行 72.55%、函数 80.49%、分支 61.68%，四个 scope 全部通过。coverage 测试阶段的一次外部 DNS 失败单独复跑后恢复通过。
+- 部署源码已更新，但未重启主进程或 worker，也未执行真实 apply、修改 `.env`、归档旧文件或重建 LanceDB；默认仍为 `legacy_compat`，未推送远端。
+
+## 舞萌用户文档 2026-08-04 12:24 +08:00
+
+- [舞萌谱面查询与成绩分析使用说明](docs/maimai-user-guide.md)：面向普通用户，包含自然语言查询、单谱分析、成绩绑定、个人弱项、隐私边界和常见问题。
+- [舞萌功能更新公告](docs/maimai-update-announcement-2026-08-04.md)：包含可直接发布的 QQ 群公告短版和更新日志长版。
+- 文档提交 `f3220cf` 已完成，当前分支未推送远端。
+
+## Memory V3 与 LanceDB 存储收敛实现 2026-08-04 12:05 +08:00
+
+- 提交 `68a5903` 建立 `writeMemoryBatch/queryMemory/applyStrictArchiveRun/restoreArchiveRun` 仓储边界与共享 embedding；提交 `62fac86` 将记忆提取、enrich、群/任务记忆、短期重启召回、Memory CLI、Prompt 上下文和 style/jargon 消费者迁到该边界。
+- 提交 `b2ffed0` 增加 `legacy_compat`、`v3_shadow`、`v3_only` 三种存储模式，以及可校验源文件哈希、稳定迁移身份、`strict-v1` 可逆归档、LanceDB reconcile、旧文件 manifest 归档和显式回滚的收敛工具；`applying` 中断后必须执行 `--rollback-run`。
+- 提交 `1a59274` 修正 auto-gold 群作用域负例；提交 `49ac6dd` 让已位于 rerank tail 的目标日期日记仍获得一次且仅一次硬优先级，消除 LanceDB 日期召回退化。
+- 真实 dry-run `converge-20260804T040343` 已通过：plan hash `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591`，源文件 hash `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`，迁移候选 24,411、`strict-v1` 候选 2,535、预计 LanceDB 行 26,676、预计重建 28.75 秒。
+- 真实门禁：baseline/candidate Recall@8 与 MRR@8 均为 0.925，scope/lifecycle/forbidden 均为 0；LanceDB missing/orphan/stale 均为 0，projection freshness 正常，`storage-overlap recommendedAction=none`。失败计划 `converge-20260804T034114`、`converge-20260804T034857` 已被召回门禁阻断，不得 apply。
+- 自动验收：`1a59274` 后完整测试 138.4 秒通过，覆盖率门禁为行 72.28%、函数 80.04%、分支 61.83%；`49ac6dd` 后五项 Memory/日期回归、lint、typecheck 通过。最新全量复跑中的 Memory 测试通过，但被既有外网用例的 Web Search/YouTube DNS 与超时阻断，未记为全量通过。
+- 部署代码已合并，默认模式仍为 `legacy_compat`；未切换 `.env`、未导入历史、未归档旧文件、未停启主进程/worker、未修改 LanceDB，也未推送远端。实际归档 manifest hash 与维护窗口耗时仍为 `N/A`。
+
+## 舞萌谱面 SQL/RAG 2026-08-04 11:00 +08:00
+
+- 功能提交 `5a53eb3` 新增独立舞萌同步 Worker、SQLite/LanceDB 版本化谱面库、三个只读查询工具、QQ 成绩绑定/快照/弱项推断与 `/mai` 命令；检索证据进入现有 ReAct 主回复链路，不建立平行回复系统。
+- 真实数据 generation 2 已激活：1362 首歌、5432 张谱面、解析率 100%、确认映射 3792、隔离 1141、映射覆盖率 76.87%、文档/向量各 15168；`PANDORA PARADOXXX` 白谱命中 `df:834:SD:4`，定数 15.0、物量 1342、映射置信度 1.0。
+- 13 项舞萌回归、lint、typecheck、Prompt、暂存密钥扫描和 diff check 通过；完整测试退出 1，独立复现为本机 ACL 测试的空 `Path` 参数，与舞萌用例无关。Node `v24.14.1` 超出项目声明的 `>=20 <21`，且未提供真实用户 Token，因此不宣称完成真实个人成绩接口验收。
+- 配置、数据边界、运维命令和完整验收见 [舞萌谱面 SQL/RAG 开发文档](docs/maimai-sql-rag.md)。当前分支未推送远端。
+
+## 运行维护 2026-08-04 +08:00
+
+- 实现提交 `87cf7d4` 已移除 direct-chat Planner 与预生成计划链，消息处理统一进入 LangGraph 原生 `agent_decide -> execute_tools` 循环；Router `allowedTools` 成为不可扩权的授权上界，工具轮次、调用总数、重复调用和副作用 checkpoint 由同一 Agent 状态管理。
+- `researchTaskQueue/researchSubagent` 代码保留但已断开生产入口；普通聊天、前台工具请求、后台消息和任务续写共用同一工具决策与限制语义。
+- 验收：ReAct、checkpoint、Router、共享链接、卡片、记忆、Web 搜索及 OpenAI/Anthropic/Gemini 协议定向测试退出 0；`npm run lint`、`npm run typecheck`、`npm run check:agent:static` 均退出 0；完整 `npm test` 用时 158.5 秒并退出 0。当前分支未推送远端。
+
+## 运行维护 2026-08-02 17:21 +08:00
+
+- LangGraph V2 新写入端已切换到 `DATA_DIR/langgraph_v2.sqlite`；checkpoint 与关联 event 通过同一 SQLite 事务提交，副作用前后边界也使用原子 transition。旧 `langgraph_v2_checkpoints/` 与 `langgraph_v2_events/` 永久只读，按 thread 惰性兼容读取，`clear()` 通过永久 tombstone 防止旧 JSON 复活。
+- SQLite 逻辑坏行会原子移入 quarantine，物理损坏 fail closed；`npm run diag:runtime -- --json` 已报告 `healthy`、`quick_check=ok`、0 checkpoint、0 event、0 quarantine，并保留 legacy 文件规模与 stale 字段。
+- 实现提交：`0a45d71`、`e2664a1`、`21e3080`、`3cfd85b`、`cc5468d`、`654170a`；测试生命周期收口提交：`662914a`。Node 20.20.2 与 Node 24.14.1 聚焦回归通过，完整测试 574/574，覆盖率 Statements/Lines `72.19%`、Branches `62.18%`、Functions `80.00%`，全部基线通过。
+- Legacy 验收保持 120/6209 文件、137,990,244/80,529,200 bytes、0 坏 JSON，聚合 SHA-256 分别为 `03a2b843ee304ddcf7644f7e112d8af1eeb8e9a60e2a8f2de78cde9c311a3b19`、`b32db4452e9c3a4eb75f1884165c77ac06b8c7f6311601fba996667455869686`；`AGENT.md` 与 `prompts/admin.txt` 保护 hash 未变化，未推送远端。
+
+## Harness 评估 2026-08-02 15:24 +08:00
+
+- 实现提交 `34ec277` 将评估契约升级为 `harness_eval_manifest_v2`，统一声明 5 个 suite、`ci` / `nightly:verify` profile、runner、case schema、data policy、指标与阈值；顶层 runner 使用隔离子进程并生成严格 JSON 报告。
+- Node 20.20.2 实测 `ci` profile 通过 3 个确定性 suite，共覆盖 30 条 routing、2 条 synthetic auto-gold 与 22 条 post-reply case；`nightly:verify` 在缺少两个外部结果文件时按预期退出 1，并同时记录两个 `external_input_missing`。
+- Node 20 全量测试 116 秒、覆盖率 145.6 秒退出 0；覆盖率为 overall `72.10/78.51/62.16`、web `79.84/87.50/80.59`、Runtime V2 `77.69/63.29/63.97`、stable boundaries `86.00/80.38/72.74`（行/函数/分支）。提交 `461a289` 将 V8 Function 基线校准到项目唯一运行边界 Node 20，其他指标阈值未降低。
+- 外部 nightly 只验证 producer 自报元数据、时效、覆盖量和阈值，不执行真实模型、生成脱敏回放或认证 producer 身份；当前分支未推送。
+
+## 环境数据查询 2026-08-02 14:17 +08:00
+
+- 地震查询接入 USGS FDSN GeoJSON：发送“最新地震”默认返回全球最近 24 小时 M4.5+ 的 5 条事件；“中国最近一周 4 级以上地震，给我 3 条”可指定中国范围、时间窗、最低震级和条数。
+- 气象云图接入 JMA Himawari：发送“最新卫星云图”“可见光云图”或“水汽云图”会获取亚太全圆盘最新时次的红外、可见光或水汽 JPEG，并直接发送到当前 QQ 会话；NapCat 发送失败时回复保留 JMA 原图链接。
+- 两项能力均为按需实时查询，不新增订阅、轮询或定时推送；USGS 与 JMA 异常会沿现有工具错误链路明确降级。
+
+## 运行维护 2026-08-01 03:50 +08:00
+
+- 工具副作用统一经过 SQLite 一次性授权账本；Runtime V2 direct、scheduler 与 legacy 共用 `executeAuthorizedToolCall`，`explicit/admin_explicit` 只创建绑定用户和聊天上下文的确认票据，不在原请求内执行。
+- `/tool-confirm <ID>` 与 `/tool-cancel <ID>` 在模型路由前处理；确认时重新校验参数/上下文哈希、schema、完整 policy、管理员身份与动态 MCP 精确注册。票据按 `pending -> executing -> completed|uncertain` 消费，进程中断或完成落盘失败均禁止自动重放。
+- 验收：`npm test` 169.4 秒、`npm run coverage` 192.0 秒及 lint、typecheck、Agent 静态检查、Prompt 清单、全仓/暂存区 secrets、diff check 均退出 0；四个覆盖率 scope 全部通过，授权账本验收后为 0 张票据、0 条审计记录。
+- 提交后记录：实现提交 `fa84dfd` 已完成；工具确认与防重放小目标已完成，`prompts/admin.txt` 与 `AGENT.md` 哈希未变化，当前分支未推送。
+
+## 运行维护 2026-08-01 02:28 +08:00
+
+- 新增 `tool_policy_manifest_v1`，统一覆盖 124 个 schema、125 个 executor 与 125 项 policy；混合读写工具按 action 解析副作用，未知工具、internal executor、未知 action 和伪造 MCP 在 Runtime V2 默认阻断。
+- scheduler、direct tool loop、dispatch checkpoint、只读缓存和 execution envelope 统一消费参数化 policy，副作用调用不会并行、缓存或 inflight dedupe；动态 MCP 只信任 `api/toolRegistry.js` 的精确注册名称。
+- 验收：`npm test` 178.2 秒、`npm run coverage` 189.9 秒及 lint、typecheck、Agent 静态检查、Prompt 清单、全仓 secrets、`git diff --check` 均退出 0；覆盖率为行 71.68%、函数 80.45%、分支 62.03%，四个 scope 全部通过。
+- 提交后记录：实现提交 `2d1afad` 已完成；Runtime V2 工具能力清单小目标已完成，确认票据、持久化幂等账本和 legacy 执行入口留待后续，当前分支未推送。
+
+## 运行维护 2026-08-01 00:40 +08:00
+
+- 新增 `harness_eval_manifest_v1` 版本化评估清单，固定 2 个 tracked synthetic suite、52 条 case、规范化 SHA-256 与递归隐私校验；空集、重复 ID、路径越界、真实账号、邮箱、非保留域 URL 和非占位凭据统一失败。
+- Memory recall CLI 新增显式 `--cases`，无 `--cases`、`--auto-gold` 或 `--build-cases` 时 fail closed；post-reply eval 默认改用 `tests/fixtures/post-reply-learning-cases.jsonl`，并拒绝空集和未知 case。
+- 新增 `npm run eval:harness:ci`，在 CI coverage 前独立运行 routing stability、synthetic auto-gold recall 和 post-reply learning 评估，不读取本地 `artifacts/` 或真实用户数据。
+- 验收（2026-08-01 00:49 +08:00）：Harness 门禁、聚焦回归、lint、typecheck、全仓 secrets、workflow policy 和 `git diff --check` 均退出 0；完整 `npm test` 180.7 秒自然退出 0。
+- 提交后记录（2026-08-01 00:51 +08:00）：实现提交 `85f421b` 已完成；版本化 Harness eval 小目标已完成，当前分支未推送。
+
+## 运行维护 2026-08-01 00:25 +08:00
+
+- Memory V3 journal/date 查询现在始终使用 lexical-first 并禁止远端 rerank，显式 `source=journal` 不再绕过策略；RAG explain 同步暴露 `decision.reason=plan_disallowed`，回归确认远端 rerank 请求数为 0。
+- 修复 Prompt 临时目录只读属性、8000 字群回复诊断和 embedding backfill 夹具契约；`prompts/admin.txt` 未修改，SHA-256 保持 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`。
+- `npm test`、`npm run coverage`、lint、typecheck、Agent 静态检查、Prompt 清单和全仓 secrets 扫描均退出 0；覆盖率为行 71.61%、分支 61.94%、函数 80.42%，四个 scope 全部通过。
+- 提交后记录（2026-08-01 00:27 +08:00）：实现提交 `e6b6ddc` 已完成；测试契约与覆盖率恢复小目标已完成，当前分支未推送。
+
+## 运行维护 2026-07-31 02:38 +08:00
+
+- 新增独立命令 `/小剧场 [--无记忆] <剧情素材>`，支持回复文字引用；输出固定四幕 HTML 渲染 PNG，并在普通路由和所有内部记忆写入前返回。
+- 群 `1083095371` 默认群记忆消息 `1365479523`、管理员私聊引用加 `--无记忆` 消息 `262404299` 均经 `get_msg` 确认为单一 900px PNG；用户素材和成品均通过强制敏感词门禁。
+- 功能提交 `32becea`；配置、隐私边界、失败提示及完整验收见 [QQ 番外小剧场](docs/qq-small-theater-2026-07-31.md)，小目标已完成，未推送远端。
+
+## 运行维护 2026-07-31 02:13 +08:00
+
+- 提示词注入防护已统一收口：仅显式可信 authority 可生成 `system`，记忆、连续性、工具证据、视觉/OCR 与会话摘要均作为低权限数据处理；持久化写入和所有回复出口增加污染/真实根提示词泄露拦截。
+- 安全专项、`lint`、`typecheck`、prompt 清单与相邻回归通过；完整边界及验收记录见 [维护日志](docs/maintenance-log.md) 和 [实施计划](docs/superpowers/plans/2026-07-30-prompt-injection-hardening.md)。
+- 实现提交 `2b7c1a2`；本地 `.env`/`data` ACL 已应用并通过诊断（7 OK / 1 既有兼容告警 / 0 ERROR），快照保存在 `artifacts/security/acl-snapshots/acl-20260731-021604-28732.json`，未推送远端。
+
+## 运行维护 2026-07-30 21:30 +08:00
+
+- 新增[瑞希的 QQ 绘图陪伴玩法手册](docs/qq-visual-rendering-companion-playbook-2026-07-30.md)，提供可直接复制的私聊陪伴与群聊娱乐提示词，并将需要定时、记忆授权或状态存储的构想统一标记为“尚未上线”。
+- 基础指南已增加玩法入口；当前玩法与未来构想、安全和隐私边界均分区说明，小目标已完成，未修改业务代码，未推送远端。
+
+## 运行维护 2026-07-30 21:17 +08:00
+
+- 新增面向 QQ 用户的[绘图功能使用指南](docs/qq-visual-rendering-user-guide-2026-07-30.md)，说明私聊与群聊触发方式、适用场景、提问模板、连续修改、安全限制和失败处理。
+- 文档内容已按当前 `render_qq_visual` 路由、渲染及审查实现逐项核对；未将尚未实现的陪伴玩法写成现有能力，小目标已完成，未推送远端。
+
+## 运行维护 2026-07-30 21:02 +08:00
+
+- 提交 `055ad9f` 新增 `render_qq_visual`：SVG 使用 `sharp`，HTML 使用固定版本 `napcat-plugin-puppeteer v1.5.0`，统一在敏感词门禁通过后以 OneBot Base64 PNG 发送到当前群聊或私聊。
+- NapCat 4.18.6 已限制在 `127.0.0.1`，插件 `browser.maxPages=2`，Chrome for Testing 131.0.6778.204 已连接；目标群 SVG 消息 `781501773` 与管理员私聊 HTML 消息 `1185586370` 经 `get_msg` 确认为单一 PNG 图片段。
+- 五项聚焦测试、lint、typecheck、secrets 检查通过；真实词库的 prompt/markup 拦截均使渲染和 QQ 发送调用保持 0。完整配置、安全边界与验收记录见 `docs/qq-visual-rendering-2026-07-30.md`，小目标已完成，未推送远端。
+
+## 运行维护 2026-07-30 19:50 +08:00
+
+- 目标5第六批完成：`message/handler` 的11个共享词法作用域 chunk 已迁为单一静态 CommonJS 运行时，生产入口不再调用 `runCommonJsChunks`；旧 chunk 保持只读兼容并由 lint 合并语法校验。
+- 18项公开 API、legacy facade 和 `src/message` 导出身份保持不变；786文件 lint、typecheck、入口冷加载及5项聚焦回归均通过，小目标已完成，未推送远端。
+
+## 运行维护 2026-07-30 11:29 +08:00
+
+- 主动私聊策略调整：全局沉默门槛由 180 分钟降为 120 分钟，两批主动私聊最小间隔由 360 分钟降为 240 分钟；每日最多 2 批、双随机窗口和连续两批无回复暂停保持不变。
+- 功能提交 `c7ac6a7`；定向主动私聊测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 退出 0，重启后运行配置为 `idleMinutes=120`、`minGapMinutes=240`，`/live`、`/ready` 均返回 200。
+- 完整 `npm test` 退出 1，失败仍为两个管理员提示词、`mainReplyUnifiedDiagnostics` 和两个既有 Memory V3 用例，主动私聊测试通过；小目标已完成，未推送远端。
+
+## 运行维护 2026-07-30 11:18 +08:00
+
+- 主动私聊判断修复：模型请求改用 `max_tokens=4096`、`reasoning_effort=minimal` 和 `response_format={type:json_object}`；运行时硬条件已满足时，提示词默认要求发送，仅在用户明确拒绝或上下文明显不适合时允许拒绝；`finish_reason=length/MAX_TOKENS` 现在记录为模型输出截断，不再伪装成判断器过滤。
+- 真实网关验收：`API_BASE_URL/API_KEY/AI_MODEL` 请求 HTTP 200、`finish_reason=stop`；2026-07-30 11:17:50-11:18:15 +08:00 手动触发一次 `privateProactiveEngine.scan()`，对 `1052258894` 发送 3 个独立私聊气泡，NapCat 三次均成功。状态文件记录上午窗口已消费、今日 `1/2` 批、预算 `2/50`、`inFlight=null`，主进程 `/ready` 返回 200，未重复发送。
+- 定向主动私聊测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 退出 0；`npm test` 退出 1，失败仍为两个管理员提示词、`mainReplyUnifiedDiagnostics` 和两个既有 Memory V3 用例，主动私聊相关测试全部通过。
+- 功能提交 `cd8645d`；本次仅追加文档，未推送远端。
+
+## 运行维护 2026-07-29 18:42 +08:00
+
+- 主动私聊故障修复：`API_PROVIDER=openai_compatible` 未透传时，Gemini 模型名被共享 HTTP 层误判为原生协议，主动请求落到 `:generateContent` 并返回 404；同时将主动决策输出上限提高到 1200 token，并固定低推理开销，避免结构化 JSON 被截断。
+- 真实恢复验收：用户 `1960901788` 的漏发机会先复现为 HTTP 200 但 `finish_reason=length`、`invalid_structure`（未发送），修复后于 2026-07-29 18:40 +08:00 真实发送 3 个独立私聊气泡，NapCat 三次 `send_private_msg` 均成功；状态已记为今日 1/2 批，另一名用户未被触发。
+- 提交：`46d659a`、`d4dd729`；定向主动私聊测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过；未推送远端。
+
+## 运行维护 2026-07-29 09:48 +08:00
+
+- QQ 群 `direct_chat` 最终回复硬截断上限由 220 字调整为 8000 字；普通用户、管理员和快速回复的模型 token 上限保持不变。
+- 验收：群聊风格守卫回归覆盖 8001 字输入精确截为 8000 字，并确认动态提示词同步使用新上限。
+
+## 运行维护 2026-07-29 09:57 +08:00
+
+- 目标5第五批完成：提交 `0144d51` 将 `runtime-v2/context` 的10个共享词法作用域 chunk 迁为15个显式 CommonJS 模块，生产入口不再执行 `runCommonJsChunks`；旧 chunk 保持只读兼容并由 lint 合并语法校验。
+- 13项主 API、6组子门面、`promptLayerCache` 单例、记忆输入惰性加载和0循环依赖边界通过；`lintChunkEntrypoints` 已同步合并记录协议。
+- Node 24.14.1 下10项 context 聚焦回归、785文件 lint、typecheck、prompt、全仓 secrets 和 diff check 通过。当前环境无 Node 20，未宣称双版本；`TEST_CONCURRENCY=4 npm test` 仍受只读 `prompts/admin.txt` 测试及4项既有基线断言失败影响。
+- `prompts/admin.txt` 保持310字节、ReadOnly、SHA-256 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；`npm audit --omit=dev` 仍报告 HEAD 既有 `sharp` 高危和 `body-parser` 低危问题，本批未改依赖。
+
+## 运行维护 2026-07-29 08:42 +08:00
+
+- 新增独立 QQ 私聊主动触达引擎：仅登记上线后成功完成正常私聊回复的用户，按每日两个稳定随机窗口、全局沉默、最小间隔、用户日上限和独立模型预算决定是否发送；群聊主动发送链路保持不变。
+- 主动决策严格使用 `API_BASE_URL`、`API_KEY`、`AI_MODEL`，支持 `/主动私聊 关闭|开启|状态` 本地控制、首次角色化告知、活动版本取消、未回应自动暂停、NapCat 离线跳过和重启防重。
+- 功能提交 `a1584aa`。定向测试、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0；完整 `npm test` 中主动私聊用例通过，但当前并行工作区仍有 5 个非本任务用例失败，详见维护日志；未推送远端。
+
+## 运行维护 2026-07-28 23:49 +08:00
+
+- 修复 Daily Journal 轮数摘要的独立向量化链路：`journal_turn_summary` / `turn_batch` segment 现在统一进入 embedding cache、本地查询候选、CLI 快照和后续 LanceDB 同步；旧 `.segments.jsonl` 切片仍由 `journal-segment:*` 文档负责，不从 episode 投影重复索引。
+- 验收：新增 turn-compaction 端到端回归覆盖 embedding cache、查询候选、CLI 快照和 LanceDB 行构建；相关 Daily Journal/embedding/语义召回 5 项测试、`npm run lint`、`npm run typecheck` 和 `npm run diag:memory -- diagnose --skip-probe --json` 均退出 0；真实数据当前没有 `journal_turn_summary` 事件，无需历史回填。
+- 只读诊断：投影未过期、`readyButNotSynced=0`，仍有 1 条既存 LanceDB stale row 和 1 条待 embedding，建议后续单独执行 full reconcile；本轮未修改运行数据、未删除文件、未推送远端。
+
+## 运行维护 2026-07-28 10:20 +08:00
+
+- Memory V3 RAG 检索优化已接入：向量化资格统一拒绝原始 turn、模型回复、污染文本、低置信度和 superseded/suspect 节点；LanceDB 行补齐 `scope/user/group/session/category/semanticSlot/lifecycle/versionRoot/sourceTs/confidence/textHash/modelVersion` 元数据。
+- `queryMemory()` 现在使用按 facet 的 Recall Plan：连续性/日期走 lexical-first，profile/preference/relationship、task、group/style 使用来源白名单与 source/semantic-slot 配额；远程 rerank 仅在高价值或高歧义候选上启用，并保留 embedding/LanceDB/rerank 降级路径。评估支持 `forbiddenIds`、`allowEmpty` 和 p95 延迟门禁。
+- 验收：`memoryV3RecallPlan`、Memory V3 查询/embedding/LanceDB/门禁定向测试通过；`diagnose --skip-probe` 通过。当前数据仍有约 962 条孤立 LanceDB 行、10 条待同步和投影过期，`lancedb-gate --auto-gold --limit 20` 按门禁失败并建议先 full reconcile；本轮未执行 reconcile、删除或远端推送。
+
 > 面向 QQ 的角色 Agent —— 在真实群聊/私聊里稳定运转，而不只是个问答 bot。
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
+
+## 运行维护 2026-07-26 11:23 +08:00
+
+- 提交 `2b143a7` 增加 QQ JSON 卡片语义上下文：在保留 `qqCardUrls` 和 `[分享链接]` 的同时，传播新闻、音乐、小程序、邀请卡的类型、标题、简介、来源、预览图与规范化主链接；网易云、B站、小红书继续复用既有 URL 提取、识别和规范化函数。
+- normal fast 会显式避开卡片；无 URL 邀请卡只在私聊或群聊门禁通过后以内部 `[分享卡片]` 进入主回复。私聊纯单卡、明确要求查看/总结/评价/比较的单卡可使用 `web_fetch`，2–3 张按卡片顺序并行读取，超过 3 张请求用户收窄；普通分享不联网，被动群聊不注入卡片感知。
+- 验收：卡片专项与相邻回归、`npm run check:prompts`、`npm run lint`、`npm run typecheck`、`npm test`、`npm run smoke:napcat-ingress` 全部通过。真实 QQ 客户端中的三平台单卡、卡片附言、双卡比较和群聊无 @ 场景本轮未人工发送，状态保持未验证。
 
 ## 运行维护 2026-07-26 11:18 +08:00
 
@@ -154,8 +333,9 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - **QQ 接入**：通过 NapCat / OneBot 收发私聊、群聊、图片、引用、转发、戳一戳等事件。
 - **路由分流**：按 `ignore` / `refuse` / `admin` / `direct_chat` 等路线分发，不是每条消息都砸给大模型。
 - **角色一致性**：prompt manifest、persona worldbook、运行时协议和回复清洗共同维持瑞希的语气和边界。
-- **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。
+- **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。Daily Journal 默认只写 Profile Journal SQLite，按用户累计 50 轮安全对话调用独立记忆模型生成 segment 摘要并独立向量化；每日任务只兜底压缩未满 50 轮的历史尾部，不再新增按日文件或多日汇总。
 - **工具调用**：本地命令、诊断、知识检索、图片处理、日程、自定义 skill。
+- **环境数据**：按需查询 USGS 最新地震事件，并从 JMA Himawari 获取红外、可见光和水汽全圆盘云图发送到当前 QQ 会话。
 - **瑞希瑞幸**：独立 `瑞希瑞幸` 命令接入瑞幸官方 MCP/skill，群聊做菜单、推荐、预览，私聊处理个人 Token、订单和支付二维码。
 - **后台学习**：post-reply worker 在回复后异步抽取记忆、维护画像、写日记，不卡主回复。
 - **回复出口拦截**：群聊和普通用户私聊发送前使用本地政治敏感词库快照，并要求命中现实政治语境后才替换；管理员私聊豁免，角色扮演标记不作为豁免。
@@ -443,6 +623,7 @@ data/       本地运行数据，默认不提交
 
 ## 文档入口
 
+- [`docs/development/README.md`](docs/development/README.md) — 开发者源码阅读、架构、功能开发、测试与排障指南
 - [`docs/maintenance-log.md`](docs/maintenance-log.md) — 近期维护记录和验收结果
 - [`docs/repository-structure.md`](docs/repository-structure.md) — 目录边界和清理规则
 - [`docs/main-reply-context.md`](docs/main-reply-context.md) — 主回复上下文设计
@@ -457,7 +638,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-24 08:21 +08:00
+更新时间：2026-08-01 02:28 +08:00
+维护记录：2026-07-31 02:15 +08:00，提交 `1674530` 新增 8 篇独立开发者源码文档及完整性回归；Node 20.20.2 下文档链接/路径/npm 脚本检查、测试运行器回归、lint、typecheck、Agent 静态检查、prompt 检查和全仓 secrets 检查均通过，小目标已完成，未推送远端。
 维护记录：2026-07-24 08:21 +08:00，提交 `bc1d10f` 将 `meme` 的9个chunk迁为显式CommonJS模块，93/93函数、16项API、legacy与5个子门面身份、6项singleton和0本地循环均已验收；Node 20/24聚焦、静态门禁及Node 24并发4全量521个tracked测试通过，目标5推进至3/6。
 维护记录：2026-07-21 21:42 +08:00，`passive-awareness` 已完成显式CommonJS迁移，21项API和5个子门面契约保持不变；静态门禁和并发4全量通过，目标5推进至2/6。
 维护记录：2026-07-21 20:52 +08:00，`daily-share` 已完成显式CommonJS迁移，生产路径不再执行对应chunk；Node 20定向、静态门禁和Node 24并发4全量通过，目标5推进至1/6。
@@ -523,3 +705,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-07-12 14:40 +08:00，本地私有 admin prompt 已移除异常双响应指令并恢复 QQ 当前消息契约；过期的 120000 token 测试断言同步为现行 9200，四组 prompt 回归通过。
 维护记录：2026-07-12 15:20 +08:00，lint 已覆盖 727 个 JS 与全部 71 个 chunk，完整 npm test 在 307.5 秒内全部通过，依赖审计 0 漏洞且安全/密钥诊断通过；Docker daemon 已启动，但真实镜像构建仍阻塞于基础镜像获取。
 维护记录：2026-07-12 16:51 +08:00，已建立 32 项仓库改进总路线与第一阶段安全边界执行计划，并将 README、Docker 部署文档中的 NapCat reverse 说明更新为签名/显式兼容模式；本轮只改文档，验收为计划文件存在、旧空对象/Bearer-only 探针已明确标注失效且 `git diff --check` 通过。
+维护记录：2026-08-04 14:43 +08:00，实现提交 `de13971` 已修复 PR #5 的供应链漏洞：根项目与嵌套技能 audit 均为 0，476 个锁定版本实时 OSV 查询为 0 漏洞，Node 20 关键门禁及 177 秒完整测试通过；当前分支未推送远端。

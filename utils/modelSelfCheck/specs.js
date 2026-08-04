@@ -31,9 +31,6 @@ const {
   getPassiveAwarenessReplyApiKey,
   getPassiveAwarenessReplyModel,
   getPassiveAwarenessReplyApiProvider,
-  getPlannerApiBaseUrl,
-  getPlannerApiKey,
-  getPlannerModel,
   isPassiveAwarenessDecisionConfigured,
   isPassiveAwarenessReplyConfigured
 } = require('./providers');
@@ -120,7 +117,6 @@ function buildSelfCheckSpecs(options = {}) {
   const timeoutMs = clampTimeoutMs(options.timeoutMs);
   const adminUserId = normalizeText(options.adminUserId);
   const normalUserId = normalizeText(options.normalUserId) || '__model_self_check_user__';
-  const planModel = getPlannerModel();
   const memoryModel = getMemoryModel();
   const embeddingModel = getEmbeddingModel();
   const rerankModel = getRerankModel();
@@ -129,21 +125,6 @@ function buildSelfCheckSpecs(options = {}) {
   const passiveReplyProvider = getPassiveAwarenessReplyApiProvider();
 
   return [
-    config.DIRECT_CHAT_PLANNER_ENABLED === true
-      ? {
-          type: 'plan',
-          model: planModel,
-          url: ensureChatCompletionsUrl(getPlannerApiBaseUrl()),
-          apiKey: getPlannerApiKey(),
-          body: buildChatBody(planModel, 'plan', timeoutMs)
-        }
-      : {
-          type: 'plan',
-          model: planModel,
-          url: '',
-          apiKey: '',
-          body: null
-        },
     isEmbeddingConfigured()
       ? {
           type: 'embedding',

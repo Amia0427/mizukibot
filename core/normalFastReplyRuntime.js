@@ -15,6 +15,11 @@ const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure'
 const {
   buildPersonaReasoningForwardText
 } = require('../utils/reasoningForwardPersona');
+const {
+  mapPromptBlockToMessage,
+  protectFinalOutput,
+  wrapUntrustedPromptContent
+} = require('../utils/promptSecurity');
 
 const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE = 2;
 const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST = 100;
@@ -412,7 +417,7 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
     modelName: normalizeText(runtimeConfig.AI_MODEL || runtimeConfig.modelName || runtimeConfig.model || '')
   }).filter((block) => block.id === 'normal_user_default_prompt');
   const stableSystemPrompt = stableSystemBlocks
-    .map((block) => String(block.content || '').trim())
+    .map((block) => mapPromptBlockToMessage(block).content)
     .filter(Boolean)
     .join('\n');
   const systemParts = [
@@ -421,18 +426,19 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
     '只根据用户本轮消息和下方轻量上下文自然回复；不要声称查了记忆、网页或工具。',
     '如果用户本轮是在评价、纠正或吐槽“你刚才/后面几段/上一条回复”，优先锚定最近一条 assistant 历史回复来接话。',
     '回答保持简洁、直接、像日常聊天；信息不足时先说明不确定。',
-    directedPrompt,
-    livenessPrompt,
     fastPersonaModules.prompt,
     fastWorldbookModules.prompt
   ];
+  const dynamicContextParts = [directedPrompt, livenessPrompt];
   if (trimmedSummary) {
-    systemParts.push(`[最近会话摘要]\n${trimmedSummary}`);
+    dynamicContextParts.push(`[最近会话摘要]\n${trimmedSummary}`);
   }
+  const dynamicContext = dynamicContextParts.filter(Boolean).join('\n');
 
   return {
     messages: [
       { role: 'system', content: systemParts.join('\n') },
+      ...(dynamicContext ? [{ role: 'assistant', content: wrapUntrustedPromptContent(dynamicContext) }] : []),
       ...recentMessages,
       { role: 'user', content: userText }
     ],
@@ -490,8 +496,17 @@ async function runNormalFastReply(input = {}, deps = {}) {
   const rawPersistedText = reply?.persistedText || rawVisibleText;
   const visibleMeta = sanitizeUserFacingText(rawVisibleText, { returnMeta: true });
   const persistedMeta = sanitizeUserFacingText(rawPersistedText, { returnMeta: true });
-  const visibleText = normalizeText(visibleMeta.text);
-  const persistedText = normalizeText(persistedMeta.text || visibleText);
+  const protectedVisible = protectFinalOutput(visibleMeta.text);
+  const protectedPersisted = protectFinalOutput(persistedMeta.text || protectedVisible.text);
+  const protectedFallback = protectedVisible.blocked
+    ? protectedVisible.text
+    : protectedPersisted.text;
+  const visibleText = normalizeText(
+    protectedVisible.blocked || protectedPersisted.blocked ? protectedFallback : protectedVisible.text
+  );
+  const persistedText = normalizeText(
+    protectedVisible.blocked || protectedPersisted.blocked ? protectedFallback : protectedPersisted.text
+  );
   const hasSafetyRestriction = Boolean(
     reply?.hasSafetyRestriction === true
     || visibleMeta.hasSafetyRestriction === true

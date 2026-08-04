@@ -18,6 +18,76 @@ function collectExtraAgentPromptRoots() {
     .filter(Boolean);
 }
 
+const TOOL_POLICY_VALUES = {
+  risk: new Set(['low', 'medium', 'high']),
+  effect: new Set(['none', 'local_write', 'external_send', 'destructive', 'unknown']),
+  confirmation: new Set(['none', 'explicit', 'admin_explicit']),
+  scope: new Set(['user', 'group', 'admin']),
+  idempotency: new Set(['none', 'required']),
+  replay: new Set(['reuse_result', 'block_uncertain']),
+  exposure: new Set(['public', 'internal'])
+};
+
+function validateToolPolicyCoverage(toolSchemas, toolExecutors, toolPolicies, policyVersion) {
+  const schemaNames = toolSchemas
+    .map((schema) => String(schema?.function?.name || '').trim())
+    .filter(Boolean);
+  const executorNames = Object.keys(toolExecutors || {});
+  const registeredNames = [...new Set([...schemaNames, ...executorNames])].sort();
+  const policyNames = Object.keys(toolPolicies || {}).sort();
+  const problems = [];
+
+  if (new Set(schemaNames).size !== schemaNames.length) {
+    problems.push('TOOL_SCHEMAS 包含重复名称');
+  }
+  const schemaWithoutExecutor = schemaNames.filter((name) => !executorNames.includes(name));
+  if (schemaWithoutExecutor.length > 0) {
+    problems.push(`schema 缺少 executor: ${schemaWithoutExecutor.join(', ')}`);
+  }
+  const missingPolicies = registeredNames.filter((name) => !toolPolicies[name]);
+  if (missingPolicies.length > 0) {
+    problems.push(`注册工具缺少 policy: ${missingPolicies.join(', ')}`);
+  }
+  const stalePolicies = policyNames.filter((name) => !registeredNames.includes(name));
+  if (stalePolicies.length > 0) {
+    problems.push(`manifest 包含未注册工具: ${stalePolicies.join(', ')}`);
+  }
+
+  for (const name of registeredNames) {
+    const policy = toolPolicies[name];
+    if (!policy) continue;
+    if (policy.version !== policyVersion) {
+      problems.push(`${name} policy version 无效: ${policy.version}`);
+    }
+    if (!String(policy.capability || '').trim()) {
+      problems.push(`${name} 缺少 capability`);
+    }
+    for (const [field, values] of Object.entries(TOOL_POLICY_VALUES)) {
+      if (!values.has(policy[field])) {
+        problems.push(`${name} ${field} 无效: ${policy[field]}`);
+      }
+    }
+  }
+
+  for (const name of schemaNames) {
+    if (toolPolicies[name]?.exposure !== 'public') {
+      problems.push(`${name} schema 必须使用 public policy`);
+    }
+  }
+  for (const name of executorNames.filter((item) => !schemaNames.includes(item))) {
+    if (toolPolicies[name]?.exposure !== 'internal') {
+      problems.push(`${name} executor-only 工具必须使用 internal policy`);
+    }
+  }
+
+  if (problems.length > 0) throw new Error(problems.join('; '));
+  return {
+    schemaCount: schemaNames.length,
+    executorCount: executorNames.length,
+    policyCount: policyNames.length
+  };
+}
+
 async function main() {
   console.log('================ LangGraph 自检开始 ================');
 
@@ -66,11 +136,20 @@ async function main() {
   let TOOL_SCHEMAS, TOOL_EXECUTORS;
   try {
     const reg = require('../api/toolRegistry');
+    const {
+      POLICY_VERSION,
+      TOOL_POLICIES
+    } = require('../utils/toolPolicy');
     TOOL_SCHEMAS = reg.TOOL_SCHEMAS;
     TOOL_EXECUTORS = reg.TOOL_EXECUTORS;
-    ok(`TOOL_SCHEMAS 数量: ${Array.isArray(TOOL_SCHEMAS) ? TOOL_SCHEMAS.length : 0}`);
-    ok(`TOOL_EXECUTORS 数量: ${TOOL_EXECUTORS ? Object.keys(TOOL_EXECUTORS).length : 0}`);
-    ok('TOOL_SCHEMAS 与 TOOL_EXECUTORS 映射正常');
+    const coverage = validateToolPolicyCoverage(
+      TOOL_SCHEMAS,
+      TOOL_EXECUTORS,
+      TOOL_POLICIES,
+      POLICY_VERSION
+    );
+    ok(`工具注册覆盖: schema=${coverage.schemaCount}, executor=${coverage.executorCount}, policy=${coverage.policyCount}`);
+    ok('TOOL_SCHEMAS、TOOL_EXECUTORS 与 policy manifest 映射正常');
   } catch (e) {
     fail(`toolRegistry 加载失败: ${e.message}`);
     return 1;
@@ -136,5 +215,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  main
+  main,
+  validateToolPolicyCoverage
 };

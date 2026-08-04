@@ -1,6 +1,18 @@
 # Memory Quality Governance
 
-更新时间：2026-06-24 10:25 +08:00
+更新时间：2026-08-04 12:05 +08:00
+
+更新 2026-08-04 12:05 +08:00：真实 dry-run `converge-20260804T040343` 已通过，plan/source hash 分别为 `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591` / `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`；24,411 个稳定迁移候选中有 2,535 个 `strict-v1` 归档候选。baseline 与 LanceDB candidate Recall@8/MRR@8 均为 0.925，scope/lifecycle/forbidden 为 0；LanceDB missing/orphan/stale 为 0，`recommendedAction=none`。提交 `1a59274` 修正群作用域 auto-gold，`49ac6dd` 修正目标日期日记在 rerank tail 中丢失优先级。真实 apply、旧文件归档和 `v3_only` 切换尚未执行。
+
+更新 2026-08-04 10:56 +08:00：Memory V3 仓储统一了业务写入和召回，`strict-v1` 只按确定性规则归档，并以 run manifest 和追加事件提供幂等恢复。`MEMORY_STORAGE_MODE` 增加 `legacy_compat|v3_shadow|v3_only`；收敛 CLI 支持 dry-run 计划、显式应用和显式回滚。代码与自动门禁已通过，但真实维护迁移未执行，`runId`、旧文件 manifest hash 与维护耗时均为 `N/A`。
+
+更新 2026-08-02 15:24 +08:00：提交 `34ec277` 将 Harness 升级为 `harness_eval_manifest_v2`，以同一契约驱动 routing stability、synthetic auto-gold、post-reply learning、live-model tasks 和 redacted replay。Node 20 下 `ci` profile 的 30/2/22 条确定性 case 全部通过；`nightly:verify` 在两个外部结果缺失时同时记录 `external_input_missing` 并退出 1。外部结果必须满足 producer 自报元数据、时效、最小样本量、data policy 和指标阈值，但当前仓库不负责执行真实模型、生成脱敏回放或认证 producer 身份。提交 `461a289` 同时将 Function 覆盖率基线固定到 Node 20 V8 统计口径，端到端覆盖率门禁通过。
+
+更新 2026-08-01 00:40 +08:00：建立版本化 Harness eval。`harness_eval_manifest_v1` 固定 memory routing stability 30 条与 post-reply learning 22 条 synthetic fixture，并校验数量、规范化摘要、唯一 ID、路径和递归隐私边界；CI 额外运行 synthetic auto-gold 真实召回，要求 Recall@5/MRR@5 不低于 0.5 且 wrong-hit、scope/lifecycle leakage、forbidden hit 为 0。Memory eval CLI 无显式 `--cases/--auto-gold/--build-cases` 时失败，不再静默依赖本地 `artifacts/`。
+
+更新 2026-08-01 00:25 +08:00：修正 journal/date rerank 契约。默认与显式 `source=journal` 查询都保留 lexical-first、零 rerank 预算并设置 `allowRemoteRerank=false`，RAG explain 输出保留 `decision.reason=plan_disallowed`，测试同时断言远端 rerank 请求数为 0。Memory V3 定向回归、全量测试与覆盖率门禁通过；当前覆盖率整体为行 71.61%、分支 61.94%、函数 80.42%。
+
+更新 2026-07-28 10:20 +08:00：Memory V3 RAG 检索优化落地。`embeddingPolicy.shouldVectorizeMemoryNode()` 统一阻断原始 turn、模型回复、污染文本、低置信度和 `suspect/superseded/archived` 节点，只保留确认事实、偏好/任务/关系/风格、图片视觉摘要和 journal rollup；LanceDB 行补齐 scope、生命周期、版本根、来源时间、置信度、textHash 和 modelVersion。`buildRecallPlan()` 将 continuity/date、profile/preference/relationship、task、group/style、default 分开路由，查询 embedding cache key 纳入 scope/来源/modelVersion，连续性查询 lexical-first，rerank 按候选歧义和高价值 facet 门控；评估新增 `forbiddenIds`、`allowEmpty`、p95 延迟比较。验收：`node tests\memoryV3RecallPlan.test.js`、`node tests\memoryV3Query.test.js`、`node tests\memoryV3EmbeddingIndex.test.js`、`node tests\memoryV3LanceDbRecall.test.js`、`node tests\lancedbMemoryStore.test.js`、`node tests\memoryRecallAndLanceDbGates.test.js` 均通过，`npm run diag:memory -- diagnose --skip-probe --json` 通过。当前数据诊断仍有约 962 条孤立 LanceDB 行、10 条待同步和投影过期，`lancedb-gate --auto-gold --limit 20` 未通过，建议先执行受控 full reconcile；本轮未删除或重建数据。
 
 更新 2026-06-24 10:25 +08:00：图片视觉摘要 `http_400` 冷却诊断补齐。复查今天日志，失败样本为 `2026-06-24 02:00:50 +08:00` 的 `image_visual_summary_memory`，endpoint/model 为 `https://opencode.ai/zen/v1/chat/completions` / `mimo-v2.5-free`；失败图 `b4b8c23b79aeb94f036f081c3077967e2cb7f6bf` 是 94KB JPEG、估算输入约 161 tokens，同链路同批存在成功样本，现有状态只落 `http_400`，看不到上游错误体或实际请求形状。现 `visualSummaryState` 在 HTTP 失败时保存脱敏 `errorDiagnostic` 和 `requestDiagnostic`，并让 `imageMemoryIndex` 保存边界保留这些字段；下次可直接区分请求体、模型参数或上游约束。验收：`node tests\imageVisualSummaryMemory.test.js`、`node tests\imageMemoryIndex.test.js`、`node --check utils\imageVisualSummaryMemory.js`、`node --check utils\imageMemoryIndex.js`、`git diff --check` 通过。小目标完成：下次图片视觉摘要 400 进入 cooldown 时，不再只有 `http_400` 黑盒。
 
@@ -56,6 +68,11 @@
 
 ## 当前机制
 
+- `utils/memory-v3/repository.js` 提供 `writeMemoryBatch()` 和 `queryMemory()`；新业务消费者不得直接调用旧 vector store 的业务读写 API。
+- `utils/memory-v3/strictArchivePolicy.js` 固定 `strict-v1`：只处理确定性重复败者、有效 `supersededBy`、Prompt/系统/工具指令污染、误存的助手自述/拒绝/失败回复，以及空值/占位/无效 scope。
+- `utils/memory-v3/archiveRuns.js` 为每条归档事件保留 `runId/policyVersion/reason/previousStatus/sourceId/evidenceHash`，同一输入重复运行新增 0 条事件；恢复只追加 `memory_confirmed`，不删除历史事件。
+- `utils/memory-v3/convergence.js` 与 `scripts/migrate-memory-v3.js` 生成带稳定迁移身份、源文件 SHA-256、预计事件数、LanceDB 重建估时和计划哈希的清单，并在应用失败或 8 分钟截止时回滚。
+- `legacy_compat` 保持旧主读并镜像 accepted 写入；`v3_shadow` 仅记录旧结果差异；`v3_only` 不加载或写入旧 JSON/shard。默认仍是 `legacy_compat`。
 - `utils/recallPollutionGuard.js` 是长期记忆污染统一分类器，覆盖 `bad_roleplay_refusal_reply`、`assistant_memory_failure_reply`、`internal_context_leak`、`raw_model_response`、`prompt_or_schema_pollution` 和 `assistant_self_instruction`。
 - `utils/memoryQuality.js` 统一评估记忆质量，输出 `score`、`grade`、`reasons`、`cleanupAction` 和 staleness；命中通用污染时追加 `memory_pollution` 并拒绝写入。
 - `utils/memoryWritePipeline.js` 在写入前调用质量评估：污染直接拒绝，低信号/过时/临时性内容转为 `candidate`，并写入 `meta.quality`。
@@ -120,6 +137,9 @@
 10. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
 11. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
 12. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
+13. 存储收敛先运行 `node scripts/migrate-memory-v3.js --converge --dry-run`，审核计划中的 preflight、源文件哈希、预计事件数与耗时；计划生成不会暂停进程、移动文件或修改 `.env`。
+14. 仅在维护窗口内运行 `node scripts/migrate-memory-v3.js --apply-plan <runId|plan.json>`。若状态停在 `applying`、应用失败或超过 8 分钟，运行 `node scripts/migrate-memory-v3.js --rollback-run <runId|plan.json>`；不要直接重试 apply。
+15. 真实召回、scope、projection freshness、LanceDB expected/actual 和 `storage-overlap recommendedAction=none` 全部通过后，才可停止主进程并切换 `MEMORY_STORAGE_MODE=v3_only`。
 
 ## 清洗策略
 
@@ -129,6 +149,7 @@
 - `archive`：类型 TTL 已硬过期的 active 记忆，例如旧 topic、任务和短期语境。
 - `superseded`：版本更新或冲突仲裁输掉的旧事实，保留在 projection 供审计，但 `notRecallable=true`，查询和 prompt 默认过滤。
 - `keep`：稳定且可复用的事实、偏好、身份、画像和日记 rollup。
+- `strict-v1` 不会仅因低置信、年龄、玩笑、短期性、图片描述或模型主观质量分归档；这些信号仍由既有 candidate/TTL/人工治理处理。
 - Profile Journal DB 清洗只改 `status` 并追加 `memory_cleanups`，不物理删除。`expires_at <= now` 标记 `stale`；同 `conflict_key` 只保留最高 rank active/candidate winner，其余标记 `superseded`；显式纠错会把旧 fact 归档为 `superseded` 并让新 fact 保持 active。
 - 低质量、临时、助手自说自话或污染回复相关 profile fact 只能停留在 `candidate/rejected`，不会进入主 prompt；`quality_json.ok=false` 的 explicit fact 降为 `candidate`，其他来源标记 `rejected`；`reserved`、重复占位、字段名/schema-like 和污染式关系占位内容一律 `rejected`。journal `unsafe/skipped` 条目保留在 `journal_entries` 供审计，但 SQLite 主读召回只取 active。
 - profile 读链路默认按 `PROFILE_JOURNAL_AUTO_CLEAN_INTERVAL_MS=60000` 做进程内清洗节流，降低 hot path 扫库成本；写入链路、`mem profile clean --apply` 和诊断命令使用强制清洗，不受节流影响。
@@ -141,6 +162,7 @@
 
 ## 运维记录
 
+- 2026-08-04 10:56 +08:00：仓储、消费者与收敛工具提交为 `68a5903`、`62fac86`、`b2ffed0`，独立工作树可移植性提交为 `d682fe3`。完整测试、coverage、lint、typecheck、Prompt、secrets 和 diff 门禁通过；真实维护迁移未执行，运行数据未修改。
 - 2026-06-11 16:54 +08:00：执行 `node scripts/sync-lancedb-memory-index.js --full --compact` 重建历史 LanceDB 热索引副本；复查 `npm run diag:memory -- storage-overlap --json` 返回 `expected=3368`、`raw=0`、`unexpected=0`、`missing=0`、`vectorOnly=0`，`node scripts/sync-lancedb-memory-index.js --dry-run --full` 推荐动作 `none`。
 - 2026-05-19 22:24 +08:00：执行 `repair-memory-vector-index --apply --compact`、强制 materialize、`backfill-memory-v3-embeddings --source memory --sync-after`，最终 `pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，`diag:memory audit --limit 5` 硬指标通过。
 - 2026-05-20 00:42 +08:00：post-reply worker 接入自动向量 watchdog，默认 30 分钟巡检一次；健康时跳过，发现 projection stale / LanceDB drift / pending embedding 时自动小批量维护。
@@ -169,6 +191,7 @@ node tests/memoryV3GenericConflictResolution.test.js
 node tests/memoryRecallPolicyPromptBlock.test.js
 node tests/memoryV3RecentRecallFastPath.test.js
 node tests/memoryRecallAutoGoldEval.test.js
+node scripts/run-tests.js tests/memoryV3Repository.test.js tests/memoryV3StrictArchive.test.js tests/memoryV3Convergence.test.js tests/memoryV3LegacyArchive.test.js tests/memoryV3ConsumerBoundary.test.js
 node tests/mainReplyContextPreview.test.js
 node tests/recallPollutionGuard.test.js
 node tests/memoryV3NocturneShell.test.js

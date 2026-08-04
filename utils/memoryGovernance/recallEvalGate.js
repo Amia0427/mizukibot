@@ -18,6 +18,7 @@ function buildRecallEvalGate(result = {}, options = {}) {
   const mrrAt8 = metricOf(result, 'mrrAt8');
   const leakage = normalizeNumber(metricOf(result, 'leakage'), 0);
   const lifecycleLeakage = normalizeNumber(metricOf(result, 'lifecycleLeakage'), 0);
+  const forbiddenHits = normalizeNumber(metricOf(result, 'forbiddenHits'), 0);
   const categoryMismatches = normalizeNumber(metricOf(result, 'categoryMismatches'), 0);
   const recentRecallMisses = normalizeNumber(metricOf(result, 'recentRecallMisses'), 0);
   const emptyResultRate = metricOf(result, 'emptyResultRate');
@@ -49,6 +50,7 @@ function buildRecallEvalGate(result = {}, options = {}) {
   if (mrrAt8 === null || mrrAt8 === undefined || normalizeNumber(mrrAt8, -1) < thresholds.minMrrAt8) failures.push('mrr_at_8_below_threshold');
   if (leakage > thresholds.maxLeakage) failures.push('scope_leakage_detected');
   if (lifecycleLeakage > thresholds.maxLifecycleLeakage) failures.push('lifecycle_leakage_detected');
+  if (forbiddenHits > 0) failures.push('forbidden_recall_detected');
   if (categoryMismatches > thresholds.maxCategoryMismatches) failures.push('category_mismatch_detected');
   if (recentRecallMisses > thresholds.maxRecentRecallMisses) failures.push('recent_recall_miss_detected');
   if (emptyResultRate !== null && emptyResultRate !== undefined && normalizeNumber(emptyResultRate, 1) > thresholds.maxEmptyResultRate) failures.push('empty_result_rate_high');
@@ -68,6 +70,7 @@ function buildRecallEvalGate(result = {}, options = {}) {
       mrrAt8: mrrAt8 ?? null,
       leakage,
       lifecycleLeakage,
+      forbiddenHits,
       categoryMismatches,
       recentRecallMisses,
       emptyResultRate: emptyResultRate ?? null,
@@ -91,12 +94,15 @@ function compareRecallEvalResults(baseline = {}, candidate = {}, options = {}) {
   const candidateMrrAt5 = normalizeNumber(metricOf(candidate, 'mrrAt5'), candidateMrr);
   const baselineEmpty = normalizeNumber(metricOf(baseline, 'emptyResultRate'), 0);
   const candidateEmpty = normalizeNumber(metricOf(candidate, 'emptyResultRate'), 0);
+  const baselineP95 = normalizeNumber(metricOf(baseline, 'p95LatencyMs') || metricOf(baseline, 'latency')?.main?.p95Ms, 0);
+  const candidateP95 = normalizeNumber(metricOf(candidate, 'p95LatencyMs') || metricOf(candidate, 'latency')?.main?.p95Ms, 0);
   const failures = [];
   if (candidateRecallAt5 + tolerance < baselineRecallAt5) failures.push('recall_at_5_regressed');
   if (candidateRecall + tolerance < baselineRecall) failures.push('recall_at_8_regressed');
   if (candidateMrrAt5 + tolerance < baselineMrrAt5) failures.push('mrr_at_5_regressed');
   if (candidateMrr + tolerance < baselineMrr) failures.push('mrr_at_8_regressed');
   if (candidateEmpty > baselineEmpty + tolerance) failures.push('empty_result_rate_regressed');
+  if (baselineP95 > 0 && candidateP95 > baselineP95 * Math.max(1, Number(options.maxLatencyRatio || 1.2) || 1.2)) failures.push('p95_latency_regressed');
   return {
     ok: failures.length === 0,
     failures,
@@ -106,7 +112,8 @@ function compareRecallEvalResults(baseline = {}, candidate = {}, options = {}) {
       recallAt8: candidateRecall - baselineRecall,
       mrrAt5: candidateMrrAt5 - baselineMrrAt5,
       mrrAt8: candidateMrr - baselineMrr,
-      emptyResultRate: candidateEmpty - baselineEmpty
+      emptyResultRate: candidateEmpty - baselineEmpty,
+      p95LatencyMs: candidateP95 - baselineP95
     }
   };
 }

@@ -107,6 +107,9 @@ module.exports = (async () => {
   ];
   const tokens = estimateMessagesTokens(messageList);
   assert.ok(tokens <= 820, `expected packet tokens to stay bounded, got ${tokens}`);
+  assert.ok(messageList.length > 0);
+  assert.ok(messageList.every((message) => message.role === 'assistant'), 'memory packet evidence must stay low authority');
+  assert.ok(messageList.every((message) => String(message.content || '').includes('[UntrustedContext]')));
   console.log('memoryPacketBudget.test.js passed');
 })().catch((error) => {
   console.error(error);

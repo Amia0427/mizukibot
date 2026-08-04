@@ -22,11 +22,14 @@ const {
   nowTs
 } = require('../utils/memoryGovernance/common');
 
+const DEFAULT_CASES_FILE = path.join(__dirname, '..', 'tests', 'fixtures', 'post-reply-learning-cases.jsonl');
+
 function parseArgs(argv = []) {
-  const out = { caseId: 'all' };
+  const out = { caseId: 'all', casesPath: DEFAULT_CASES_FILE };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--case') out.caseId = String(argv[i + 1] || 'all').trim() || 'all';
+    else if (arg === '--cases') out.casesPath = String(argv[i + 1] || '').trim();
   }
   return out;
 }
@@ -37,6 +40,14 @@ function readCases(filePath) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+function loadSelectedCases(casesPath, caseId = 'all') {
+  const cases = readCases(path.resolve(casesPath));
+  if (cases.length === 0) throw new Error(`post-reply eval fixture is empty: ${casesPath}`);
+  const selected = cases.filter((item) => caseId === 'all' || item.id === caseId);
+  if (selected.length === 0) throw new Error(`post-reply eval case ${caseId} not found`);
+  return selected;
 }
 
 function sortedUnique(value = []) {
@@ -259,9 +270,7 @@ function runCase(item) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const casesPath = path.join(__dirname, '..', 'artifacts', 'post-reply-eval', 'cases.jsonl');
-  const cases = readCases(casesPath)
-    .filter((item) => args.caseId === 'all' || item.id === args.caseId);
+  const cases = loadSelectedCases(args.casesPath, args.caseId);
   const results = cases.map(runCase);
   const failed = results.filter((item) => !item.ok);
   for (const result of results) {
@@ -279,5 +288,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_CASES_FILE,
+  loadSelectedCases,
+  parseArgs,
   runCase
 };

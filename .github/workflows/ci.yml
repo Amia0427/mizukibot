@@ -56,18 +56,42 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev
 
-      - name: Run tests
+      - name: Run versioned harness eval
+        run: npm run eval:harness:ci
+
+      - name: Upload harness eval report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: harness-eval-${{ github.run_id }}
+          path: artifacts/harness-eval/ci.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Run coverage gate
         shell: pwsh
         run: |
-          npm test 2>&1 | Tee-Object -FilePath test-output.log
+          npm run coverage 2>&1 | Tee-Object -FilePath coverage-output.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload failed test log
+      - name: Upload failed coverage log
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: test-output-${{ github.run_id }}
-          path: test-output.log
+          name: coverage-output-${{ github.run_id }}
+          path: coverage-output.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report-${{ github.run_id }}
+          path: |
+            artifacts/coverage/coverage-summary.json
+            artifacts/coverage/baseline-check.json
+            artifacts/coverage/lcov.info
           if-no-files-found: ignore
           retention-days: 7
 

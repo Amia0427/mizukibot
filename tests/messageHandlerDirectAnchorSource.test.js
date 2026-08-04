@@ -119,15 +119,6 @@ module.exports = (async () => {
       return flow;
     };
 
-    const directChatPlanner = require('../core/directChatPlanner');
-    directChatPlanner.planDirectChat = async () => ({
-      shouldUseTools: false,
-      allowedTools: [],
-      allowedToolNames: [],
-      needsBackground: false,
-      executionPlan: { mode: 'chat_only', steps: [] }
-    });
-
     const config = require('../config');
     const { createMessageHandler } = require('../core/messageHandler');
     const sentPayloads = [];
@@ -159,6 +150,7 @@ module.exports = (async () => {
     console.log('messageHandlerDirectAnchorSource.test.js passed');
   } finally {
     console.log = originalConsoleLog;
+    require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     restoreEnv(snapshot);
     clearProjectCache();
     fs.rmSync(tempDataDir, { recursive: true, force: true });

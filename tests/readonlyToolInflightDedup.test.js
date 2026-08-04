@@ -1,6 +1,11 @@
 const assert = require('assert');
 
 const { createToolExecutionHelpers } = require('../api/runtimeV2/runtime/toolExecution');
+const {
+  getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy
+} = require('../utils/toolPolicy');
 
 module.exports = (async () => {
   let searchCalls = 0;
@@ -17,11 +22,15 @@ module.exports = (async () => {
     summarizeToolLogValue(value) {
       return typeof value === 'string' ? value : JSON.stringify(value);
     },
-    getPolicy(toolName) {
-      return toolName === 'write_tool'
-        ? { capability: 'write', risk: 'high' }
-        : {};
-    },
+    getPolicy,
+    hasPublicToolPolicy,
+    resolveToolPolicy,
+    isDynamicToolRegistered: () => false,
+    executeAuthorizedToolCall: async (input) => ({
+      status: 'completed',
+      executed: true,
+      result: await input.executor({ ...input.normalizedArgs, __context: input.toolContext })
+    }),
     enforceToolPolicy(_toolName, args) {
       return args;
     },
@@ -33,7 +42,7 @@ module.exports = (async () => {
       return null;
     },
     computeEffectiveAllowedTools() {
-      return ['web_search', 'write_tool'];
+      return ['web_search', 'skill_stock_watchlist'];
     },
     createMemoryCliTurnState(value = {}) {
       return value;
@@ -66,7 +75,7 @@ module.exports = (async () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
         return 'search ok';
       },
-      write_tool: async () => {
+      skill_stock_watchlist: async () => {
         writeCalls += 1;
         await new Promise((resolve) => setTimeout(resolve, 20));
         return 'write ok';
@@ -79,7 +88,7 @@ module.exports = (async () => {
       userId: 'u1',
       sessionKey: 's1',
       routeMeta: {},
-      allowedTools: ['web_search', 'write_tool']
+      allowedTools: ['web_search', 'skill_stock_watchlist']
     },
     execution: {
       memoryCliTurn: {}
@@ -109,13 +118,13 @@ module.exports = (async () => {
   await Promise.all([
     helpers.runToolStep({
       id: 'step_3',
-      tool: 'write_tool',
-      inputs: { id: 1 }
+      tool: 'skill_stock_watchlist',
+      inputs: { action: 'add', ticker: 'AAA' }
     }, state, { node: 'dispatch' }),
     helpers.runToolStep({
       id: 'step_4',
-      tool: 'write_tool',
-      inputs: { id: 1 }
+      tool: 'skill_stock_watchlist',
+      inputs: { action: 'add', ticker: 'AAA' }
     }, state, { node: 'dispatch' })
   ]);
 

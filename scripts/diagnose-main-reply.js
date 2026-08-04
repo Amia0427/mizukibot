@@ -89,15 +89,14 @@ function parseArgs(argv = []) {
     limit,
     readLimit,
     logFile,
-    traceFile,
-    plannerMode: flags.has('--live-planner') ? 'live' : 'rule'
+    traceFile
   };
 }
 
 function main() {
   const args = parseArgs(process.argv);
   if (!args.text && !args.cacheStats && !args.truncation) {
-    console.error('usage: node scripts/diagnose-main-reply.js [--live-planner] [--prompt-blocks] [--real-prompt] [--explain-budget] [--max-candidates n] [--cache-stats] [--truncation --limit n] <text-or-json>');
+    console.error('usage: node scripts/diagnose-main-reply.js [--prompt-blocks] [--real-prompt] [--explain-budget] [--max-candidates n] [--cache-stats] [--truncation --limit n] <text-or-json>');
     process.exit(1);
   }
 
@@ -124,9 +123,7 @@ async function run(args) {
     console.log(JSON.stringify(await buildRealPromptDiagnostic(args), null, 2));
     return;
   }
-  const result = await buildMainReplyDiagnosticReport(args.text, {
-    plannerMode: args.plannerMode
-  });
+  const result = await buildMainReplyDiagnosticReport(args.text);
   console.log(JSON.stringify(result, null, 2));
 }
 

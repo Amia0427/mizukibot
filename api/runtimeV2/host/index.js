@@ -7,15 +7,9 @@ const {
   buildDynamicPrompt,
   buildVisionMessageContent,
   buildVisionLiteTextContent,
-  mergeAllowedToolsWithMemoryCli,
   shouldExposeMemoryCli,
   shouldBypassHumanizerForPolicy
 } = require('../context/service');
-const {
-  buildPlan,
-  synthesizeFromPlan,
-  requiresToolEvidence
-} = require('../planning/service');
 const { sanitizeUserFacingText } = require('../../../utils/userFacingText');
 const {
   requestStreamingReply,
@@ -23,49 +17,30 @@ const {
   requestNonStreamingReply,
   requestAssistantMessage
 } = require('../model/service');
-const {
-  buildToolEvidenceBundle,
-  normalizeExecutionEnvelope,
-  normalizeText
-} = require('../contracts');
+const { normalizeText } = require('../contracts');
 const {
   GraphStateV2,
-  buildExecLogsFromSteps,
-  buildReplyOnlyPlan,
-  findEvidenceEnvelope,
-  isCompletedSideEffectStep,
-  normalizePlanForResume,
-  rebuildFinalPlanFromSteps,
   snapshotState
 } = require('../state');
 const {
-  buildDirectChatExecutionBatches,
   buildDirectChatToolStep,
-  compileDirectChatToolCallsToPlan,
   isExcludedDirectChatToolName,
-  parseToolCallArgs
+  isDirectChatRuntimeDependentStep
 } = require('../services/directChat');
 const {
   createRouteAfterRoute,
   createRouteNode
 } = require('../nodes/route');
 const {
-  createPlannerNode
-} = require('../nodes/planner');
+  createAgentDecideNode,
+  createRouteAfterAgentDecide
+} = require('../nodes/agentDecide');
+const {
+  createExecuteToolsNode
+} = require('../nodes/executeTools');
 const {
   createFinalValidateNode
 } = require('../nodes/finalValidate');
-const {
-  createDraftReplyNode,
-  createRouteAfterDraftReply
-} = require('../nodes/draftReply');
-const {
-  createDirectReplyNode,
-  createRouteAfterDirectReply
-} = require('../nodes/directReply');
-const {
-  createDispatchNode
-} = require('../nodes/dispatch');
 const {
   createHumanizeNode
 } = require('../nodes/humanize');
@@ -79,23 +54,17 @@ const {
   createPersistNode
 } = require('../nodes/persist');
 const {
-  createRepairOrContinueNode,
-  createRouteAfterRepair
-} = require('../nodes/repairOrContinue');
-const {
-  createRouteAfterValidate,
-  createValidateNode
-} = require('../nodes/validate');
-const {
-  buildExecutionBatches,
-  executeBatch: executeCapabilityBatch,
   getCapabilityExecutors,
-  resolveCapability,
-  runCapabilityPreflight,
   shouldRunParallel
 } = require('../capabilities/scheduler');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
-const { getPolicy, enforceToolPolicy } = require('../../../utils/toolPolicy');
+const {
+  getPolicy,
+  hasPublicToolPolicy,
+  resolveToolPolicy,
+  enforceToolPolicy
+} = require('../../../utils/toolPolicy');
+const { getDynamicToolNames } = require('../../toolRegistry');
 const { appendDailyJournalEntry } = require('../../../utils/dailyJournal');
 const { runHumanizerAgent, isHumanizerAgentEnabled } = require('../../humanizerAgent');
 const {
@@ -128,12 +97,12 @@ const { learnSomethingNew } = require('../../memoryExtraction');
 const { postWithRetry } = require('../../httpClient');
 const { extractMessageContent } = require('../../parser');
 const { isReplyFailure, classifyReplyFailure } = require('../../../utils/replyFailure');
-const { verifyExecutionResult, buildRepairPlan } = require('../../../utils/agentLoop');
 const {
   captureToolFailure,
   learnSelfImprovement
 } = require('../../../utils/selfImprovementRuntime');
 const { createCheckpointStore } = require('../../../utils/langgraphV2Store');
+const { createRuntimePersistence } = require('./persistence');
 const { getPostReplyJobQueue } = require('../../../utils/postReplyJobQueue');
 const {
   createMemoryCliTurnState,
@@ -158,7 +127,6 @@ const {
 } = require('../../../utils/sessionContextSummaryRuntime');
 const { createConversationContextHelpers } = require('../runtime/conversationContext');
 const { createContinuityProbeHelpers } = require('../runtime/continuityProbe');
-const { createDirectToolLoopHelpers } = require('../runtime/directToolLoop');
 const { createEvent, emitEvents, pickRouteMetaForPostReplyJob, stableHash, summarizeToolLogValue } = require('../runtime/events');
 const {
   appendRequestTraceEvent,
@@ -186,18 +154,13 @@ const {
 const {
   isReviewMode,
   isChatLikeRoute,
-  isDirectChatRequest,
   shouldQueueMemoryLearningForV2,
   shouldAppendDailyJournalForV2
 } = require('./routePredicates');
 const {
   isSideEffectPolicy,
-  getRouteToolPlanner,
-  getToolPlannerExecutionPlan,
-  isPlannerSingleAuthorityEnabled,
   createInitialState,
-  normalizeMode,
-  translatePlan
+  normalizeMode
 } = require('./requestState');
 
 function buildV2CanonicalSegments(state, input = {}) {
@@ -221,11 +184,32 @@ function applyRuntimeReplyOutput(out = {}, options = {}, sanitize = sanitizeUser
   const rawReply = output.displayReply || output.finalReply || output.draftReply || '';
   const sanitized = sanitize(rawReply, { returnMeta: true });
   const finalReply = String(typeof sanitized === 'object' ? sanitized.text : sanitized).trim();
+  const pendingAuthorizations = [];
+  const seenTicketIds = new Set();
+  const addPendingAuthorization = (envelope = {}) => {
+    if (String(envelope.status || '').trim() !== 'confirmation_required') return;
+    const authorization = normalizeObject(envelope.authorization, null);
+    const ticketId = String(authorization?.ticketId || '').trim();
+    if (!ticketId || seenTicketIds.has(ticketId)) return;
+    seenTicketIds.add(ticketId);
+    pendingAuthorizations.push({ ...authorization });
+  };
+  normalizeArray(out.execution?.toolResults).forEach(addPendingAuthorization);
+  normalizeArray(out.plan?.steps).forEach((step) => {
+    normalizeArray(step?.evidence).forEach(addPendingAuthorization);
+  });
+  options.pendingToolAuthorizations = pendingAuthorizations;
   options.hasSafetyRestriction = Boolean(
     output.hasSafetyRestriction === true
     || (typeof sanitized === 'object' && sanitized.hasSafetyRestriction === true)
   );
-  return finalReply || '刚才网络有点不稳，你再发一次我接着回。';
+  const replyText = finalReply || '刚才网络有点不稳，你再发一次我接着回。';
+  if (pendingAuthorizations.length === 0) return replyText;
+  const commands = pendingAuthorizations.map((authorization) => [
+    `确认执行：/tool-confirm ${authorization.ticketId}`,
+    `取消执行：/tool-cancel ${authorization.ticketId}`
+  ].join('\n'));
+  return `${replyText}\n\n${commands.join('\n\n')}`;
 }
 
 function createRuntime(options = {}) {
@@ -235,17 +219,13 @@ function createRuntime(options = {}) {
   const capabilityRuntime = getCapabilityExecutors(runtimeOptions);
   const capabilityRegistry = capabilityRuntime.registry;
   const toolExecutors = normalizeObject(capabilityRuntime.executors, {});
-  const buildPlanImpl = runtimeOptions.buildPlan || buildPlan;
   const buildDynamicPromptImpl = runtimeOptions.buildDynamicPrompt || buildDynamicPrompt;
   const requestReplyImpl = runtimeOptions.requestNonStreamingReply || requestNonStreamingReply;
   const requestStreamingReplyImpl = runtimeOptions.requestStreamingReply || requestStreamingReply;
   const requestAssistantMessageImpl = runtimeOptions.requestAssistantMessage || requestAssistantMessage;
   const finalizeStreamingReplyWithHumanizerImpl = runtimeOptions.finalizeStreamingReplyWithHumanizer || finalizeStreamingReplyWithHumanizer;
-  const synthesizeImpl = runtimeOptions.synthesizeFromPlan || synthesizeFromPlan;
   const runHumanizerImpl = runtimeOptions.runHumanizerAgent || runHumanizerAgent;
   const isHumanizerEnabledImpl = runtimeOptions.isHumanizerAgentEnabled || isHumanizerAgentEnabled;
-  const verifyExecutionImpl = runtimeOptions.verifyExecutionResult || verifyExecutionResult;
-  const buildRepairPlanImpl = runtimeOptions.buildRepairPlan || buildRepairPlan;
   const postReplyJobQueue = runtimeOptions.postReplyJobQueue || getPostReplyJobQueue();
 
   let mcpWarmPromise = null;
@@ -294,15 +274,11 @@ function createRuntime(options = {}) {
     computeEffectiveAllowedTools,
     getMainConversationSystemMessages,
     resolveMainConversationModelName,
-    resolveMainConversationTokenLimit,
-    stripMemoryCliInstruction
+    resolveMainConversationTokenLimit
   } = createConversationContextHelpers({
     config,
     normalizeToolNames,
     filterAllowedToolsForMemoryCliTurn,
-    mergeAllowedToolsWithMemoryCli,
-    isPlannerSingleAuthorityEnabled,
-    getRouteToolPlanner,
     resolveModelTokenLimit,
     buildSecuritySystemPrompt
   });
@@ -320,7 +296,6 @@ function createRuntime(options = {}) {
       assistantOnlyContextMessages: normalizeArray(segmentedMessages.assistantOnlyContextMessages),
       userTurnMessages: normalizeArray(segmentedMessages.userTurnMessages),
       toolEvidenceMessages: normalizeArray(segmentedMessages.globalToolEvidenceMessages),
-      plannerArtifactMessages: normalizeArray(options.plannerArtifactMessages),
       disableMemoryContextSegments: segmentedMessages.disableMemoryContextSegments === true || options.disableMemoryContextSegments === true,
       modelName: resolveMainConversationModelName(request),
       modelWindowTokens: resolveMainConversationTokenLimit(request, affinity),
@@ -388,7 +363,6 @@ function createRuntime(options = {}) {
       affinity: options.affinity || state.memory?.affinity,
       allowedTools: options.allowedTools || request.allowedTools,
       source: String(options.source || 'prepare').trim() || 'prepare',
-      plannerArtifactMessages: normalizeArray(options.plannerArtifactMessages)
     });
     return {
       messages: normalizeArray(directReplyPayload.messages),
@@ -436,7 +410,6 @@ function createRuntime(options = {}) {
       affinity: options.affinity,
       allowedTools: options.allowedTools,
       source: String(options.source || 'direct_reply').trim() || 'direct_reply',
-      plannerArtifactMessages: normalizeArray(options.plannerArtifactMessages)
     });
   }
 
@@ -590,139 +563,10 @@ function createRuntime(options = {}) {
     return !isReplyFailure(trimmed, { emptyIsFailure: true });
   }
 
-  function buildDirectToolLoopExecLogs(executedToolEnvelopes = []) {
-    return normalizeArray(executedToolEnvelopes)
-      .map((envelope, index) => {
-        const toolName = String(envelope?.tool_name || 'tool').trim() || 'tool';
-        const ok = String(envelope?.status || '').trim() === 'completed';
-        return {
-          id: String(envelope?.step_id || `direct_tool_${index + 1}`).trim() || `direct_tool_${index + 1}`,
-          action: toolName,
-          args: {},
-          purpose: `use ${toolName} result to answer the user`,
-          ok,
-          result: ok ? String(envelope?.result || '') : '',
-          error: ok ? '' : String(envelope?.result || envelope?.blockedReason || 'tool failed')
-        };
-      })
-      .filter((row) => row.result || row.error);
-  }
-
-  function buildDirectToolLoopPlan(question = '', execLogs = []) {
-    return {
-      goal: String(question || '').trim() || 'answer the user from collected tool results',
-      need_tools: false,
-      steps: normalizeArray(execLogs).map((row, index) => ({
-        id: String(row?.id || `direct_tool_${index + 1}`).trim() || `direct_tool_${index + 1}`,
-        action: String(row?.action || 'reply').trim() || 'reply',
-        args: normalizeObject(row?.args, {}),
-        purpose: String(row?.purpose || '').trim() || 'answer the user directly from tool evidence'
-      }))
-    };
-  }
-
   function normalizeToolEvidenceSnippet(text = '', maxChars = 480) {
     const compact = String(text || '').replace(/\s+/g, ' ').trim();
     if (!compact) return '';
     return compact.slice(0, Math.max(80, Number(maxChars) || 480));
-  }
-
-  function shouldAttemptMemoryRecovery(question = '', allowedTools = []) {
-    const text = String(question || '').trim().toLowerCase();
-    if (!text) return false;
-    if (!normalizeArray(allowedTools).includes('memory_cli')) return false;
-    return /(where did we leave off|what were we(?: just)? talking about|what were we doing|before|earlier|last time|continue|resume|pick back up|next step|next steps|remember|前几天|记不记得|记得|记不清|事情|上次|刚才|之前|继续|接着|做到哪|聊到哪)/i.test(text);
-  }
-
-  function buildMemoryRecoveryCommand(question = '') {
-    const text = String(question || '').trim();
-    if (!text) return 'mem search --query "where did we leave off" --source recent';
-    if (/(where did we leave off|what were we(?: just)? talking about|what were we doing|before|earlier|last time|continue|resume|pick back up|next step|next steps|remember|前几天|记不记得|记得|记不清|事情|上次|刚才|之前|继续|接着|做到哪|聊到哪)/i.test(text)) {
-      return `mem search --query ${JSON.stringify('where did we leave off')} --source recent`;
-    }
-    return `mem search --query ${JSON.stringify(text)} --source recent`;
-  }
-
-  async function attemptDirectMemoryRecovery(state, directContext, runtimeOptions = {}, currentLoopState = {}) {
-    const request = normalizeObject(state.request, {});
-    const loopState = cloneDirectToolLoopState(currentLoopState);
-    const availableTools = normalizeArray(loopState.effectiveAllowedTools);
-    if (!shouldAttemptMemoryRecovery(directContext.question, availableTools)) return null;
-
-    const memoryStep = {
-      id: `direct_memory_recovery_${Date.now()}`,
-      kind: 'memory_cli',
-      tool: 'memory_cli',
-      instruction: 'recover recent memory context for direct chat answer',
-      inputs: {
-        command: buildMemoryRecoveryCommand(directContext.question)
-      },
-      successCriteria: 'memory result available',
-      attempts: 0,
-      evidence: [],
-      blockingReason: ''
-    };
-
-    const envelope = await runToolStep(memoryStep, {
-      ...state,
-      request: {
-        ...request,
-        allowedTools: availableTools
-      },
-      execution: {
-        ...state.execution,
-        memoryCliTurn: loopState.memoryCliTurn
-      }
-    }, runtimeOptions);
-
-    if (String(envelope?.status || '').trim() !== 'completed') return null;
-
-    const nextMemoryCliTurn = envelope.memoryCliTurn
-      ? createMemoryCliTurnState(envelope.memoryCliTurn)
-      : createMemoryCliTurnState(loopState.memoryCliTurn);
-    const nextAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
-    const executedToolEnvelopes = normalizeArray(loopState.executedToolEnvelopes).concat([{ ...envelope }]);
-    const loopMessages = normalizeArray(loopState.messages).concat([{
-      role: 'tool',
-      tool_call_id: String(envelope.tool_call_id || '').trim() || `memory_recovery_${Date.now()}`,
-      content: String(envelope.result || '')
-    }]);
-    const loopEvents = normalizeArray(loopState.events).concat([
-      createEvent('tool_result', {
-        ...envelope,
-        node: 'direct_reply',
-        tool_call_id: String(envelope.tool_call_id || '').trim() || `memory_recovery_${Date.now()}`
-      }),
-      createEvent('memoryCliTurn', {
-        node: 'direct_reply',
-        memoryCliTurn: nextMemoryCliTurn
-      }),
-      createEvent('effectiveAllowedTools', {
-        node: 'direct_reply',
-        allowedTools: nextAllowedTools
-      }),
-      createEvent('tool_loop_forced_answer', {
-        node: 'direct_reply',
-        reason: 'memory_recovery_after_model_error',
-        allowedTools: nextAllowedTools
-      })
-    ]);
-
-    const replyResolution = await resolveToolLoopReply(
-      { role: 'assistant', content: '' },
-      loopMessages,
-      directContext,
-      'post_tool_empty_reply',
-      executedToolEnvelopes
-    );
-
-    return {
-      reply: replyResolution.text,
-      memoryCliTurn: nextMemoryCliTurn,
-      effectiveAllowedTools: nextAllowedTools,
-      events: loopEvents,
-      executedToolEnvelopes
-    };
   }
 
   function buildDirectToolEvidenceFallback(executedToolEnvelopes = []) {
@@ -803,40 +647,6 @@ function createRuntime(options = {}) {
       }
     }
 
-    const directExecLogs = buildDirectToolLoopExecLogs(executedToolEnvelopes);
-    if (directExecLogs.length > 0) {
-      try {
-        const synthesizedReply = String(await synthesizeImpl(
-          directContext.question || '',
-          directContext.dynamicPrompt || '',
-          buildDirectToolLoopPlan(directContext.question, directExecLogs),
-          directExecLogs,
-          {
-            done: directExecLogs.some((row) => row.ok),
-            confidence: directExecLogs.every((row) => row.ok) ? 0.72 : 0.48,
-            missing: []
-          },
-          directContext.modelConfig
-        ) || '').trim();
-        if (isStableDirectReplyText(synthesizedReply)) {
-          return {
-            text: synthesizedReply,
-            source: 'tool_result_synthesis'
-          };
-        }
-      } catch (error) {
-        if (typeof telemetry.onEvent === 'function') {
-          telemetry.onEvent(createEvent('direct_reply_failure', {
-            node: 'direct_reply',
-            stage: 'tool_result_synthesis',
-            failureType,
-            fallbackSource: 'tool_result_synthesis',
-            rawErrorMessage: summarizeDirectReplyError(error)
-          }));
-        }
-      }
-    }
-
     try {
       const fallbackReply = String(await requestReplyImpl(fallbackMessages, {
         ...directContext,
@@ -909,46 +719,18 @@ function createRuntime(options = {}) {
 
   // Tool-plan answers still converge to one final text. When the graph is
   // streaming, emit only that final text so callers never see draft + final.
-  function persistCheckpoint(state, nodeName, status = 'running') {
-    const threadId = String(state?.thread?.threadId || '').trim();
-    if (!threadId) return;
-    store.saveCheckpoint(threadId, {
-      status,
-      node: nodeName,
-      updatedAt: nowTs(),
-      state: snapshotState(state)
-    });
-  }
-
-  function appendRuntimeEvents(state, events = []) {
-    const normalized = normalizeArray(events).filter(Boolean);
-    if (normalized.length === 0) return;
-    const threadId = String(state?.thread?.threadId || '').trim();
-    const requestTrace = normalizeRequestTrace(state?.request?.requestTrace)
-      || normalizeRequestTrace(state?.request?.routeMeta?.requestTrace);
-    if (threadId) {
-      store.appendEvents(threadId, normalized);
-    }
-    if (requestTrace) {
-      for (const event of normalized) {
-        appendRequestTraceEvent(nextTracePhase(requestTrace, `runtime_v2_${String(event?.type || 'event').trim() || 'event'}`, {
-          tracePhase: `runtime_v2_${String(event?.type || 'event').trim() || 'event'}`,
-          stage: String(event?.type || 'runtime_v2_event').trim() || 'runtime_v2_event',
-          source: 'runtimeV2',
-          node: String(event?.node || state?.thread?.currentNode || '').trim(),
-          routePolicyKey: String(state?.request?.routePolicyKey || state?.request?.routeMeta?.routePolicyKey || '').trim(),
-          routeDebugKey: String(state?.request?.routeDebugKey || state?.request?.routeMeta?.routeDebugKey || '').trim(),
-          topRouteType: String(state?.request?.topRouteType || state?.request?.routeMeta?.topRouteType || '').trim(),
-          dispatchBranch: String(state?.request?.dispatchBranch || event?.dispatchBranch || '').trim(),
-          triggerBranch: String(event?.triggerBranch || '').trim(),
-          durationMs: Number.isFinite(Number(event?.durationMs)) ? Math.max(0, Math.floor(Number(event.durationMs))) : null,
-          finalErrorCode: String(event?.finalErrorCode || event?.errorCode || '').trim(),
-          error: String(event?.error || event?.rawErrorMessage || '').trim().slice(0, 400)
-        }));
-      }
-    }
-    emitEvents(normalized, state?.request || {});
-  }
+  const {
+    appendRuntimeEvents,
+    saveTransition
+  } = createRuntimePersistence({
+    appendRequestTraceEvent,
+    emitEvents,
+    nextTracePhase,
+    normalizeRequestTrace,
+    nowTs,
+    snapshotState,
+    store
+  });
 
   function withLatencyBreakdown(state, nodeName, meta = {}) {
     const nextState = {
@@ -971,8 +753,7 @@ function createRuntime(options = {}) {
     const nextState = withLatencyBreakdown(state, nodeName, {
       completedAt: nowTs()
     });
-    appendRuntimeEvents(nextState, events);
-    persistCheckpoint(nextState, nodeName, status);
+    saveTransition(nextState, nodeName, status, events);
     return nextState;
   }
 
@@ -990,6 +771,11 @@ function createRuntime(options = {}) {
     stableHash,
     summarizeToolLogValue,
     getPolicy,
+    resolveToolPolicy,
+    hasPublicToolPolicy,
+    isDynamicToolRegistered(toolName) {
+      return getDynamicToolNames().includes(String(toolName || '').trim());
+    },
     enforceToolPolicy,
     shouldRunParallel,
     capabilityRegistry,
@@ -1001,7 +787,6 @@ function createRuntime(options = {}) {
     decideMemoryCliTurnAction,
     safeParseMemoryCliResult,
     captureToolFailure,
-    isPlannerSingleAuthorityEnabled,
     toolExecutors
   });
 
@@ -1049,27 +834,6 @@ function createRuntime(options = {}) {
     shortTermMemory
   });
 
-  const {
-    cloneDirectToolLoopState,
-    runDirectChatToolLoop
-  } = createDirectToolLoopHelpers({
-    createEvent,
-    normalizeMessageForToolLoop,
-    requestAssistantMessageImpl,
-    buildDirectChatToolStep,
-    buildDirectChatExecutionBatches,
-    parseToolCallArgs,
-    isExcludedDirectChatToolName,
-    computeEffectiveAllowedTools,
-    createMemoryCliTurnState,
-    updateMemoryCliTurnStateAfterError,
-    runToolStep,
-    computeToolEnvelope,
-    getPolicy,
-    logToolExecution,
-    resolveToolLoopReply
-  });
-
   const routeNode = createRouteNode({
     createEvent,
     normalizeMode,
@@ -1080,81 +844,11 @@ function createRuntime(options = {}) {
     normalizeMode
   });
 
-  const plannerNode = createPlannerNode({
-    normalizeObject,
-    normalizeArray,
-    createEvent,
-    isPlannerSingleAuthorityEnabled,
-    getToolPlannerExecutionPlan,
-    buildPlanImpl,
-    translatePlan,
-    rebuildFinalPlanFromSteps,
-    saveAndEmit
-  });
-
-  const validateNode = createValidateNode({
-    createEvent,
-    normalizeObject,
-    normalizeArray,
-    rebuildFinalPlanFromSteps,
-    buildExecLogsFromSteps,
-    verifyExecutionImpl,
-    getMaxRounds() {
-      return Math.max(1, Math.min(3, Number(config.AGENT_MAX_ROUNDS) || 3));
-    },
-    saveAndEmit
-  });
-
-  const routeAfterValidate = createRouteAfterValidate({
-    normalizeArray,
-    getMaxRounds() {
-      return Math.max(1, Math.min(3, Number(config.AGENT_MAX_ROUNDS) || 3));
-    }
-  });
-
-  const repairNode = createRepairOrContinueNode({
-    rebuildFinalPlanFromSteps,
-    normalizeObject,
-    normalizeArray,
-    buildRepairPlanImpl,
-    isCompletedSideEffectStep,
-    createEvent,
-    saveAndEmit
-  });
-
-  const routeAfterRepair = createRouteAfterRepair({
-    normalizeArray
-  });
-
   const finalValidateNode = createFinalValidateNode({
     createEvent,
     isReplyFailure,
     classifyReplyFailure,
     protectFinalOutput,
-    saveAndEmit
-  });
-
-  const routeAfterDraftReply = createRouteAfterDraftReply();
-
-  const draftReplyNode = createDraftReplyNode({
-    normalizeObject,
-    normalizeArray,
-    createEvent,
-    buildDynamicPromptImpl,
-    rebuildFinalPlanFromSteps,
-    buildContinuitySystemMessage,
-    isReviewMode,
-    getMainConversationSystemMessages,
-    buildDirectReplyMessages,
-    buildVisionMessageContent,
-    normalizeMessageForToolLoop,
-    requestAssistantMessageImpl,
-    compileDirectChatToolCallsToPlan,
-    computeEffectiveAllowedTools,
-    resolveToolLoopReply,
-    buildToolEvidenceBundle,
-    normalizeExecutionEnvelope,
-    synthesizeImpl,
     saveAndEmit
   });
 
@@ -1249,13 +943,9 @@ function createRuntime(options = {}) {
     buildContinuityState,
     createMemoryCliTurnState,
     computeEffectiveAllowedTools,
-    runCapabilityPreflight,
     buildDynamicPromptImpl,
     buildPreparedMainConversationContext,
     classifyPromptThreat,
-    getToolPlannerExecutionPlan,
-    isPlannerSingleAuthorityEnabled,
-    normalizePlanForResume,
     normalizeMode,
     ensureOutputStream,
     buildLatencyDecision,
@@ -1299,112 +989,45 @@ function createRuntime(options = {}) {
     saveAndEmit
   });
 
-  const routeAfterDirectReplyImpl = createRouteAfterDirectReply();
-
-  const directReplyNodeImpl = createDirectReplyNode({
-    normalizeObject,
-    normalizeArray,
+  const agentDecideNodeImpl = createAgentDecideNode({
     createEvent,
-    isReviewMode,
-    shouldBypassHumanizerForPolicy,
-    computeEffectiveAllowedTools,
-    getToolPlannerExecutionPlan,
-    isPlannerSingleAuthorityEnabled,
-    getRouteToolPlanner,
+    saveAndEmit,
+    normalizeMessageForToolLoop,
     buildVisionMessageContent,
-    stripMemoryCliInstruction,
     getMainConversationSystemMessages,
     buildDirectReplyMessages,
-    buildLiveMainConversationSnapshot,
-    ensureOutputStream,
-    createMemoryCliTurnState,
-    cloneDirectToolLoopState,
-    normalizeMessageForToolLoop,
-    requestAssistantMessageImpl,
-    compileDirectChatToolCallsToPlan,
-    saveAndEmit,
-    mirrorStreamingFlags,
-    isPureToolCallMarkup,
+    isReviewMode,
     streamDirectReply,
     requestReplyImpl,
+    requestAssistantMessageImpl,
+    resolveToolLoopReply,
+    isPureToolCallMarkup,
+    ensureOutputStream,
     classifyDirectReplyError,
     summarizeDirectReplyError,
-    attemptDirectMemoryRecovery,
     getControlledFailureReply,
-    updateMemoryCliTurnStateAfterError,
-    classifyReplyFailure
+    getMaxToolRounds() {
+      return Math.max(1, Math.min(3, Number(config.AGENT_MAX_ROUNDS) || 3));
+    },
+    getMaxToolCalls() {
+      return Math.max(1, Math.min(4, Number(config.DIRECT_TOOL_MAX_CALLS_PER_TURN) || 4));
+    }
   });
 
-  const dispatchNodeImpl = createDispatchNode({
-    normalizeObject,
-    normalizeArray,
+  const executeToolsNodeImpl = createExecuteToolsNode({
     createEvent,
-    stableHash,
-    isCompletedSideEffectStep,
-    findEvidenceEnvelope,
-    isDirectChatRequest,
-    buildDirectChatExecutionBatches,
+    saveAndEmit,
+    saveTransition,
+    buildDirectChatToolStep,
+    isExcludedDirectChatToolName,
+    isDirectChatRuntimeDependentStep,
     canRunStepsInParallel,
-    buildExecutionBatches,
-    buildLiveMainConversationSnapshot,
-    computeEffectiveAllowedTools,
-    createMemoryCliTurnState,
-    persistCheckpoint,
-    appendRuntimeEvents,
-    updatePlanStepsWithEnvelope,
     getPolicy,
     isSideEffectPolicy,
-    runCapabilityPreflight,
-    executeBatch(steps, dispatchState, runtimeContext) {
-      return executeCapabilityBatch(steps, dispatchState, {
-        ...runtimeContext,
-        registry: capabilityRegistry,
-        executors: toolExecutors,
-        helpers: {
-          stableHash,
-          buildLiveMainConversationSnapshot,
-          computeEffectiveAllowedTools,
-          enforceToolPolicy,
-          captureToolFailure
-        }
-      });
-    },
-    normalizeExecutionEnvelope,
-    rebuildFinalPlanFromSteps,
-    buildExecLogsFromSteps,
-    mergeAllowedToolsWithMemoryCli,
-    requiresToolEvidence,
-    saveAndEmit,
-    config
+    runToolStep
   });
 
-  function updatePlanStepsWithEnvelope(steps = [], envelope = {}) {
-    return normalizeArray(steps).map((step) => {
-      if (String(step.id || '').trim() !== String(envelope.step_id || '').trim()) return { ...step };
-      const evidence = normalizeArray(step.evidence).concat([envelope]);
-      const batchId = String(envelope.batch_id || step.batchId || '').trim();
-      const batchIndex = Number.isFinite(Number(envelope.batch_index))
-        ? Number(envelope.batch_index)
-        : (Number.isFinite(Number(step.batchIndex)) ? Number(step.batchIndex) : null);
-      return {
-        ...step,
-        inputs: envelope.args && typeof envelope.args === 'object' && !Array.isArray(envelope.args)
-          ? { ...envelope.args }
-          : step.inputs,
-        attempts: Number(step.attempts || 0) + 1,
-        status: envelope.status === 'completed' ? 'completed' : 'failed',
-        evidence,
-        blockingReason: envelope.status === 'completed'
-          ? ''
-          : String(envelope.blockedReason || envelope.result || '').slice(0, 240),
-        runtimeBinding: Object.prototype.hasOwnProperty.call(envelope, 'runtimeBinding')
-          ? (envelope.runtimeBinding === null ? null : normalizeObject(envelope.runtimeBinding, {}))
-          : step.runtimeBinding,
-        batchId,
-        batchIndex
-      };
-    });
-  }
+  const routeAfterAgentDecide = createRouteAfterAgentDecide();
 
   const graph = new StateGraph(GraphStateV2);
   applyLangGraphV2Topology(graph, {
@@ -1413,22 +1036,15 @@ function createRuntime(options = {}) {
       prepare: prepareNodeImpl,
       enhance_live_state: enhanceLiveStateNodeImpl,
       route: routeNode,
-      direct_reply: directReplyNodeImpl,
-      planner: plannerNode,
-      dispatch: dispatchNodeImpl,
-      validate: validateNode,
-      repair_or_continue: repairNode,
-      draft_reply: draftReplyNode,
+      agent_decide: agentDecideNodeImpl,
+      execute_tools: executeToolsNodeImpl,
       humanize: humanizeNode,
       final_validate: finalValidateNode,
       persist: persistNode
     },
     routers: {
       routeAfterRoute,
-      routeAfterDirectReply: routeAfterDirectReplyImpl,
-      routeAfterValidate,
-      routeAfterRepair,
-      routeAfterDraftReply
+      routeAfterAgentDecide
     }
   });
 
@@ -1514,6 +1130,7 @@ function getRuntime() {
 }
 
 function resetRuntime() {
+  if (runtimeSingleton) runtimeSingleton.store.close();
   runtimeSingleton = null;
   return getRuntime();
 }

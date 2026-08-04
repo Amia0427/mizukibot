@@ -13,6 +13,7 @@ process.env.MEMORY_V3_PROJECTIONS_DIR = path.join(process.env.MEMORY_V3_DIR, 'pr
 process.env.MEMORY_V3_NODES_FILE = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'memory_nodes.jsonl');
 process.env.MEMORY_V3_EMBEDDING_CACHE_FILE = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'embedding_cache.jsonl');
 process.env.MEMORY_V3_ENABLED = 'true';
+process.env.MEMORY_STORAGE_MODE = 'v3_only';
 process.env.MEMORY_TRACE_ENABLED = 'true';
 process.env.MEMORY_RAG_ENABLED = 'true';
 process.env.MEMORY_HYBRID_RECALL_ENABLED = 'true';
@@ -120,16 +121,14 @@ module.exports = (async () => {
       topRouteType: 'direct_chat',
       memoryContext,
       routeMeta: {
-        directChatPlanner: {
-          dynamicPromptPlan: {
-            schemaVersion: 'dynamic_context_plan_v2',
-            enabledBlockIds: [],
-            personaModules: [],
-            blockDecisions: [
-              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.9, priority: 20, reason: 'planner miss' }
-            ],
-            rationaleByBlock: {}
-          }
+        dynamicPromptPlan: {
+          schemaVersion: 'dynamic_context_plan_v2',
+          enabledBlockIds: [],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.9, priority: 20, reason: 'dynamic plan miss' }
+          ],
+          rationaleByBlock: {}
         }
       }
     }
@@ -150,9 +149,12 @@ module.exports = (async () => {
   }]);
   assert.strictEqual(legacyIds.length, 1);
   const previousV3Enabled = process.env.MEMORY_V3_ENABLED;
+  const previousStorageMode = process.env.MEMORY_STORAGE_MODE;
   const config = require('../config');
   process.env.MEMORY_V3_ENABLED = 'false';
+  process.env.MEMORY_STORAGE_MODE = 'legacy_compat';
   config.MEMORY_V3_ENABLED = false;
+  config.MEMORY_STORAGE_MODE = 'legacy_compat';
   const legacyContext = await buildMemoryContextAsync('u_legacy_prompt', 'where is the brass adapter', {
     routePolicyKey: 'chat/default',
     topRouteType: 'direct_chat',
@@ -162,7 +164,9 @@ module.exports = (async () => {
   assert.ok(String(legacyContext.memoryForPrompt || '').includes('blue tin'), 'legacy unified fallback must enter memoryForPrompt');
   assert.ok(legacyContext.diagnostics.memoryTrace.injected_block_ids.includes('retrieved_memory_lite'));
   process.env.MEMORY_V3_ENABLED = previousV3Enabled;
+  process.env.MEMORY_STORAGE_MODE = previousStorageMode;
   config.MEMORY_V3_ENABLED = true;
+  config.MEMORY_STORAGE_MODE = previousStorageMode;
 
   console.log('memoryVectorPromptGuarantee.test.js passed');
 })().catch((error) => {

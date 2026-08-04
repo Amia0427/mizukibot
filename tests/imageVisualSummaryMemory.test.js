@@ -24,10 +24,8 @@ process.env.TIMEZONE = 'Asia/Shanghai';
 
 const cacheDir = path.join(tempRoot, 'inbound_image_cache');
 fs.mkdirSync(cacheDir, { recursive: true });
-const tinyJpegBase64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/AgP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/ISP/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z';
 
-function writeCachedImage(cacheKey, sourceUrl) {
-  const buffer = Buffer.from(tinyJpegBase64, 'base64');
+function writeCachedImage(cacheKey, sourceUrl, buffer) {
   fs.writeFileSync(path.join(cacheDir, `${cacheKey}.bin`), buffer);
   fs.writeFileSync(path.join(cacheDir, `${cacheKey}.json`), JSON.stringify({
     cacheKey,
@@ -38,10 +36,6 @@ function writeCachedImage(cacheKey, sourceUrl) {
   }, null, 2));
 }
 
-writeCachedImage('score_img', 'https://example.com/score.png');
-writeCachedImage('text_model_img', 'https://example.com/text-model.png');
-writeCachedImage('failure_img', 'https://example.com/failure.png');
-writeCachedImage('raw_provider_img', 'https://example.com/raw-provider.png');
 fs.writeFileSync(process.env.MEMORY_SCOPE_INDEX_FILE, JSON.stringify({ version: 1, users: {} }, null, 2));
 
 const config = require('../config');
@@ -61,6 +55,19 @@ const {
 
 module.exports = (async () => {
   const sharp = require('sharp');
+  const cachedImageBuffer = await sharp({
+    create: {
+      width: 1,
+      height: 1,
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 }
+    }
+  }).jpeg().toBuffer();
+  writeCachedImage('score_img', 'https://example.com/score.png', cachedImageBuffer);
+  writeCachedImage('text_model_img', 'https://example.com/text-model.png', cachedImageBuffer);
+  writeCachedImage('failure_img', 'https://example.com/failure.png', cachedImageBuffer);
+  writeCachedImage('raw_provider_img', 'https://example.com/raw-provider.png', cachedImageBuffer);
+
   const tallJpeg = await sharp({
     create: {
       width: 1200,
@@ -108,7 +115,7 @@ module.exports = (async () => {
   const fittedVisualInput = await fitVisualSummaryImagePayloadToBudget(largeImagePayload, largeImageContext);
   assert.strictEqual(fittedVisualInput, largeImagePayload, 'image should not be recompressed when token budget already fits');
 
-  writeCachedImage('singleflight_img', 'https://example.com/singleflight.png');
+  writeCachedImage('singleflight_img', 'https://example.com/singleflight.png', cachedImageBuffer);
   let releaseSingleflight = null;
   let singleflightCalls = 0;
   const singleflightPromise = new Promise((resolve) => { releaseSingleflight = resolve; });

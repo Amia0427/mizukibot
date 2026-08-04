@@ -1,3 +1,137 @@
+## 运行维护 2026-08-04 13:05 +08:00
+
+- 小目标：收敛舞萌谱面 SQL/RAG 的普通聊天误召回；功能提交为 `c82ad3d`。`classifyMaimaiIntent()` 以“明确舞萌名或至少两个专属谱面信号”确认领域，再要求谱面检索、单谱分析或当前用户成绩意图，仅授权唯一目标工具并保留其他领域工具。
+- 执行保护：路由只读取当前 `cleanText`，不继承引用、摘要或上一轮结果；执行器以当前问题再次分类。目标工具不一致返回 `blocked: maimai_route_mismatch`，单谱标题缺失或不在当前问题中时在数据库访问前阻断；`MAIMAI_ENABLED=false` 时不暴露舞萌工具。
+- 结果契约：单谱分析区分 `ok`、`ambiguous`、`not_found`、`unavailable` 和 `blocked`；只有 `ok` 返回完整特征与代表段，歧义最多返回 5 个候选并设置 `answerPolicy=clarify`。SQL 候选与向量结果的强制求交保持不变。
+- 自动验收：32 条普通聊天负例、9 条舞萌闲聊负例和 13 条正例全部命中预期；15 项舞萌回归、812 文件 lint、typecheck、Prompt、全仓与暂存区密钥扫描、diff check 和 166.9 秒完整测试均退出 0。功能关闭、AI Router 注入、模型伪造调用和标题时，底层查询调用保持 0。
+- 真实只读验收：generation 2 的定数 13.7 至 14.0 DX 紫谱搜索返回 5 条；`PANDORA PARADOXXX` 标准白谱唯一命中 `df:834:SD:4`，定数 15.0、物量 1342、映射置信度 1.0；5 条普通聊天探针的舞萌工具授权均为 0。未使用 Import-Token，未修改同步、映射、特征、弱项算法或真实数据，未纳入 `.belt/`、`AGENT.md` 和并行未跟踪测试，未推送远端。
+
+## 运行维护 2026-08-04 12:42 +08:00
+
+- 合并：提交 `7c23451` 将 `codex/memory-v3-lancedb-convergence` 合入部署分支 `amia/dev`，父提交依次为部署 `0b6d779` 与收敛 `eef03db`；原部署分支领先的 8 个提交和收敛分支的 8 个提交均保持为祖先。
+- 冲突与保护：仅 README、架构地图、维护日志发生内容冲突，均保留两边事实；`AGENT.md` SHA-256 保持 `B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`，`.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js` 仍未跟踪且未纳入提交。
+- 验收：21 项 Memory V3、日期召回、post-reply、ReAct 与舞萌交叉回归通过；`npm test` 172.1 秒退出 0；lint、typecheck、Prompt、全仓密钥、`git diff --cached --check` 均退出 0。coverage 报告基线为 overall 行 72.55%、函数 80.49%、分支 61.68%，web、runtime-v2、stable-boundaries 与 overall 四个 scope 全部通过；coverage 测试阶段一次外部 DNS 失败后，环境数据和 YouTube 用例单独复跑通过。
+- 运行边界：仅完成源码合并，未重启主进程或 worker，未执行 convergence apply、修改 `.env`、归档旧文件或重建 LanceDB；默认仍为 `legacy_compat`，未推送远端。
+
+## 运行维护 2026-08-04 12:24 +08:00
+
+- 新增 `docs/maimai-user-guide.md`，按普通查询、单谱分析、个人绑定、成绩刷新、弱项推断、数据边界和常见问题说明舞萌功能；示例文案已通过当前 Planner 路由探针，明确多谱筛选与单谱手法分析需要分步提问。
+- 新增 `docs/maimai-update-announcement-2026-08-04.md`，提供可直接发布的 QQ 群公告短版和更新日志长版，明确 Import-Token 仅私聊、群聊个人结果公开、不能定位实际掉音和谱面同步延迟。
+- 验收（2026-08-04 12:22 +08:00）：6 条公开问法全部命中预期工具；开发文档、命令、Planner 路由和工具契约 4 项定向测试通过；5 份文档本地链接检查、Prompt 清单、工作区/全仓密钥扫描、暂存区文件名单及 diff check 均通过。
+- README 与舞萌开发文档已增加入口；文档提交 `f3220cf` 已完成。本轮只修改文档，不改业务代码，不纳入 `.belt/`、`AGENT.md` 和并行的 `tests/maimaiAgentIntegration.test.js`，未推送远端。
+
+## 运行维护 2026-08-04 12:05 +08:00
+
+- 真实预检：在独立工作树中显式使用 `DATA_DIR=D:\waifu\data` 和 `MEMORY_LANCEDB_DIR=D:\waifu\data\lancedb_user_bucket`。`converge-20260804T040343` 的 plan hash 为 `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591`，源文件 hash 为 `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`；迁移候选 24,411，`strict-v1` 候选 2,535，预计 LanceDB 行 26,676，预计重建 28.75 秒。
+- 门禁修复：提交 `1a59274` 排除不能作为跨用户负例的群记忆；提交 `49ac6dd` 修复目标日期日记已存在于 rerank tail 时未获硬优先级的问题。失败计划 `converge-20260804T034114` 和 `converge-20260804T034857` 的 candidate Recall@8/MRR@8 为 `0.900/0.8875`，均按门禁停止；修复后 baseline/candidate 均为 `0.925/0.925`，scope/lifecycle/forbidden 为 0。
+- 存储验收：真实 LanceDB memory/worldbook `readyButNotSynced=0`、`staleTableRows=0`，storage-overlap missing/orphan/unexpected 均为 0，projection stale=false，`recommendedAction=none`。
+- 自动验收：完整测试在 `1a59274` 后 138.4 秒通过，覆盖率门禁为行 72.28%、函数 80.04%、分支 61.83%；`49ac6dd` 后五项 Memory/日期回归、lint、typecheck 通过。随后完整复跑中的 Memory 测试继续通过，但既有 `environmentDataRouting` 与 `nativeWatchlistYoutube` 受外部 Web Search/YouTube DNS 和超时阻断，因此未记为全量通过。
+- 部署代码已合并，默认仍为 `legacy_compat`；未暂停或重启主进程/worker，未导入事件、归档旧文件、修改 `.env` 或重建 LanceDB。实际归档 manifest hash、维护窗口耗时仍为 `N/A`。
+
+## 运行维护 2026-08-04 11:00 +08:00
+
+- 小目标：完成舞萌谱面 SQL/RAG、个性化成绩分析和现有主回复链路接入；功能提交为 `5a53eb3`。`src/features/maimai/` 统一负责增量同步、Simai 解析、硬条件映射、SQLite/LanceDB 版本切换、检索、凭据、成绩快照、弱项推断和 `/mai` 命令。
+- 数据与安全：公共查询在没有主密钥时仍可使用；Import-Token 仅私聊绑定，以 AES-256-GCM 和 QQ 用户 AAD 加密，并在 NapCat 入站最前阶段消费，禁止进入日志、Router、模型、记忆、被动感知和诊断。查询执行 SQL 候选与向量命中的双重求交，embedding 失败明确降级为 `sql_only`。
+- 真实验收：generation 2 激活，1362 首歌、5432 张谱面、解析率 100%、确认映射 3792、隔离 1141、覆盖率 76.87%、代表段 11376、文档/向量各 15168；真实混合查询 579 ms。`PANDORA PARADOXXX` 白谱命中 `df:834:SD:4`，定数 15.0、物量 1342、置信度 1.0。
+- 自动验收：13 项舞萌测试、lint、typecheck、Prompt、暂存密钥扫描和 diff check 退出 0。稳定 HEAD 的完整测试运行 158.9 秒后退出 1，单独确认为本机 `localAclScriptSource.test.js` 向 ACL 脚本传入空 `Path`；舞萌用例均通过。运行 Node `v24.14.1` 超出项目 `>=20 <21` 声明。
+- 边界：真实同步 generation 使用 3792 条确定性摘要缓存；模型润色适配器与非法输出回退已有自动测试，但没有真实摘要模型和用户 Import-Token，未宣称完成真实个人成绩接口验收。完整说明见 `docs/maimai-sql-rag.md`；小目标已完成，未推送远端。
+
+## 运行维护 2026-08-04 10:56 +08:00
+
+- 根因：长期记忆业务读写同时依赖 Memory V3 与旧 JSON/shard vector store，embedding 能力也被旧 store 持有；直接删除旧文件会破坏默认兼容路径，且历史治理缺少稳定身份、可审计清单和完整恢复协议。
+- 实现：提交 `68a5903` 建立 Memory V3 仓储、共享 embedding 和 `strict-v1` 可逆归档；提交 `62fac86` 迁移记忆提取、post-reply enrich、群/任务记忆、短期重启召回、Memory CLI、Prompt 上下文与 style/jargon 消费者；提交 `b2ffed0` 增加稳定增量迁移、预检计划、8 分钟截止回滚、LanceDB full reconcile、旧文件 manifest 归档/恢复和 `legacy_compat|v3_shadow|v3_only` 模式。提交 `d682fe3` 修复独立工作树测试路径与 Windows ACL 模块路径兼容。
+- 治理边界：`strict-v1` 只归档确定性重复败者、有效 `supersededBy`、Prompt/系统/工具指令污染、误存的助手自述/拒绝/失败回复，以及空值/占位/无效 scope；低置信、年龄、玩笑、短期性、图片描述或主观评分不会单独触发归档。事件保留 `runId/policyVersion/reason/previousStatus/sourceId/evidenceHash`，恢复只追加 `memory_confirmed`，不删除事件。
+- 自动验收：使用 `MIZUKIBOT_ENV_FILE=D:\waifu\.env` 与工作树 `PROMPTS_DIR`，`npm test`、`npm run coverage`、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 全部退出 0；覆盖率为行 72.27%、函数 80.04%、分支 61.83%。V3-only 缺失旧文件启动、旧文件零写、shadow 只统计、迁移幂等、治理恢复和消费者静态边界均有回归测试。
+- 未执行真实维护窗口：本地 `.env` 仍未切换，未暂停或重启主进程/worker，未导入真实历史、归档旧文件或修改 LanceDB。迁移 `runId=N/A`、归档 manifest hash `N/A`、维护耗时 `N/A`；若计划停在 `applying`，必须显式运行 `node scripts/migrate-memory-v3.js --rollback-run <runId|plan.json>`，不得直接重试 apply。
+- 边界：未删除任何文件，未触碰主工作树的 `.belt/`、`AGENT.md` 或其他代理改动，未推送远端。Memory V3/LanceDB 代码收敛小目标已完成，真实数据切换仍等待独立维护窗口。
+
+## 运行维护 2026-08-04 +08:00
+
+- 小目标：以 LangGraph 原生 ReAct 循环取代 direct-chat Planner 和预生成执行计划链；实现提交为 `87cf7d4`。生产拓扑统一为 `route -> agent_decide -> execute_tools -> agent_decide -> humanize -> final_validate -> persist`，无工具路由保持流式，工具路由只输出最终回答。
+- 授权与恢复：Router `allowedTools` 是工具暴露上界，运行时只能收窄；每轮最多 3 个工具轮次、累计 4 次调用，越权、参数错误、重复和超额调用均回灌明确 tool result。副作用顺序执行并在前后写 checkpoint，恢复时依据已完成调用状态避免重放；只读工具可安全并行。
+- 清理范围：删除 Planner 配置、prompt、planning package、旧图节点及不可达专属测试；后台研究队列与研究语义代码保留但不再入队，历史 research brief 仍可读取。新增 `agent_decision`、`agent_tool_round`、`agent_tool_result`、`agent_limit_reached`、`agent_forced_final` 观测事件。
+- 验收：定向执行 `node scripts/run-tests.js tests/langgraphCheckpointSnapshot.test.js tests/runTestsRunner.test.js tests/checkSecretsAllMode.test.js` 及 prompt 治理回归，均退出 0；`npm run lint`、`npm run typecheck`、`npm run check:agent:static` 均退出 0；完整 `npm test` 用时 158.5 秒并退出 0；隔离索引 `git diff --cached --check` 退出 0。
+- 并行保护：提交前后主索引中的舞萌等暂存路径保持原清单，四个重叠文件经三方合并保留两边内容；未纳入 `package-lock.json`、`simai.js`、`.learnings/**` 和舞萌业务文件，未推送远端。小目标已完成。
+
+## 运行维护 2026-08-02 17:21 +08:00
+
+- 根因：LangGraph V2 的 checkpoint 与 event 仍分散写入 JSON，节点与副作用边界可能只落一半；全量启动扫描 legacy 会放大 I/O，单个坏 payload 或 SQLite 物理损坏也缺少明确隔离等级。
+- 实现：提交 `0a45d71`、`e2664a1`、`21e3080`、`3cfd85b`、`cc5468d`、`654170a` 将新写入端切到 `DATA_DIR/langgraph_v2.sqlite`，以 `saveTransition()` 单事务提交 checkpoint/event；legacy 只按 thread 惰性读取且永久只读，`clear()` 原子删除 SQLite 数据并保留 tombstone。逻辑坏行进入 quarantine，物理损坏 fail closed；热重载、全局 shutdown 和诊断均纳入连接生命周期。提交 `662914a` 补齐 7 个临时 `DATA_DIR` 测试的显式 SQLite 关闭和诊断测试的独立 store 路径。
+- 验收：Node 20.20.2（ABI 115 hook）与 Node 24.14.1 的 LangGraph 聚焦回归通过；Node 24 完整测试为 574/574。804 文件 lint、typecheck、Agent 静态检查、Prompt、全仓 secrets、diff check 和 coverage 均退出 0；覆盖率为 Statements/Lines `72.19%`、Branches `62.18%`、Functions `80.00%`，四个 scope 全部通过。
+- 数据与诊断：`diag:runtime -- --json` 报告 SQLite `healthy`、`quick_check=ok`、0 checkpoint、0 event、0 quarantine；legacy 保持 120/6209 文件、137,990,244/80,529,200 bytes、0 坏 JSON，聚合 SHA-256 分别为 `03a2b843ee304ddcf7644f7e112d8af1eeb8e9a60e2a8f2de78cde9c311a3b19`、`b32db4452e9c3a4eb75f1884165c77ac06b8c7f6311601fba996667455869686`。
+- 边界：未修改或暂存 `AGENT.md` 与 `prompts/admin.txt`，SHA-256 分别保持 `B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`、`2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；LangGraph V2 SQLite 原子存储小目标已完成，未推送远端。
+
+## 运行维护 2026-08-02 15:24 +08:00
+
+- 根因：`harness_eval_manifest_v1` 只固定 fixture，三个本地评估仍分别解析控制台与硬编码阈值，也没有统一 profile/report 契约；真实模型与脱敏回放只有名称，没有可验证的输入元数据、时效和最小覆盖边界。
+- 实现：提交 `34ec277` 升级为 `harness_eval_manifest_v2`，统一 5 个 suite 的 runner、case schema、synthetic data policy、metrics 和 thresholds。顶层 runner 使用白名单环境、独立临时目录、超时/输出上限和原子报告；CI 始终上传 `artifacts/harness-eval/ci.json`，缺失报告视为失败。
+- Harness 验收：Node 20.20.2 下 `ci` profile 通过 3 个 suite，case 数为 routing 30、auto-gold 2、post-reply 22；`nightly:verify` 按预期退出 1，三个本地 suite 通过，`live-model-tasks` 与 `redacted-replay` 均记录 `external_input_missing`。外部结果只验证 producer 自报元数据、时效、覆盖量和阈值，不声称执行或认证 producer。
+- 仓库验收：Node 20 全量测试 116 秒退出 0，覆盖率 145.6 秒退出 0；四个 scope 为 overall `72.10/78.51/62.16`、web `79.84/87.50/80.59`、Runtime V2 `77.69/63.29/63.97`、stable boundaries `86.00/80.38/72.74`（行/函数/分支）。802 文件 lint、typecheck、全仓 secrets、diff check 及 Node 24 ABI 137 SQLite 探针通过。
+- 环境修正：Node 20 归档内 npm 缺少 `lib/commands/sbom.js`，验收显式使用完整系统 npm CLI；提交 `461a289` 将 Function 阈值按 Node 20 的 V8 区间统计校准为 overall 78%、Runtime V2 63%，lines/statements/branches 和其他 scope 阈值保持不变。主工作区 Node 24 依赖未替换。
+- 边界：未修改或暂存 `AGENT.md` 与 `prompts/admin.txt`，SHA-256 分别保持 `B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`、`2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；Harness manifest 驱动小目标已完成，未推送远端。
+
+## 运行维护 2026-08-02 14:23 +08:00
+
+- 实现提交 `cc8ca1f`：在本地意图识别、Planner、Runtime V2 和 QQ 回复链路中新增 `skill_earthquake_latest` 与 `skill_weather_cloud`。地震工具支持全球/中国、小时至月、震级和条数过滤；云图工具支持 JMA Himawari 红外、可见光和水汽全圆盘 JPEG，并将 `external_send` 副作用贯穿策略和 Planner，单轮只执行一次且发送失败不重试。
+- 数据源与降级：地震默认查询 USGS 最近 24 小时全球 M4.5+ 的 5 条事件，中国默认 M2.5+；云图读取 JMA 最新官方时次，仅在图片尚未同步的 404 场景回退前一时次一次。两项能力均为按需查询，不新增订阅、轮询、定时推送、API 密钥或备用抓取源。
+- 自动验收：环境数据适配器、路由、Planner 单工具计划、QQ 群聊/私聊伪发送、失败不重试、Schema/执行器/策略/Companion/全局预取和无外部子进程契约测试通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0，最终 `npm test` 在 179 秒内自然退出 0。
+- 真实只读探针：USGS 返回有效 M4.9 事件及 UTC/北京时间；JMA 最新红外图返回 `image/jpeg`，161909 字节，观测时间 `2026-08-02T06:10:00.000Z`。云图发送使用内存伪客户端且仅调用一次，没有向真实 QQ 会话发送图片。
+- 边界：未暂存或覆盖 `AGENT.md` 与并行 harness eval 文件，未推送远端；QQ 机器人地震与气象云图查询小目标已完成。
+
+## 运行维护 2026-08-01 03:50 +08:00
+
+- 根因：能力 manifest 已能判定副作用，但 Runtime V2 direct、scheduler 与 legacy 仍各自调用 executor；`explicit/admin_explicit` 没有跨消息确认、一次性领取和崩溃后禁止重放协议，`retryable=false` 也未完整贯穿验证/repair。
+- 实现：提交 `fa84dfd` 新增 SQLite 授权账本与共享 `executeAuthorizedToolCall`。票据绑定用户和 private/group/群号，确认时复验参数/上下文哈希、schema、完整 policy、管理员身份与动态 MCP 精确注册；`pending/executing/completed/uncertain/cancelled/expired` 使用条件事务转换，终态清除原始参数和上下文。`/tool-confirm`、`/tool-cancel` 在消息聚合和模型路由前执行，授权事件进入 Runtime V2 与消息 trace。
+- 防重放：Runtime V2 direct/scheduler 和 legacy 共用授权边界；确认等待、身份拒绝、过期、已消费及 uncertain 均为 `retryable=false`，不进入 repair、缓存、并行重放或 inflight 重放。executor 开始后的异常、进程中断、完成状态落盘失败统一记为 `uncertain`。
+- 验收：6 项授权聚焦测试及模块边界/repair/cache/unknown-capability 相邻回归通过；最终 `npm test` 169.4 秒、`npm run coverage` 192.0 秒，lint、typecheck、Agent 静态、Prompt、全仓/暂存区 secrets 和 diff check 均退出 0。覆盖率四个 scope 为 overall `71.49/80.23/62.01`、web `79.84/87.50/80.59`、Runtime V2 `77.61/74.77/63.62`、stable boundaries `85.89/82.24/72.04`（行/函数/分支）。
+- 边界：验收后授权库为 0 张票据、0 条审计记录；未修改或暂存 `prompts/admin.txt` 与 `AGENT.md`，两者保护哈希未变化，未推送远端。工具确认与防重放小目标已完成，文档独立提交。
+
+## 运行维护 2026-08-01 02:28 +08:00
+
+- 根因：工具 schema、executor 与策略分散维护，旧 `getPolicy` 对未知名称 fail open；Runtime V2 的 scheduler、direct tool loop、dispatch checkpoint 和 cache 对混合读写工具只按名称判断，allowlist 或伪造 MCP descriptor 可能绕过注册边界。
+- 实现：新增版本化 `tool_policy_manifest_v1`，覆盖 124 个 schema、125 个 executor 和 125 项 policy；stock、ontology 与 scheduled command 按规范化 action 解析 `none/local_write/external_send/destructive`。两个 Runtime V2 执行入口默认阻断未知能力、internal executor 与未知 action，动态 MCP 只认 `api/toolRegistry.js` 的精确注册名称；参数化 policy 已贯通 batch、cache、inflight dedupe、checkpoint 与 execution envelope。
+- 验收：`npm test` 在 178.2 秒内退出 0，`npm run coverage` 在 189.9 秒内退出 0；整体覆盖率为行 71.68%、函数 80.45%、分支 62.03%。四个 scope 均通过：overall `71.68/80.45/62.03`、web `79.84/87.50/80.59`、Runtime V2 `77.63/74.46/63.73`、stable boundaries `85.98/82.24/72.12`（行/函数/分支）。796 文件 lint、typecheck、Agent 静态映射、Prompt 清单、全仓 secrets 与 `git diff --check` 均退出 0。
+- 边界：本轮只收口 Runtime V2；确认票据、跨消息确认状态机、持久化幂等账本、授权审计事件及 `api/legacy/aiHost.js` 共享执行内核延期。未修改或暂存 `prompts/admin.txt` 与 `AGENT.md`，未执行远端推送。
+- 提交后记录：实现提交 `2d1afad` 已完成；版本化工具能力清单小目标已完成，验收结果已保留，当前分支未推送。
+
+## 运行维护 2026-08-01 00:40 +08:00
+
+- 根因：两个 eval CLI 仍默认依赖 gitignored `artifacts/`，干净检出无法复现；tracked fixture 没有统一版本、摘要和 synthetic-only 隐私契约，空集也可能被误判为通过。Memory routing stability 只验证召回意图分类，不能替代 Recall/MRR 与泄漏指标。
+- 实现：新增 `harness_eval_manifest_v1`，以规范化 LF JSONL SHA-256 固定 2 个 suite、52 条 synthetic case；校验器递归拒绝空集、重复 ID、目录越界、账号字段别名、邮箱、非保留域 URL 和非占位凭据。Memory CLI 只接受显式 `--cases/--auto-gold/--build-cases`，post-reply CLI 默认使用 tracked fixture 并拒绝未知 case。
+- CI：`npm run eval:harness:ci` 在 coverage 前运行 manifest 校验、30 条 routing stability、synthetic auto-gold 真实召回和 22 条 post-reply learning；auto-gold 要求 Recall@5/MRR@5 不低于 0.5，wrong-hit、scope leakage、lifecycle leakage 和 forbidden hit 均为 0。
+- 验收：`npm run eval:harness:ci`、四项聚焦回归、`npm run lint`、`npm run typecheck`、`npm run check:secrets:all`、workflow policy 与 `git diff --check` 均退出 0；完整 `npm test` 于 2026-08-01 00:49 +08:00 在 180.7 秒内自然退出 0，日志为 `C:\Users\Administrator\AppData\Local\Temp\waifu-harness-eval-full-test-20260801.log`。
+- 边界：本轮不提交本地 `artifacts/`、真实用户数据或未跟踪 `AGENT.md`，不执行远端推送。
+- 提交后记录（2026-08-01 00:51 +08:00）：实现提交 `85f421b` 已完成；版本化 Harness eval 小目标已完成，字段级 suite schema 与更大规模召回语料留作后续增强，当前分支未推送。
+
+## 运行维护 2026-08-01 00:25 +08:00
+
+- 根因：journal/date Recall Plan 已禁止远端 rerank，但 explain 测试仍要求 rerank 生效；显式 `source=journal` 又会优先进入 `explicit_source`，意外恢复远端 rerank。另有四项全量失败分别来自临时 Prompt 副本继承只读属性、测试未隔离受保护 admin 夹具、群回复字符上限由 220 调整到 8000 后输入未同步，以及 embedding 节点夹具缺少 `active/strict` 元数据。
+- 修复：显式 journal/continuity 来源继承 lexical-first、零 rerank 预算和 `allowRemoteRerank=false`；RAG explain 保留 rerank decision，并断言未发起远端请求。Prompt 测试只在可写临时副本中写入安全 admin 夹具，主回复诊断和 embedding 并发测试同步当前生产契约；Web 认证补齐有效会话、本地同源写请求、限流容量和安全 Cookie 分支。
+- 验收：四项 Memory V3 定向测试、四项既有失败复跑、`npm test`、`npm run coverage`、`npm run lint`、`npm run typecheck`、`npm run check:agent:static`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 均退出 0。覆盖率整体为行 71.61%、分支 61.94%、函数 80.42%；web 分支 80.59%，四个 scope 全部通过。
+- 边界：未修改或暂存 `prompts/admin.txt` 与 `AGENT.md`，未执行远端推送；版本化 harness eval 与统一工具授权协议进入下一阶段。
+- 提交后记录（2026-08-01 00:27 +08:00）：实现提交 `e6b6ddc` 已完成；测试契约与覆盖率恢复小目标已完成，验收结果已保留，当前分支未推送。
+
+## 运行维护 2026-07-30 19:50 +08:00
+
+- 小目标：完成目标5第六个生产入口迁移，将 `message/handler` 的11个共享词法作用域 chunk 收敛为单一静态 CommonJS 运行时；生产入口不再加载或执行旧 chunk，旧文件保持未修改。
+- 契约：46个顶层函数、160个顶层变量及18项公开 API 完成映射，`core/messageHandler`、`src/message/handler` 与 `src/message` 的导出引用保持一致；lint 按旧入口顺序合并11个 chunk，仅做语法校验并标记 `execution=not-run`。
+- 验收：`node tests/messageHandlerModuleBoundary.test.js`、`node tests/lintChunkEntrypoints.test.js`、`node tests/messageHandlerCardContextSource.test.js`、`node tests/privateProactiveIntegrationSource.test.js`、`node tests/runtimeContextModuleBoundary.test.js`、`node -e "require('./core/messageHandler')"`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 均退出0；小目标已完成，未推送远端。
+
+## 运行维护 2026-07-29 09:57 +08:00
+
+- 小目标：完成目标5第五个生产入口迁移，提交 `0144d51` 将 `runtime-v2/context` 的10个共享词法作用域 chunk 拆为15个显式 CommonJS 模块；生产入口不再加载或执行旧 chunk，旧文件保持未修改。
+- 契约：13项主 API、6组子门面、`promptLayerCache` 唯一 owner、memory-inputs 热路径惰性和0本地循环依赖通过；lint 以旧入口顺序合并10个 chunk，仅做 `new Function` 语法校验并标记 `execution=not-run`。
+- 验收：Node 24.14.1 下10项 context 聚焦测试、785文件 `npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 通过。Node 20 不在当前环境，未宣称双版本；并发4全量仍有只读 `prompts/admin.txt` 测试和4项既有基线断言失败，未归因于本批。
+- `prompts/admin.txt` 未修改，仍为310字节、ReadOnly，SHA-256 为 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；`npm audit --omit=dev` 退出1，仅报告 HEAD 既有 `sharp` 高危、`body-parser` 低危。
+
+## 运行维护 2026-07-29 09:48 +08:00
+
+- 小目标：将 QQ 群 `direct_chat` 最终回复硬截断上限从 220 字调整为 8000 字。
+- 最小实现：只修改群聊风格守卫共享常量；运行时截断与动态提示词自动复用新值，模型 token 上限、私聊和其他路由保持不变。
+- 验收：`tests/groupDirectReplyStyleGuard.test.js` 覆盖 8001 字输入精确截为 8000 字及动态提示词上限同步，`tests/messageRouteFlowGroupStreaming.test.js` 使用共享上限验证群聊工具回退链路。
+- 小目标已完成：QQ群直接问答不再按 220 字硬截断。
+- 提交后记录：QQ群 `direct_chat` 8000 字硬上限实现提交 `6d68b5d` 已完成，当前分支未推送。
+
 ## 运行维护 2026-07-25 13:52 +08:00
 
 - 小目标：完成目标5的第四个生产入口迁移，取消 `memory/vector` 的源码拼接和共享词法作用域执行。
@@ -1705,3 +1839,80 @@
 - 行为覆盖：确认门、主进程/worker/launcher识别、调用者PID保护、期望停机marker先于停止、重启结果落盘、marker消费/来源保留、早退计数/冷却、HTTP reverse恢复仅绕过一次、锁成功/超时/进程提前退出、日志归档和worker原因优先级。仅 `restart-bot.cmd` 保留4项最小结构契约。
 - 验收：10项关联测试、730文件lint、typecheck、prompt、全仓secrets、PowerShell AST、production audit（0漏洞）、diff check和 `TEST_CONCURRENCY=4 npm test`（142.5秒）全部退出0；目标23完成。本轮未暂存并行代理的CI、覆盖率、依赖和安全诊断改动，未推送远端。
 - 提交后记录：目标23重启/daemon行为化实现提交 `84e534b` 已完成，README、维护日志、聚焦实施计划和32项目标路线图均已更新；当前分支未推送。
+
+## 运行维护 2026-07-28 10:29 +08:00
+
+- 实现 Daily Journal 按用户全局对话轮数压缩：默认每 50 个安全用户+助手轮次生成一个 SQLite `journal_rollups.level=segment` 摘要；摘要统一调用独立记忆模型，不调用主回复模型。
+- 数据一致性：`journal_entries` 增加用户序号和批次标记，新增 `journal_compaction_batches` 记录租约、失败重试和摘要 ID；多进程 worker 通过 SQLite 事务领取批次，成功后保留最近 8 条活动原文，其余只标记 `archived`。
+- 召回行为：Profile Journal DB 增加 `segment` 层和轮数摘要搜索；每日 scheduler 只压缩昨日及更早未满 50 轮的历史尾部，当前日未完成尾部不提前处理；关闭 `DAILY_JOURNAL_TURN_COMPACTION_ENABLED` 可回到旧逻辑。
+- 验收：`dailyJournalTurnCompaction.test.js`、Daily Journal/SQLite/worker 相关回归测试、定向 ESLint 通过；工作区原有 `embeddingIndex.js` 重复 `const config` 语法错误已删除重复声明，保留其余并行改动。
+- 完整验收：`npm run lint`、`npm run typecheck`、`git diff --check` 通过；`npm test` 中 Daily Journal 相关用例均通过，但现有工作区的 `memoryV3EmbeddingBackfillConcurrency.test.js`（0 !== 4）和 `memoryV3RagExplainDiagnostic.test.js`（false !== true）仍失败，单独复跑结果一致，未在本任务中修改其所属 Memory V3 文件。
+- 提交后记录：Daily Journal 轮数压缩补充实现与验收提交 `e9b8a7d` 已完成；当前分支未推送。
+
+## 运行维护 2026-07-28 23:41 +08:00
+
+- 关闭轮数模式下的旧 Daily Journal 写入机制：新对话仅写 Profile Journal SQLite，不再新增每日 Markdown、sidecar、daily/4day/monthly 汇总；历史文件读取和关闭轮数模式后的回滚兼容保留。
+- 调度修正：截至昨日的尾部压缩失败时不推进完成日期，后续调度继续重试。
+- 验收：Daily Journal 轮数压缩、旧分段、sidecar、聚类召回和污染防护测试通过；`npm run lint`、`npm run typecheck` 通过。`npm test` 仍仅有既有的两个 Memory V3 用例失败，单独复跑结果一致，未修改其所属模块。
+- 提交后记录：关闭旧 Daily Journal 自动写入机制提交 `25adb6b` 已完成；当前分支未推送。
+
+## 运行维护 2026-07-28 23:49 +08:00
+
+- 根因：新轮数压缩生成的 `episode_rollup_generated` 使用 `rollupLevel=segment`，但 embedding 全量收集、即时 journal 入队、本地查询候选和 CLI 快照沿用旧去重规则，统一跳过所有 episode segment，导致 `journal_turn_summary` 只能通过 SQLite 词法召回，无法形成独立向量。
+- 修复：新增共享 journal episode 索引策略，只放行 `journal_turn_summary`、`turn_batch` 或 `daily_journal_turn_compaction` segment；旧 `journal_segment` 继续由 `.segments.jsonl` 的 `journal-segment:*` 文档向量化，避免重复索引和重复召回。
+- 验收：`dailyJournalTurnCompactionEmbedding.test.js` 覆盖 embedding cache、查询候选、CLI 快照和 LanceDB 行构建，连同 `dailyJournalTurnCompaction.test.js`、`dailyJournalSegments.test.js`、`memoryV3EmbeddingIndex.test.js`、`dailyJournalSegmentSemanticRecall.test.js` 全部通过；`npm run lint`、`npm run typecheck`、`npm run diag:memory -- diagnose --skip-probe --json` 均退出 0。扩展查询回归 8 项中 7 项通过，既有 `memoryV3RagExplainDiagnostic.test.js` 仍在 rerank enabled 断言失败，与本次 segment 准入无关；真实投影中当前 `journal_turn_summary=0`，无需历史回填，只读诊断保留 1 条既存 stale LanceDB row 和 1 条待 embedding，本轮未处理运行数据。
+- 提交后记录：轮数摘要独立向量化修复提交 `4c0d1db` 已完成；当前分支未推送。
+
+## 运行维护 2026-07-29 08:42 +08:00
+
+- 小目标：完成独立 QQ 私聊主动触达功能，不修改现有群聊主动发送链路；功能提交为 `a1584aa`。
+- 接入边界：只在上线后成功完成正常私聊回复时登记用户并发送一次控制告知；群聊和私聊入站均更新全局活动版本，只有私聊回复解除未回应暂停。`/主动私聊 关闭|开启|状态` 在私聊准入后本地拦截，不进入意图、planner 或主模型。
+- 调度与防重：每日 `09:00-15:00`、`17:00-23:00` 各生成一个稳定随机机会；同时执行 3 小时沉默、6 小时间隔、每日 2 批、全局每日 50 次模型预算和 NapCat 在线检查。机会、预算、发送中状态和内容签名在模型或发送前同步落盘，发送失败、结果未知和进程中断不在当前窗口续发。
+- 模型与上下文：非流式决策严格使用 `API_BASE_URL/API_KEY/AI_MODEL` 和共享 HTTP 层，不切换 `ADMIN_*` 或 `INITIATIVE_DECISION_*`；上下文只包含近期私聊、关系、长期记忆、日记、48 小时内最多两份用户相关群摘要和有限主动叙事，不读取群聊原文，不把主动虚构写成用户事实。
+- 输出与发送：只接受严格 `{"send":boolean,"reason":string,"messages":string[]}`；每批 1-3 条、每条不超过 50 字，过滤内部信息、媒体标签、空内容和 48 小时重复内容。气泡间隔 1.5-4 秒，每条发送前复检活动版本；连续两批无私聊回应后自动暂停。
+- 定向验收：`node scripts/run-tests.js tests/privateProactiveEngine.test.js tests/privateProactiveModelConfig.test.js tests/privateProactiveIntegrationSource.test.js tests/privateProactiveMessageHandler.test.js tests/runtimeStatusDiagnostics.test.js tests/messageHandlerPrivateFreshness.test.js`，2026-07-29 00:22:13-00:22:15 +08:00，退出码 0。
+- 静态验收：`npm run lint`，00:22:30-00:22:37，退出码 0；`npm run typecheck`，00:22:46-00:22:47，退出码 0；`git diff --check`，08:41:56，退出码 0。
+- 完整验收：`npm test` 在 2026-07-29 08:38:59-08:41:27 +08:00 稳定退出 1。主动私聊相关测试全部通过；失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`lintChunkEntrypoints.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，分别落在未修改的管理员提示词/测试临时目录、并行 `scripts/lint.js` 入口清单和既有 Memory V3 范围，本任务未越界修复。
+- 小目标已完成：功能、配置、测试、主进程生命周期和运行态诊断均已提交；文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-07-29 18:42 +08:00
+
+- 故障根因：主动私聊请求未透传已配置的 `API_PROVIDER=openai_compatible`，共享 HTTP 层按 `AI_MODEL=gemini-3-flash-preview-search` 自动选择 Gemini 原生协议，将请求改写到 `:generateContent`，连续返回 HTTP 404。
+- 第一轮修复提交 `46d659a`：主动请求透传 `API_PROVIDER`，固定 `chat_completions` 协议；预处理验收确认 URL 保持 `https://gcli.ggchan.dev/v1/chat/completions`，不再切换原生地址。
+- 真实恢复首次尝试：2026-07-29 18:35 +08:00 对唯一漏发用户 `1960901788` 发起恢复，模型请求已 HTTP 200，但 `max_tokens=500` 返回 `finish_reason=length`，结构化响应为 `invalid_structure`，未发送，消耗 1 次主动模型预算。
+- 第二轮修复提交 `d4dd729`：主动决策上限调整为 `max_tokens=1200` 并设置 `reasoning_effort=low`；定向 `privateProactiveEngine.test.js`、`privateProactiveModelConfig.test.js`、lint、typecheck 和 diff check 均通过。
+- 真实发送验收：2026-07-29 18:40 +08:00 对 `1960901788` 重新恢复，模型调用 HTTP 200、`finish_reason=stop`，NapCat 三次 `send_private_msg` 全部成功，发送 3 个独立气泡；状态文件记录 `daily.batchesSent=1`、`unansweredBatches=1`、`inFlight=null`，另一名用户仍为 0 批。
+- 主进程已在 18:41 +08:00 重启并健康运行；当前分支未推送远端。小目标已完成。
+
+## 运行维护 2026-07-30 11:18 +08:00
+
+- 故障复盘：2026-07-30 10:10 的主动模型请求虽然 HTTP 200，但 `max_tokens=1200` 下 `finish_reason=length`，可见 JSON 只有 46 个 token，随后被归类为 `invalid_structure`，因此窗口被消费但没有发送；另外两名用户尚未到稳定机会时间。
+- 修复提交 `cd8645d`：主动模型请求改用 `max_tokens=4096`、`reasoning_effort=minimal`、OpenAI-compatible `response_format={type:json_object}`；提示词在运行时硬条件通过后默认要求 `send=true`，只保留明确拒绝或明显不适合两类拒绝依据；截断终止原因抛出明确错误，避免误诊为模型拒绝。
+- 真实探针：请求使用 `API_BASE_URL/API_KEY/AI_MODEL`，HTTP 200、`finish_reason=stop`；探针生成完成后因共享 HTTP 传输句柄未自动退出，记录为本地诊断脚本问题，不影响模型结果。
+- 真实发送验收：2026-07-30 11:17:50-11:18:15 +08:00 手动调用一次 `privateProactiveEngine.scan()`，符合条件的 `1052258894` 发送 3 个独立气泡，NapCat 三次 `send_private_msg` 均成功；发送理由为模型返回的角色化主动联系决定。状态文件记录上午窗口已消费、`daily.batchesSent=1`、`unansweredBatches=1`、`inFlight=null`，预算使用 `2/50`；主进程 PID 25208 存活且 `/ready` 返回 200。
+- 定向验收：`node scripts/run-tests.js tests/privateProactiveEngine.test.js tests/privateProactiveModelConfig.test.js tests/privateProactiveIntegrationSource.test.js tests/privateProactiveMessageHandler.test.js tests/runtimeStatusDiagnostics.test.js tests/messageHandlerPrivateFreshness.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0。
+- 完整验收：`npm test` 于本轮退出 1；主动私聊用例全部通过，失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`mainReplyUnifiedDiagnostics.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，均属于未修改的并行/既有范围，本轮未越界修复。
+- 小目标已完成：主动模型稳定性和判断阈值修复、真实主动发送及重启恢复均已验收；文档追加提交，当前分支未推送远端。
+
+## 运行维护 2026-07-30 11:29 +08:00
+
+- 策略调整：`PRIVATE_PROACTIVE_IDLE_MINUTES` 默认值由 180 降为 120，`PRIVATE_PROACTIVE_MIN_GAP_MINUTES` 默认值由 360 降为 240；每日 2 批、`09:00-15:00`/`17:00-23:00` 双窗口、全局 50 次模型预算和连续两批无私聊回复暂停均保持不变。
+- 功能提交 `c7ac6a7`：同步 `.env.example`、运行配置、引擎默认值和回归测试；主进程已重启，运行配置确认 `idleMinutes=120`、`minGapMinutes=240`、`maxPerDay=2`、`maxUnanswered=2`，`/live`、`/ready` 均返回 200。
+- 验收：主动私聊定向测试、`npm run lint`、`npm run typecheck`、`git diff --check` 均退出 0；完整 `npm test` 退出 1，主动私聊测试通过，失败为 `adminStableSystemPrompt.test.js`、`configPersonaPrompt.test.js`、`mainReplyUnifiedDiagnostics.test.js`、`memoryV3EmbeddingBackfillConcurrency.test.js`、`memoryV3RagExplainDiagnostic.test.js`，属于未修改的并行或既有范围。
+- 小目标已完成：主动私聊触达节奏已调得更积极，现有防打扰上限和自动暂停保护未放宽；本次文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-07-31 02:13 +08:00
+
+- 安全边界：提示词块改用封闭 authority 白名单，未知来源默认降为带 `[UntrustedContext]` 边界的 `assistant`；记忆、连续性、工具证据、会话摘要、快速回复动态上下文和压缩摘要不再提升为 `system`。
+- 持久化与输出：短期/会话结构化摘要任一嵌套字段命中污染即整份拒绝且不消费历史；会话摘要存储与图片索引在写入点复检，视觉 OCR 仅供当前轮；真实 `SYSTEM.txt` 及运行时已装配 `system_root` 建立有限指纹，普通回复、快速回复、最终发送和跨 delta 流式发送统一拦截泄露。
+- 验收：14 项安全/相邻专项全部通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0。`npm test` 退出 1：五项为本分支既有 `adminStableSystemPrompt`、`configPersonaPrompt`、`mainReplyUnifiedDiagnostics`、`memoryV3EmbeddingBackfillConcurrency`、`memoryV3RagExplainDiagnostic`，另一项为暂存区外并行小剧场实现尚未同步 `messageHandlerModuleBoundary`；排除该并行用例后的 552 项中 547 项通过，失败仍为上述五项。本次安全文件未涉及这些失败范围。
+- 受保护的 `prompts/admin.txt` 与未跟踪 `AGENT.md` 未修改、未暂存；并行开发文档和小剧场改动保持原样，未纳入本次提交，不推送远端。
+- 提交后记录（2026-07-31 02:18 +08:00）：实现提交 `2b7c1a2` 已完成；以 `mizuki\administrator` 对 `.env` 与 `data` 共 38,830 项应用仓库 ACL 脚本，恢复快照为 `artifacts/security/acl-snapshots/acl-20260731-021604-28732.json`。`npm run diag:security` 为 7 OK、1 WARN、0 ERROR，敏感路径 ACL 通过；仅保留既有 `NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER` 兼容告警，本目标已完成。
+
+## 运行维护 2026-08-04 14:43 +08:00
+
+- 根因：PR #5 没有内容冲突，`dependency-vulnerabilities` 因 7 个过期依赖节点失败；同一提交分别由 `push` 和 `pull_request` 触发，形成两条相同红色检查。
+- 修复：根锁文件将 `body-parser`、两条 `brace-expansion`、`sharp`、`undici` 升到安全版本，Brave Search 锁文件将 `ws` 升到 8.21.2，Free Ride 约束 `idna>=3.15,<4`；没有新增 npm 直接依赖。
+- 兼容性：Sharp 0.35 拒绝旧测试夹具中的无效 JPEG 扫描参数，测试改为动态生成有效 JPEG，生产图片容错逻辑未放宽。
+- 验收：根项目与嵌套技能 `npm audit` 均为 0；两个锁文件共 476 个版本的实时 OSV 查询为 0 漏洞；CI/Supply Chain policy、812 文件 lint、typecheck、prompt、全仓密钥、许可证、SBOM、Node 20.20.2 Sharp 编码与关键测试全部通过；第二轮完整 `npm test` 177 秒退出 0。
+- 提交后记录：实现提交 `de13971` 已完成，本小目标已完成；文档单独提交，当前分支未推送远端。

@@ -30,8 +30,8 @@ function getGroupMemoryModule() {
   return require('../groupMemory');
 }
 
-function getVectorMemoryModule() {
-  return require('../vectorMemory');
+function getMemoryRepository() {
+  return require('../memory-v3');
 }
 
 function normalizeObject(value, fallback = {}) {
@@ -336,12 +336,15 @@ function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {
 
 async function runEnrichPhase(job = {}, meta = {}) {
   const { extractPostReplyEnrichment } = getMemoryExtractionModule();
-  const { maybeSegmentJournalByThreshold } = getDailyJournalModule();
+  const {
+    maybeCompactJournalByTurnThreshold,
+    maybeSegmentJournalByThreshold
+  } = getDailyJournalModule();
   const { storeExtractedSelfImprovementItems } = getSelfImprovementModule();
   const { applyAffinityProposal } = getMemoryModule();
-  const { addTaskMemory, addTaskMemoryWithVectorBackfill } = getTaskMemoryModule();
-  const { addGroupMemory, addGroupMemoryWithVectorBackfill } = getGroupMemoryModule();
-  const { addMemoryItemsBatch, addMemoryItemsBatchWithVectorBackfill } = getVectorMemoryModule();
+  const { addTaskMemoryWithVectorBackfill } = getTaskMemoryModule();
+  const { addGroupMemoryWithVectorBackfill } = getGroupMemoryModule();
+  const { writeMemoryBatch } = getMemoryRepository();
   const budget = trimTurnsForEnrichBudget(job.turns, normalizeObject(job.enrichBudget, {}));
   appendPostReplyJobTrace(job, 'enrich_budget', {
     truncated: budget.truncated,
@@ -433,18 +436,8 @@ async function runEnrichPhase(job = {}, meta = {}) {
           entities: [],
           relations: []
         };
-        if (typeof addTaskMemoryWithVectorBackfill === 'function') {
-          const writeResult = await addTaskMemoryWithVectorBackfill(job.userId, taskPayload, meta);
-          appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('task', writeResult));
-        } else {
-          const id = addTaskMemory(job.userId, taskPayload);
-          appendPostReplyJobTrace(job, 'enrich_write_ids', {
-            kind: 'task',
-            ids: [id].filter(Boolean),
-            accepted: id ? 1 : 0,
-            rejected: 0
-          });
-        }
+        const writeResult = await addTaskMemoryWithVectorBackfill(job.userId, taskPayload, meta);
+        appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('task', writeResult));
       }
     }
   }
@@ -462,18 +455,8 @@ async function runEnrichPhase(job = {}, meta = {}) {
       });
       if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_fact', 'candidate') };
-      if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', groupMeta, 1.08, meta);
-        appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_fact', writeResult));
-      } else {
-        const id = addGroupMemory(meta.groupId, value, 'fact', groupMeta, 1.08);
-        appendPostReplyJobTrace(job, 'enrich_write_ids', {
-          kind: 'group_fact',
-          ids: [id].filter(Boolean),
-          accepted: id ? 1 : 0,
-          rejected: 0
-        });
-      }
+      const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', groupMeta, 1.08, meta);
+      appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_fact', writeResult));
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_goals).map((item) => normalizeText(item)).filter(Boolean)) {
       const gateResult = assessWrite({
@@ -486,18 +469,8 @@ async function runEnrichPhase(job = {}, meta = {}) {
       });
       if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'active', ...buildPostReplyEnrichMeta(meta, 'group_goal', 'active') };
-      if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15, meta);
-        appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_goal', writeResult));
-      } else {
-        const id = addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15);
-        appendPostReplyJobTrace(job, 'enrich_write_ids', {
-          kind: 'group_goal',
-          ids: [id].filter(Boolean),
-          accepted: id ? 1 : 0,
-          rejected: 0
-        });
-      }
+      const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15, meta);
+      appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_goal', writeResult));
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_topics).map((item) => normalizeText(item)).filter(Boolean)) {
       const gateResult = assessWrite({
@@ -511,18 +484,8 @@ async function runEnrichPhase(job = {}, meta = {}) {
       });
       if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_topic', 'candidate') };
-      if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96, meta);
-        appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_topic', writeResult));
-      } else {
-        const id = addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96);
-        appendPostReplyJobTrace(job, 'enrich_write_ids', {
-          kind: 'group_topic',
-          ids: [id].filter(Boolean),
-          accepted: id ? 1 : 0,
-          rejected: 0
-        });
-      }
+      const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96, meta);
+      appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_topic', writeResult));
     }
   }
 
@@ -543,21 +506,11 @@ async function runEnrichPhase(job = {}, meta = {}) {
     return gateResult.allow;
   });
   if (signalItems.length > 0) {
-    if (typeof addMemoryItemsBatchWithVectorBackfill === 'function') {
-      const writeResult = await addMemoryItemsBatchWithVectorBackfill(signalItems, {
-        ...meta,
-        phase: 'post_reply_enrich_write'
-      });
-      appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('style_jargon', writeResult));
-    } else {
-      const ids = addMemoryItemsBatch(signalItems);
-      appendPostReplyJobTrace(job, 'enrich_write_ids', {
-        kind: 'style_jargon',
-        ids: normalizeArray(ids).map((item) => normalizeText(item)).filter(Boolean),
-        accepted: normalizeArray(ids).length,
-        rejected: 0
-      });
-    }
+    const writeResult = await writeMemoryBatch(signalItems, {
+      ...meta,
+      phase: 'post_reply_enrich_write'
+    });
+    appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('style_jargon', writeResult));
   }
 
   if (enrichment?.self_improvement && typeof enrichment.self_improvement === 'object') {
@@ -593,7 +546,11 @@ async function runEnrichPhase(job = {}, meta = {}) {
     ? String(latestTurnCreatedAt).slice(0, 10)
     : '';
   if (targetDay) {
-    await maybeSegmentJournalByThreshold(job.userId, targetDay, {
+    const compactJournal = config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED !== false
+      && typeof maybeCompactJournalByTurnThreshold === 'function'
+      ? maybeCompactJournalByTurnThreshold
+      : maybeSegmentJournalByThreshold;
+    const journalOptions = {
       sessionKey: meta.sessionKey,
       routePolicyKey: meta.routePolicyKey,
       topRouteType: meta.topRouteType,
@@ -603,7 +560,12 @@ async function runEnrichPhase(job = {}, meta = {}) {
       groupId: meta.groupId,
       channelId: meta.channelId,
       taskType: meta.taskType
-    });
+    };
+    if (compactJournal === maybeCompactJournalByTurnThreshold) {
+      await compactJournal(job.userId, journalOptions);
+    } else {
+      await compactJournal(job.userId, targetDay, journalOptions);
+    }
   }
   const gateStats = gate.getStats();
   const result = {

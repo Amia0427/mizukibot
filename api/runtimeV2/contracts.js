@@ -45,7 +45,7 @@ function normalizeStepId(step = {}, fallbackPrefix = 'step', index = 0) {
   return raw || `${fallbackPrefix}_${index + 1}`;
 }
 
-function normalizePlanStep(rawStep = {}, source = 'planner', index = 0) {
+function normalizeToolStep(rawStep = {}, source = 'route', index = 0) {
   const step = normalizeObject(rawStep, {});
   const preferredTools = normalizeArray(step.preferredTools)
     .map((item) => normalizeText(item))
@@ -157,6 +157,9 @@ function normalizeExecutionEnvelope(rawEnvelope = {}, fallbackStep = {}, options
   if (Object.prototype.hasOwnProperty.call(envelope, 'blockedReason')) {
     normalized.blockedReason = normalizeText(envelope.blockedReason);
   }
+  if (Object.prototype.hasOwnProperty.call(envelope, 'cached')) {
+    normalized.cached = Boolean(envelope.cached);
+  }
   if (Object.prototype.hasOwnProperty.call(envelope, 'unsatisfiedRequirement')) {
     normalized.unsatisfiedRequirement = normalizeText(envelope.unsatisfiedRequirement);
   }
@@ -165,143 +168,13 @@ function normalizeExecutionEnvelope(rawEnvelope = {}, fallbackStep = {}, options
       ? null
       : normalizeObject(envelope.runtimeBinding, {});
   }
+  if (envelope.authorization && typeof envelope.authorization === 'object') {
+    normalized.authorization = normalizeObject(envelope.authorization, {});
+  }
+  if (envelope.authorizationEvent && typeof envelope.authorizationEvent === 'object') {
+    normalized.authorizationEvent = normalizeObject(envelope.authorizationEvent, {});
+  }
   return normalized;
-}
-
-function normalizeAllowedToolSet(allowedTools = []) {
-  return new Set(normalizeArray(allowedTools).map((item) => normalizeText(item)).filter(Boolean));
-}
-
-function validatePlannerExecutionPlan(executionPlan = null, options = {}) {
-  const allowedTools = normalizeAllowedToolSet(options.allowedTools);
-  const requireAllowedTools = options.requireAllowedTools !== false;
-  const reasons = [];
-  if (!executionPlan || typeof executionPlan !== 'object' || Array.isArray(executionPlan)) {
-    return {
-      ok: false,
-      status: 'planner_invalid',
-      reasons: [{ code: 'invalid_execution_plan', message: 'executionPlan must be an object.' }],
-      steps: []
-    };
-  }
-  if (!Array.isArray(executionPlan.steps)) {
-    return {
-      ok: false,
-      status: 'planner_invalid',
-      reasons: [{ code: 'invalid_steps', message: 'executionPlan.steps must be an array.' }],
-      steps: []
-    };
-  }
-
-  const plannerAllowedToolNames = normalizeArray(executionPlan.allowedToolNames ?? executionPlan.allowed_tools)
-    .map((item) => normalizeText(item))
-    .filter(Boolean);
-  if (
-    Object.prototype.hasOwnProperty.call(executionPlan, 'allowedToolNames')
-    && !Array.isArray(executionPlan.allowedToolNames)
-  ) {
-    reasons.push({
-      code: 'invalid_allowed_tool_names',
-      message: 'Planner allowedToolNames must be an array when provided.'
-    });
-  }
-  if (
-    Object.prototype.hasOwnProperty.call(executionPlan, 'allowed_tools')
-    && !Array.isArray(executionPlan.allowed_tools)
-  ) {
-    reasons.push({
-      code: 'invalid_allowed_tool_names',
-      message: 'Planner allowed_tools must be an array when provided.'
-    });
-  }
-  for (const toolName of plannerAllowedToolNames) {
-    if (requireAllowedTools && !allowedTools.has(toolName)) {
-      reasons.push({
-        code: 'allowed_tool_not_allowed',
-        toolName,
-        message: `Planner allowedToolNames contains disallowed tool: ${toolName}`
-      });
-    }
-  }
-
-  const normalizedSteps = executionPlan.steps.map((step, index) => normalizePlanStep(step, 'direct_chat', index));
-  const ids = new Set();
-  for (let index = 0; index < normalizedSteps.length; index += 1) {
-    const step = normalizedSteps[index];
-    const stepId = normalizeText(step.id);
-    const toolName = normalizeText(step.tool);
-    if (!stepId) {
-      reasons.push({ code: 'missing_step_id', stepId, message: 'Planner step id is required.' });
-    }
-    if (ids.has(stepId)) {
-      reasons.push({ code: 'duplicate_step_id', stepId, message: `Duplicate planner step id: ${stepId}` });
-    }
-    ids.add(stepId);
-    if (step.kind !== 'reply' && !toolName) {
-      reasons.push({ code: 'missing_tool', stepId, message: `Planner step ${stepId} is missing tool.` });
-    }
-    if (step.kind !== 'reply' && requireAllowedTools && (!allowedTools.has(toolName))) {
-      reasons.push({ code: 'tool_not_allowed', stepId, toolName, message: `Planner step ${stepId} requested disallowed tool: ${toolName}` });
-    }
-    const rawStep = normalizeObject(executionPlan.steps[index], {});
-    const rawArgs = rawStep.args ?? rawStep.inputs ?? {};
-    if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
-      reasons.push({ code: 'invalid_args', stepId, toolName, message: `Planner step ${stepId} args must be an object.` });
-    }
-    const rawDependsOn = rawStep.dependsOn ?? rawStep.depends_on;
-    if (rawDependsOn !== undefined && !Array.isArray(rawDependsOn)) {
-      reasons.push({
-        code: 'invalid_depends_on',
-        stepId,
-        toolName,
-        message: `Planner step ${stepId} dependsOn must be an array when provided.`
-      });
-    }
-  }
-
-  for (const step of normalizedSteps) {
-    for (const dep of normalizeArray(step.dependsOn)) {
-      if (dep === step.id) {
-        reasons.push({ code: 'depends_on_self', stepId: step.id, dependsOn: dep, message: `Planner step ${step.id} depends on itself.` });
-      } else if (!ids.has(dep)) {
-        reasons.push({ code: 'depends_on_unknown', stepId: step.id, dependsOn: dep, message: `Planner step ${step.id} depends on unknown step ${dep}.` });
-      }
-    }
-  }
-
-  const visiting = new Set();
-  const visited = new Set();
-  const byId = new Map(normalizedSteps.map((step) => [step.id, step]));
-  const visit = (stepId, path = []) => {
-    if (!stepId || visited.has(stepId)) return false;
-    if (visiting.has(stepId)) {
-      reasons.push({
-        code: 'depends_on_cycle',
-        stepId,
-        path: path.concat([stepId]),
-        message: `Planner dependencies contain a cycle at ${stepId}.`
-      });
-      return true;
-    }
-    visiting.add(stepId);
-    const step = byId.get(stepId);
-    for (const dep of normalizeArray(step?.dependsOn)) {
-      if (byId.has(dep)) visit(dep, path.concat([stepId]));
-    }
-    visiting.delete(stepId);
-    visited.add(stepId);
-    return false;
-  };
-  for (const step of normalizedSteps) visit(step.id, []);
-
-  return {
-    ok: reasons.length === 0,
-    status: reasons.length === 0 ? 'validated' : 'planner_invalid',
-    reasons,
-    steps: reasons.length === 0 ? normalizedSteps : [],
-    stepCount: normalizedSteps.length,
-    allowedToolNames: plannerAllowedToolNames.length > 0 ? plannerAllowedToolNames : [...allowedTools]
-  };
 }
 
 function extractExecLogsFromEnvelopes(envelopes = []) {
@@ -319,7 +192,9 @@ function extractExecLogsFromEnvelopes(envelopes = []) {
     batchId: normalizeText(envelope.batch_id),
     batchIndex: Number.isFinite(Number(envelope.batch_index)) ? Number(envelope.batch_index) : null,
     duration_ms: Number.isFinite(Number(envelope.duration_ms)) ? Number(envelope.duration_ms) : 0,
-    source: normalizeText(envelope.source)
+    source: normalizeText(envelope.source),
+    retryable: envelope.retryable !== false,
+    authorization: normalizeObject(envelope.authorization, null)
   }));
 }
 
@@ -438,15 +313,28 @@ function buildToolEvidenceBundle(state = {}, options = {}) {
 
 function createCapabilityDescriptor(raw = {}) {
   const descriptor = normalizeObject(raw, {});
+  const policy = normalizeObject(descriptor.policy, null);
+  const hasExplicitReadOnly = descriptor.readOnly !== undefined;
+  const hasExplicitSideEffect = descriptor.sideEffect !== undefined;
+  const sideEffect = hasExplicitSideEffect
+    ? Boolean(descriptor.sideEffect)
+    : (hasExplicitReadOnly
+      ? descriptor.readOnly === false
+      : Boolean(policy?.effect && policy.effect !== 'none'));
+  const readOnly = hasExplicitReadOnly ? descriptor.readOnly !== false : !sideEffect;
+  const parallelSafe = descriptor.parallelSafe === undefined
+    ? readOnly && !sideEffect
+    : descriptor.parallelSafe !== false && !sideEffect;
   return {
     name: normalizeText(descriptor.name || descriptor.toolName || descriptor.functionName),
     kind: normalizeText(descriptor.kind || 'tool') || 'tool',
     schema: descriptor.schema || null,
     executor: typeof descriptor.executor === 'function' ? descriptor.executor : null,
-    risk: normalizeText(descriptor.risk || 'low') || 'low',
-    readOnly: descriptor.readOnly !== false,
-    sideEffect: Boolean(descriptor.sideEffect),
-    parallelSafe: descriptor.parallelSafe !== false,
+    policy,
+    risk: normalizeText(descriptor.risk || policy?.risk || 'low') || 'low',
+    readOnly,
+    sideEffect,
+    parallelSafe,
     resumable: descriptor.resumable !== false,
     maxCallsPerTurn: Number.isFinite(Number(descriptor.maxCallsPerTurn))
       ? Math.max(1, Math.floor(Number(descriptor.maxCallsPerTurn)))
@@ -470,10 +358,9 @@ module.exports = {
   normalizeArray,
   normalizeExecutionEnvelope,
   normalizeObject,
-  normalizePlanStep,
+  normalizeToolStep,
   normalizeStepId,
   normalizeText,
   stableStringify,
-  summarizeToolResultText,
-  validatePlannerExecutionPlan
+  summarizeToolResultText
 };

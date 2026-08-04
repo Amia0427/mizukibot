@@ -30,6 +30,10 @@ const {
   buildOutboundMessageMeta,
   recordOutboundMessageEvent
 } = require('./outboundMessageDiagnostics');
+const {
+  getSensitiveOutputHoldbackChars,
+  protectFinalOutput
+} = require('../utils/promptSecurity');
 
 function createReplyTelemetryEvent(type = '', payload = {}) {
   return {
@@ -276,6 +280,10 @@ function shouldApplyReplySensitiveGuard(context = {}, runtimeConfig = {}) {
 }
 
 function applyReplySensitiveGuard(text = '', context = {}, runtimeConfig = {}) {
+  const promptGuard = protectFinalOutput(extractReplyTextValue(text));
+  if (promptGuard.blocked) {
+    return { text: promptGuard.text, blocked: true, matchedCount: promptGuard.matches.length };
+  }
   if (!shouldApplyReplySensitiveGuard(context, runtimeConfig)) {
     return { text, blocked: false, matchedCount: 0 };
   }
@@ -451,8 +459,14 @@ function createStreamingDispatcher({
   }
 
   async function flush(force = false) {
-    const pending = state.fullText.slice(state.sentLength);
+    let pending = state.fullText.slice(state.sentLength);
     if (!pending) return false;
+
+    if (!force) {
+      const releasableChars = pending.length - getSensitiveOutputHoldbackChars();
+      if (releasableChars <= 0) return false;
+      pending = pending.slice(0, releasableChars);
+    }
 
     let sendUntil = -1;
     const canSplitMore = state.sentSegments < (maxSegments - 1);
@@ -494,12 +508,19 @@ function createStreamingDispatcher({
   return {
     async onDelta(_delta, fullText) {
       state.fullText = sanitizeUserFacingText(fullText);
+      const protectedOutput = protectFinalOutput(state.fullText);
+      if (protectedOutput.blocked) {
+        state.fullText = `${state.fullText.slice(0, state.sentLength)}${protectedOutput.text}`;
+      }
       await flush(false);
     },
     async finish(finalReply) {
       if (typeof shouldSend === 'function' && shouldSend() === false) return;
       const visibleFinalReply = sanitizeUserFacingText(finalReply).trim();
-      state.fullText = visibleFinalReply || state.fullText || '';
+      const protectedOutput = protectFinalOutput(visibleFinalReply || state.fullText || '');
+      state.fullText = protectedOutput.blocked
+        ? `${state.fullText.slice(0, state.sentLength)}${protectedOutput.text}`
+        : protectedOutput.text;
       while (state.sentSegments < maxSegments && await flush(true)) {}
 
       if (!state.hasSentAny && state.fullText.trim()) {

@@ -278,9 +278,10 @@ enrich 完成后会在 `taskStates.enrich.result` 和 trace 的 `enrich_budget_r
 ```bash
 node scripts/eval-post-reply-learning.js
 node scripts/eval-post-reply-learning.js --case explicit-remember-like
+node scripts/eval-post-reply-learning.js --cases tests/fixtures/post-reply-learning-cases.jsonl
 ```
 
-评测集位于 `artifacts/post-reply-eval/cases.jsonl`，当前覆盖 intent、expected writes/drops、enrich gate、预算裁剪、学习回滚和重启租约恢复 case；`tests/postReplyLearningEval.test.js` 会在自动测试中校验它们。
+默认评测集位于 `tests/fixtures/post-reply-learning-cases.jsonl`，由 `harness-eval-manifest.json` 固定版本、数量和摘要，当前覆盖 intent、expected writes/drops、enrich gate、预算裁剪、学习回滚和重启租约恢复 case；空集或未知 `--case` 会失败。
 
 ## 背压降级
 

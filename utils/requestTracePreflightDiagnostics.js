@@ -143,6 +143,11 @@ function duration(event = null) {
   return Number.isFinite(n) ? n : null;
 }
 
+function totalDuration(events = []) {
+  const values = events.map(duration).filter((value) => value !== null);
+  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) : null;
+}
+
 function isMainReplyHttpSource(source = '') {
   return new Set([
     'v2_streaming_reply',
@@ -210,8 +215,8 @@ function summarizeRequest(events = [], options = {}) {
   const lock = firstEvent(sorted, ['message_ingress_lock_acquired', 'inbound_lock_acquired']);
   const routeEntry = firstEvent(sorted, ['message_ingress_route_entry', 'inbound_route_entry']);
   const routerStart = firstEvent(sorted, ['router_start', 'route_resolver_start']);
-  const plannerStart = firstEvent(sorted, ['planner_start', 'direct_chat_planner_start']);
-  const plannerDone = firstEvent(sorted, ['planner_done', 'direct_chat_planner_done']);
+  const agentDecisions = sorted.filter((event) => normalizeText(event.stage || event.tracePhase || event.type) === 'agent_decision');
+  const latestAgentDecision = agentDecisions[agentDecisions.length - 1] || null;
   const dispatchStart = firstEvent(sorted, ['runtime_dispatch_start', 'formal_route_dispatch_start']);
   const dispatchSelected = firstEvent(sorted, ['dispatch_branch_selected']);
   const prepareStart = firstBy(sorted, (event) => normalizeText(event.node) === 'prepare' && normalizeText(event.stage) === 'node_start');
@@ -233,7 +238,7 @@ function summarizeRequest(events = [], options = {}) {
     ingressToLockMs: deltaBetween(ingress, lock),
     lockToRouteEntryMs: deltaBetween(lock, routeEntry),
     routeEntryToRouterStartMs: deltaBetween(routeEntry, routerStart),
-    plannerMs: duration(plannerDone) ?? deltaBetween(plannerStart, plannerDone),
+    agentDecisionMs: totalDuration(agentDecisions),
     dispatchToPrepareMs: deltaBetween(dispatchSelected || dispatchStart, prepareStart),
     thinkingEmojiToToolTaskMs: deltaBetween(thinkingEmoji, toolTaskStart),
     toolTaskStartToPrepareMs: deltaBetween(toolTaskStart, prepareStart),
@@ -250,7 +255,7 @@ function summarizeRequest(events = [], options = {}) {
   const dominantPreUpstream = pickDominant({
     ingress_queue_or_event_loop: segments.ingressToLockMs,
     route_pre_resolver_gap: segments.routeEntryToRouterStartMs,
-    planner: segments.plannerMs,
+    agent_decision: segments.agentDecisionMs,
     dispatch_pre_model_gap: segments.dispatchToPrepareMs,
     prepare: segments.prepareMs,
     route_node: segments.routeNodeMs,
@@ -265,8 +270,9 @@ function summarizeRequest(events = [], options = {}) {
     routePolicyKey: normalizeText(dispatchSelected?.routePolicyKey || requestComplete?.routePolicyKey),
     routeDebugKey: normalizeText(dispatchSelected?.routeDebugKey || finalSend?.routeDebugKey),
     allowTools: dispatchSelected?.allowTools === true,
-    shouldUseTools: plannerDone?.shouldUseTools === true,
-    plannerDecisionSource: normalizeText(plannerDone?.decisionSource || plannerDone?.plannerDecisionSource),
+    shouldUseTools: agentDecisions.some((event) => normalizeText(event.decision) === 'tools'),
+    agentDecision: normalizeText(latestAgentDecision?.decision),
+    forcedFinal: sorted.some((event) => normalizeText(event.stage || event.tracePhase || event.type) === 'agent_forced_final'),
     upstreamStartedAtMs: elapsedFromStart(upstreamStart, ingress),
     segments,
     prepare: summarizePrepareEvents(sorted),
@@ -343,7 +349,7 @@ function formatRequestTracePreflightDiagnostic(report = {}) {
       '  pre-upstream:',
       `ingressToLock=${formatMs(request.segments.ingressToLockMs)}`,
       `routeGap=${formatMs(request.segments.routeEntryToRouterStartMs)}`,
-      `planner=${formatMs(request.segments.plannerMs)}`,
+      `agentDecision=${formatMs(request.segments.agentDecisionMs)}`,
       `dispatchToPrepare=${formatMs(request.segments.dispatchToPrepareMs)}`,
       `prepare=${formatMs(request.segments.prepareMs)}`,
       `route=${formatMs(request.segments.routeNodeMs)}`,

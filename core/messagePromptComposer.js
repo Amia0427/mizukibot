@@ -11,8 +11,8 @@ function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
 }
 
 function buildToolGuidancePrompt(route = {}) {
-  const toolHints = Array.isArray(route?.meta?.directChatPlanner?.allowedToolNames)
-    ? route.meta.directChatPlanner.allowedToolNames.filter(Boolean)
+  const toolHints = Array.isArray(route?.meta?.allowedTools)
+    ? route.meta.allowedTools.filter(Boolean)
     : [];
   if (!toolHints.length) return null;
 

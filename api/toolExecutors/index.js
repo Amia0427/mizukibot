@@ -46,14 +46,19 @@ const {
   loadSkillReference,
   resolveSkillsBaseDir
 } = require('./skillRuntime');
+const { validateMaimaiToolInvocation } = require('../../src/features/maimai/invocation-policy');
+const { getMaimaiRuntime, isMaimaiEnabled } = require('../../src/features/maimai/runtime');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
 const nativeArxiv = createLazyModuleProxy('nativeArxiv', () => require('../skills_native/arxiv'));
+const nativeEarthquake = createLazyModuleProxy('nativeEarthquake', () => require('../skills_native/earthquake'));
 const nativeWeather = createLazyModuleProxy('nativeWeather', () => require('../skills_native/weather'));
+const nativeWeatherCloud = createLazyModuleProxy('nativeWeatherCloud', () => require('../skills_native/weatherCloud'));
 const nativeSkillValidation = createLazyModuleProxy('nativeSkillValidation', () => require('../skills_native/skillValidation'));
 const nativeClawddocs = createLazyModuleProxy('nativeClawddocs', () => require('../skills_native/clawddocs'));
 const nativeSummarize = createLazyModuleProxy('nativeSummarize', () => require('../skills_native/summarize'));
+const nativeVisualRender = createLazyModuleProxy('nativeVisualRender', () => require('../skills_native/visualRender'));
 const nativeStockQuote = createLazyModuleProxy('nativeStockQuote', () => require('../skills_native/stocks/quote'));
 const nativeStockDividend = createLazyModuleProxy('nativeStockDividend', () => require('../skills_native/stocks/dividend'));
 const nativeStockPortfolio = createLazyModuleProxy('nativeStockPortfolio', () => require('../skills_native/stocks/portfolio'));
@@ -194,7 +199,41 @@ async function runFreeUrlExtract(args = {}) {
 // -------------------------
 // 1) Executor map (normalized object-style args)
 // -------------------------
+function buildBlockedMaimaiResult(reason) {
+  const messages = {
+    maimai_route_mismatch: '当前问题未确认需要舞萌谱面或成绩数据，已阻止工具调用。',
+    maimai_title_required: '请提供要分析的完整曲名、SD/DX 和难度。',
+    maimai_title_not_grounded: '谱面标题不在当前问题中，请明确要分析的完整曲名。'
+  };
+  return {
+    status: 'blocked',
+    reason,
+    answerPolicy: 'clarify',
+    message: messages[reason] || '舞萌工具调用已阻止。'
+  };
+}
+
+async function executeMaimaiTool(toolName, methodName, args = {}) {
+  if (!isMaimaiEnabled()) return { status: 'disabled', message: '舞萌功能未启用。' };
+  const validation = validateMaimaiToolInvocation(toolName, args, args.__context || {}, { enabled: true });
+  if (!validation.allowed) return buildBlockedMaimaiResult(validation.reason);
+  const runtime = getMaimaiRuntime();
+  return runtime.retrieval[methodName](args);
+}
+
 const TOOL_EXECUTORS = {
+  maimai_chart_search: async (args = {}) => {
+    return executeMaimaiTool('maimai_chart_search', 'searchCharts', args);
+  },
+
+  maimai_chart_analyze: async (args = {}) => {
+    return executeMaimaiTool('maimai_chart_analyze', 'analyzeChart', args);
+  },
+
+  maimai_player_analysis: async (args = {}) => {
+    return executeMaimaiTool('maimai_player_analysis', 'playerAnalysis', args);
+  },
+
   // ===== tools.js =====
   getLyrics: async (args = {}) => {
     const question = args.question ?? args.song ?? args.text ?? '';
@@ -203,7 +242,7 @@ const TOOL_EXECUTORS = {
 
   getWeather: async (args = {}) => {
     const text = args.text ?? args.city ?? '';
-    return tools1.getWeather(text);
+    return nativeWeather.getWeatherSummary({ location: text });
   },
 
   search_nearby_places: async (args = {}) => {
@@ -670,8 +709,16 @@ const TOOL_EXECUTORS = {
     return nativeArxiv.latestArxiv(args);
   },
 
+  skill_earthquake_latest: async (args = {}) => {
+    return nativeEarthquake.queryLatestEarthquakes(args);
+  },
+
   skill_weather: async (args = {}) => {
     return nativeWeather.getWeatherSummary(args);
+  },
+
+  skill_weather_cloud: async (args = {}) => {
+    return nativeWeatherCloud.sendLatestWeatherCloud(args);
   },
 
   skill_youtube_transcript: async (args = {}) => {
@@ -924,6 +971,10 @@ const TOOL_EXECUTORS = {
     const docPath = String(args.doc_path ?? args.path ?? '').trim();
     const skillDir = ensureSkillPath('clawddocs');
     return nativeClawddocs.fetchDoc(skillDir, docPath);
+  },
+
+  render_qq_visual: async (args = {}) => {
+    return nativeVisualRender.renderQqVisual(args);
   },
 
   skill_image_generate_pro: async (args = {}) => {

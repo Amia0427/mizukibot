@@ -7,9 +7,11 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const script = path.resolve(__dirname, '../scripts/check-staged-secrets.js');
+const isolatedGitEnv = { ...process.env };
+delete isolatedGitEnv.GIT_INDEX_FILE;
 
 function git(cwd, args) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv });
   assert.strictEqual(result.status, 0, result.stderr);
 }
 
@@ -22,7 +24,8 @@ try {
 
   const safe = spawnSync(process.execPath, [script, '--all'], {
     cwd: tempRoot,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    env: isolatedGitEnv
   });
   assert.strictEqual(safe.status, 0, safe.stderr);
   assert.match(safe.stdout, /tracked secret scan passed/);
@@ -33,7 +36,8 @@ try {
 
   const blocked = spawnSync(process.execPath, [script, '--all'], {
     cwd: tempRoot,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    env: isolatedGitEnv
   });
   assert.strictEqual(blocked.status, 1);
   assert.match(blocked.stderr, /credential\.js:1 OpenAI-style API key/);

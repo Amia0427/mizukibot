@@ -373,11 +373,7 @@ async function tryGenerateBotDiaryQzoneImage(content = '', meta = {}, options = 
   return result;
 }
 
-async function sendGroupImageMessage(groupId = '', imageInput = null, options = {}) {
-  const actionClient = options.actionClient || getNapCatActionClient();
-  const targetGroupId = normalizeText(groupId);
-  if (!targetGroupId) throw new Error('groupId is required');
-
+async function resolveImageBase64(imageInput = null) {
   let base64Body = '';
   if (Buffer.isBuffer(imageInput)) {
     base64Body = imageInput.toString('base64');
@@ -400,11 +396,18 @@ async function sendGroupImageMessage(groupId = '', imageInput = null, options = 
       base64Body = await readImageFileAsBase64(imageInput.file);
     }
   }
-
   if (!base64Body) throw new Error('image content is required');
+  return base64Body;
+}
 
-  await actionClient.callAction('send_group_msg', {
-    group_id: targetGroupId,
+async function sendImageAction(action = '', targetKey = '', targetId = '', imageInput = null, options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const normalizedTargetId = normalizeText(targetId);
+  if (!normalizedTargetId) throw new Error(`${targetKey} is required`);
+  const base64Body = await resolveImageBase64(imageInput);
+
+  const response = await actionClient.callAction(action, {
+    [targetKey]: normalizedTargetId,
     message: [{
       type: 'image',
       data: {
@@ -415,8 +418,29 @@ async function sendGroupImageMessage(groupId = '', imageInput = null, options = 
 
   return {
     success: true,
-    reason: 'group image sent'
+    messageId: response?.message_id ?? response?.messageId ?? null
   };
+}
+
+async function sendGroupImageMessage(groupId = '', imageInput = null, options = {}) {
+  const result = await sendImageAction('send_group_msg', 'group_id', groupId, imageInput, options);
+  return { ...result, reason: 'group image sent' };
+}
+
+async function sendPrivateImageMessage(userId = '', imageInput = null, options = {}) {
+  const result = await sendImageAction('send_private_msg', 'user_id', userId, imageInput, options);
+  return { ...result, reason: 'private image sent' };
+}
+
+async function sendImageMessageForContext(context = {}, imageInput = null, options = {}) {
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {};
+  const groupId = normalizeText(context.groupId || routeMeta.groupId || routeMeta.group_id);
+  const chatType = normalizeText(context.chatType || routeMeta.chatType || routeMeta.chat_type).toLowerCase();
+  if (groupId && chatType !== 'private') {
+    return sendGroupImageMessage(groupId, imageInput, options);
+  }
+  const userId = normalizeText(context.userId || routeMeta.userId || routeMeta.user_id || routeMeta.senderId || routeMeta.sender_id);
+  return sendPrivateImageMessage(userId, imageInput, options);
 }
 
 module.exports = {
@@ -427,6 +451,8 @@ module.exports = {
   sanitizeDiaryImageMeta,
   sanitizeDiaryImageText,
   sendGroupImageMessage,
+  sendImageMessageForContext,
+  sendPrivateImageMessage,
   shouldAttemptBotDiaryImage,
   tryGenerateBotDiaryQzoneImage
 };

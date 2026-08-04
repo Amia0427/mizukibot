@@ -466,11 +466,11 @@ function looksLikeMissingColumnError(error = null) {
 }
 
 function legacySelectColumns() {
-  return LANCEDB_SELECT_COLUMNS.filter((column) => !['category', 'tagsText', 'intent', 'privacyLevel'].includes(column));
+  return LANCEDB_SELECT_COLUMNS.filter((column) => !['category', 'tagsText', 'intent', 'privacyLevel', 'modelVersion', 'lifecycleStatus', 'versionRoot', 'sourceTs', 'confidence'].includes(column));
 }
 
 function stripMetadataColumnsFromRows(rows = []) {
-  const metadataColumns = new Set(['category', 'tagsText', 'intent', 'privacyLevel']);
+  const metadataColumns = new Set(['category', 'tagsText', 'intent', 'privacyLevel', 'modelVersion', 'lifecycleStatus', 'versionRoot', 'sourceTs', 'confidence']);
   return (Array.isArray(rows) ? rows : []).map((row) => {
     if (!row || typeof row !== 'object') return row;
     const next = {};
@@ -486,7 +486,7 @@ function stripMetadataFilterClauses(filterSql = '') {
     .split(/\s+AND\s+/i)
     .map((clause) => clause.trim())
     .filter(Boolean)
-    .filter((clause) => !/^(category|intent|privacyLevel)\s*=/.test(clause))
+    .filter((clause) => !/^(category|intent|privacyLevel|source\s+IN)\s*/.test(clause))
     .join(' AND ');
 }
 

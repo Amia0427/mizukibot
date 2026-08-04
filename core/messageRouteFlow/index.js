@@ -60,7 +60,7 @@ const {
 const {
   NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE
 } = require('../../utils/normalGroupMainReplyRateLimiter');
-const { buildDirectChatPlannerOptions } = require('../directChatPlannerContext');
+const { applyDeterministicToolRouting } = require('../router/toolRouting');
 
 function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
   return resolveVisionFallbackModelConfigBase(route, imageUrl, userId, buildImageModelConfig);
@@ -121,7 +121,6 @@ function createMessageRouteFlow(deps = {}) {
     config,
     routeResolver,
     routeExecution,
-    planDirectChat,
     askAIDispatch,
     askToolTaskLocally,
     runBackgroundToolTask,
@@ -274,10 +273,7 @@ function createMessageRouteFlow(deps = {}) {
     const routerContextSummary = typeof buildSubagentContextSummary === 'function'
       ? buildSubagentContextSummary(senderId, groupId, { maxLength: 180 })
       : '';
-    const plannerContextSummary = typeof buildSubagentContextSummary === 'function'
-      ? buildSubagentContextSummary(senderId, groupId, { maxLength: 320 })
-      : '';
-    const route = await routeResolver({
+    let route = await routeResolver({
       rawText: String(rawText || '').replace(cleanText, supplementedText),
       botQQ,
       userId: senderId,
@@ -290,19 +286,7 @@ function createMessageRouteFlow(deps = {}) {
     };
     route.cleanText = supplementedText;
     route.rawText = supplementedText;
-    if (route?.topRouteType === 'direct_chat') {
-      const plannerDecision = await planDirectChat(route, buildDirectChatPlannerOptions({
-        route,
-        directedContext: route?.meta?.directedContext || null,
-        userId: senderId,
-        contextSummary: plannerContextSummary
-      }));
-      route.meta = {
-        ...(route.meta || {}),
-        toolPlanner: plannerDecision,
-        directChatPlanner: plannerDecision
-      };
-    }
+    route = applyDeterministicToolRouting(route);
     const routeExecutionPlan = routeExecution.resolveRouteExecution(route, config, {});
 
     if (String(routeExecutionPlan.executor || '').trim() !== 'background_direct' && !routeExecutionPlan.allowTools) {
@@ -346,7 +330,7 @@ function createMessageRouteFlow(deps = {}) {
         routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
         topRouteType: routeExecutionPlan.topRouteType,
         allowedTools: routeExecutionPlan.allowedTools,
-        routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, { groupId })
+        routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, { groupId })
       },
       sendAckOnly: false
     });
@@ -453,7 +437,7 @@ function createMessageRouteFlow(deps = {}) {
       } else if (routeExecutionPlan.allowTools || routeExecutionPlan.executor === 'background_direct') {
         const dispatchBranch = routeExecutionPlan.executor === 'background_direct'
           ? 'background_direct'
-          : 'tool_plan';
+          : 'agent';
         emitRouteDiag('dispatch_branch_selected', buildRouteDiagPayload(routeExecutionPlan, dispatchBranch));
         const toolTaskOptions = {
           routePrompt: [toolGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
@@ -467,11 +451,9 @@ function createMessageRouteFlow(deps = {}) {
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
           imageUrls,
-          plannerExecutionPlan: route?.meta?.toolPlanner?.executionPlan || route?.meta?.directChatPlanner?.executionPlan || null,
-          disableDirectToolLoop: true,
           deferPersist: false,
           requestTrace: cloneTraceForMeta(requestTrace),
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             groupId,
             chatType,
             dispatchBranch,
@@ -603,7 +585,7 @@ function createMessageRouteFlow(deps = {}) {
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           triggerReason: 'direct_reply.final_send',
           topRouteType: routeExecutionPlan.topRouteType,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             groupId,
             chatType,
             dispatchBranch: 'direct_reply',
@@ -634,8 +616,7 @@ function createMessageRouteFlow(deps = {}) {
           allowedTools: routeExecutionPlan.allowedTools,
           imageUrl,
           imageUrls,
-          disableDirectToolLoop: true,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, null, {
             groupId,
             chatType,
             messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
@@ -940,8 +921,7 @@ function createMessageRouteFlow(deps = {}) {
           requestText: parsed.requestText || parsed.cleanText || parsed.text || payload || rawText,
           userId: parsed.userId || senderId,
           groupId: parsed.groupId || groupId,
-          chatType: parsed.chatType || normalizedChatType,
-          plannerMode: parsed.plannerMode || 'rule'
+          chatType: parsed.chatType || normalizedChatType
         });
         adminReply = JSON.stringify(report, null, 2);
       } else if (subcmd === 'replyprompt' || subcmd === 'prompt-assembly' || subcmd === 'system-prompt') {

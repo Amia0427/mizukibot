@@ -126,6 +126,7 @@ function summarizeRerank(recallDiagnostics = {}, options = {}) {
   return {
     enabled: rerank.enabled === true,
     applied: rerank.applied === true,
+    decision: normalizeObject(rerank.decision, {}),
     candidates: toFiniteNumber(rerank.candidates, 0),
     limit: toFiniteNumber(rerank.limit, 0),
     tail: toFiniteNumber(rerank.tail, 0),

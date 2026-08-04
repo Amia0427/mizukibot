@@ -4,6 +4,8 @@ const {
   normalizeText
 } = require('./helpers');
 const { isMemoryNotRecallable } = require('./recallFilter');
+const { shouldVectorizeMemoryNode } = require('./embeddingPolicy');
+const { shouldIndexJournalEpisode } = require('./journalEpisodePolicy');
 
 function createEmbeddingNodes(deps = {}) {
   const { buildEmbeddingIdentity } = deps;
@@ -12,7 +14,7 @@ function createEmbeddingNodes(deps = {}) {
     const { loadMemoryNodes, loadEpisodeProjection } = require('./storage');
     const nodes = [];
     for (const node of loadMemoryNodes()) {
-      if (!node || normalizeText(node.status).toLowerCase() === 'archived' || isMemoryNotRecallable(node)) continue;
+      if (!node || normalizeText(node.status).toLowerCase() === 'archived' || isMemoryNotRecallable(node) || !shouldVectorizeMemoryNode(node)) continue;
       nodes.push(node);
     }
     const episodeProjection = loadEpisodeProjection();
@@ -23,8 +25,8 @@ function createEmbeddingNodes(deps = {}) {
         const eventId = normalizeText(episode.id);
         if (!text || !eventId) continue;
         const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
-        if (rollupLevel === 'segment') continue;
-        nodes.push({
+        if (!shouldIndexJournalEpisode(episode)) continue;
+        const episodeNode = {
           id: `episode:${eventId}`,
           source: 'journal',
           sourceKind: normalizeText(episode.sourceKind || 'journal'),
@@ -52,13 +54,14 @@ function createEmbeddingNodes(deps = {}) {
           textKind: normalizeText(episode.textKind) || `journal_${rollupLevel}`,
           sourceCompleteness: normalizeText(episode.sourceCompleteness || 'summary'),
           sourceFile: normalizeText(episode.sourceFile)
-        });
+        };
+        if (shouldVectorizeMemoryNode(episodeNode)) nodes.push(episodeNode);
       }
     }
     if (config.MEMORY_JOURNAL_EMBEDDING_BACKFILL_ENABLED !== false) {
       const { buildDailyJournalDocsForAllUsers } = require('./journalDocs');
       for (const doc of buildDailyJournalDocsForAllUsers({ includeSegments: true })) {
-        if (!doc || normalizeText(doc.status).toLowerCase() === 'archived' || isMemoryNotRecallable(doc)) continue;
+        if (!doc || normalizeText(doc.status).toLowerCase() === 'archived' || isMemoryNotRecallable(doc) || !shouldVectorizeMemoryNode(doc)) continue;
         nodes.push(doc);
       }
     }

@@ -6,12 +6,8 @@ const LANGGRAPH_V2_TOPOLOGY = Object.freeze({
     'prepare',
     'enhance_live_state',
     'route',
-    'direct_reply',
-    'planner',
-    'dispatch',
-    'validate',
-    'repair_or_continue',
-    'draft_reply',
+    'agent_decide',
+    'execute_tools',
     'humanize',
     'final_validate',
     'persist'
@@ -19,8 +15,7 @@ const LANGGRAPH_V2_TOPOLOGY = Object.freeze({
   edges: Object.freeze([
     Object.freeze({ from: 'prepare', to: 'enhance_live_state' }),
     Object.freeze({ from: 'enhance_live_state', to: 'route' }),
-    Object.freeze({ from: 'planner', to: 'dispatch' }),
-    Object.freeze({ from: 'dispatch', to: 'validate' }),
+    Object.freeze({ from: 'execute_tools', to: 'agent_decide' }),
     Object.freeze({ from: 'humanize', to: 'final_validate' }),
     Object.freeze({ from: 'final_validate', to: 'persist' }),
     Object.freeze({ from: 'persist', to: END_TARGET })
@@ -30,44 +25,19 @@ const LANGGRAPH_V2_TOPOLOGY = Object.freeze({
       from: 'route',
       router: 'routeAfterRoute',
       branches: Object.freeze({
-        chat: 'direct_reply',
-        proactive: 'direct_reply',
-        review: 'direct_reply',
-        image: 'direct_reply',
-        minecraft: 'direct_reply',
-        tool_plan: 'planner'
+        chat: 'agent_decide',
+        proactive: 'agent_decide',
+        review: 'agent_decide',
+        image: 'agent_decide',
+        minecraft: 'agent_decide',
+        agent: 'agent_decide'
       })
     }),
     Object.freeze({
-      from: 'direct_reply',
-      router: 'routeAfterDirectReply',
+      from: 'agent_decide',
+      router: 'routeAfterAgentDecide',
       branches: Object.freeze({
-        planner: 'planner',
-        persist: 'persist',
-        __end__: END_TARGET
-      })
-    }),
-    Object.freeze({
-      from: 'validate',
-      router: 'routeAfterValidate',
-      branches: Object.freeze({
-        answer: 'draft_reply',
-        repair: 'repair_or_continue'
-      })
-    }),
-    Object.freeze({
-      from: 'repair_or_continue',
-      router: 'routeAfterRepair',
-      branches: Object.freeze({
-        dispatch: 'dispatch',
-        answer: 'draft_reply'
-      })
-    }),
-    Object.freeze({
-      from: 'draft_reply',
-      router: 'routeAfterDraftReply',
-      branches: Object.freeze({
-        dispatch: 'dispatch',
+        execute_tools: 'execute_tools',
         humanize: 'humanize'
       })
     })

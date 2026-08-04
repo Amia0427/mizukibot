@@ -45,22 +45,7 @@ const explicitWebSearchPlan = resolveRouteExecution({
     responseIntent: 'answer',
     toolIntent: 'maybe_tools',
     allowedTools: ['web_search', 'web_fetch'],
-    explicitWebSearchRequired: true,
-    toolPlanner: {
-      shouldUseTools: true,
-      allowedToolNames: ['web_search'],
-      executionPlan: {
-        mode: 'tool_plan',
-        steps: [
-          {
-            id: 'planner_step_1',
-            action: 'web_search',
-            args: { query: '纳斯达克 2026 最高点' },
-            purpose: 'Search before answering the explicit web request.'
-          }
-        ]
-      }
-    }
+    explicitWebSearchRequired: true
   },
   intent: {
     risk: 'low',
@@ -82,9 +67,7 @@ const explicitWebSearchPlan = resolveRouteExecution({
 });
 
 assert.strictEqual(explicitWebSearchPlan.allowTools, true);
-assert.deepStrictEqual(explicitWebSearchPlan.allowedTools, ['web_search']);
-assert.strictEqual(explicitWebSearchPlan.allowedPlanSteps.length, 1);
-assert.strictEqual(explicitWebSearchPlan.allowedPlanSteps[0].action, 'web_search');
+assert.deepStrictEqual(explicitWebSearchPlan.allowedTools, ['web_search', 'web_fetch']);
 assert.strictEqual(explicitWebSearchPlan.unavailableReason, '');
 assert.strictEqual(explicitWebSearchPlan.allowStream, false);
 

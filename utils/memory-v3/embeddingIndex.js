@@ -6,7 +6,7 @@ const {
   canonicalizeText
 } = require('./helpers');
 const { isMemoryNotRecallable } = require('./recallFilter');
-const { shouldUseRemoteEmbedding, requestEmbedding, cosineArray } = require('../vectorMemory');
+const { shouldUseRemoteEmbedding, requestEmbedding, cosineArray } = require('../memoryEmbedding');
 const {
   CACHE_VERSION,
   buildEmbeddingIdentity,
@@ -27,6 +27,7 @@ const {
 } = require('./embeddingIndexCache');
 const { createEmbeddingPriority } = require('./embeddingPriority');
 const { createEmbeddingNodes } = require('./embeddingNodes');
+const { shouldVectorizeMemoryNode } = require('./embeddingPolicy');
 
 const backfillState = {
   running: false,
@@ -50,7 +51,7 @@ const {
 function reconcileEmbeddingCache(nodes = [], options = {}) {
   ensureDir(config.MEMORY_V3_PROJECTIONS_DIR);
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
-    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node));
+    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node) && shouldVectorizeMemoryNode(node));
   if (!isEmbeddingIndexEnabled()) {
     if (options.dryRun === true) {
       return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0, dropped: 0 };
@@ -77,7 +78,7 @@ function reconcileEmbeddingCache(nodes = [], options = {}) {
 
 function buildEmbeddingCacheReconcilePlan(nodes = [], options = {}) {
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
-    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node));
+    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node) && shouldVectorizeMemoryNode(node));
   if (!isEmbeddingIndexEnabled()) {
     return {
       enabled: false,
@@ -121,6 +122,7 @@ function buildEmbeddingCacheReconcilePlan(nodes = [], options = {}) {
         nodeId: identity.nodeId,
         canonicalKey: identity.canonicalKey,
         model: identity.model,
+        modelVersion: identity.modelVersion,
         source: identity.source,
         textHash: identity.textHash,
         updatedAt: identity.updatedAt
@@ -209,6 +211,7 @@ function buildEmbeddingBackfillPlan(options = {}) {
         nodeId: identity.nodeId,
         canonicalKey: identity.canonicalKey,
         model: identity.model,
+        modelVersion: identity.modelVersion,
         source: identity.source,
         textHash: identity.textHash,
         updatedAt: identity.updatedAt

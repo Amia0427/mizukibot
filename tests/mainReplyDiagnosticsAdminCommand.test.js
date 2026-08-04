@@ -28,7 +28,6 @@ module.exports = (async () => {
     process.env.API_BASE_URL = 'https://diag-admin.example/v1/chat/completions';
     process.env.API_KEY = 'diag-key';
     process.env.AI_MODEL = 'diag-model';
-    process.env.PLANNER_SUBAGENT_ENABLED = 'false';
     process.env.ENABLE_AI_ROUTER = 'false';
     process.env.COMPANION_TOOL_MODE_ENABLED = 'false';
     process.env.MEMORY_EMBEDDING_ENABLED = '0';
@@ -58,14 +57,14 @@ module.exports = (async () => {
           admin: true,
           command: {
             cmd: 'debug',
-            args: ['replydiag', '{"requestText":"查下今天上海天气","userId":"u_diag","groupId":"g_diag","chatType":"group","plannerMode":"rule"}'],
-            raw: '/debug replydiag {"requestText":"查下今天上海天气","userId":"u_diag","groupId":"g_diag","chatType":"group","plannerMode":"rule"}'
+            args: ['replydiag', '{"requestText":"查下今天上海天气","userId":"u_diag","groupId":"g_diag","chatType":"group"}'],
+            raw: '/debug replydiag {"requestText":"查下今天上海天气","userId":"u_diag","groupId":"g_diag","chatType":"group"}'
           }
         }
       },
       groupId: 'g_diag',
       senderId: 'admin_1',
-      rawText: '/debug replydiag {"requestText":"查下今天上海天气","userId":"u_diag","groupId":"g_diag","chatType":"group","plannerMode":"rule"}',
+      rawText: '/debug replydiag {"requestText":"查下今天上海天气","userId":"u_diag","groupId":"g_diag","chatType":"group"}',
       userInfo: null,
       chatType: 'group'
     });
@@ -76,7 +75,7 @@ module.exports = (async () => {
     assert.strictEqual(report.schemaVersion, 'main_reply_diagnostic_v1');
     assert.strictEqual(report.input.userId, 'u_diag');
     assert.strictEqual(report.input.groupId, 'g_diag');
-    assert.strictEqual(report.diagnostics.plannerSource, 'rule');
+    assert.strictEqual(report.diagnostics.agentSource, 'native_react');
     assert.ok(Object.prototype.hasOwnProperty.call(report, 'memoryFreshness'));
     assert.ok(Object.prototype.hasOwnProperty.call(report, 'guards'));
     assert.ok(Object.prototype.hasOwnProperty.call(report.branch, 'finalBranch'));
@@ -264,7 +263,7 @@ module.exports = (async () => {
     assert.strictEqual(checkResult.handled, true);
     assert.strictEqual(sent.length, 8);
     assert.ok(sent[7].replyText.includes('模型自检:'));
-    assert.ok(sent[7].replyText.includes('plan |'));
+    assert.ok(!sent[7].replyText.includes('plan |'));
     assert.ok(sent[7].replyText.includes('main_reply |'));
     assert.ok(!sent[7].replyText.includes('https://'));
     assert.ok(!sent[7].replyText.includes('diag-key'));

@@ -2,6 +2,15 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const assert = require('assert');
+const { spawnSync } = require('child_process');
+const {
+  SUITE_RESULT_SCHEMA_VERSION,
+  completeHarnessSuite,
+  getHarnessSuiteContext
+} = require('../scripts/harness-eval-contract');
+
+const SUITE_ID = 'memory-recall-auto-gold';
+const { suite } = getHarnessSuiteContext(SUITE_ID);
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-memory-recall-auto-gold-'));
 process.env.DATA_DIR = tempRoot;
@@ -36,7 +45,7 @@ for (const fileName of [
 
 const { writeJsonLines, atomicWriteText } = require('../utils/memory-v3/helpers');
 
-writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [{
+const goldMemoryNode = {
   id: 'node_like_tea',
   userId: 'u_gold',
   scopeType: 'personal',
@@ -53,7 +62,9 @@ writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [{
   evidenceTier: 'strict',
   stabilityScore: 0.9,
   updatedAt: Date.now()
-}]);
+};
+
+writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [goldMemoryNode]);
 
 atomicWriteText(path.join(process.env.PROMPTS_DIR, 'persona_modules', 'module-catalog.json'), JSON.stringify({
   version: 1,
@@ -74,11 +85,15 @@ atomicWriteText(
 );
 
 const {
+  assertExplicitCaseSource,
+  assertNonEmptyCases,
   buildAutoGoldCases,
+  buildNegativeGoldCases,
   buildCaseQueryOptions,
   countCategoryMismatches,
   countLifecycleLeaks,
   countRecentRecallMisses,
+  loadCases,
   parseArgs,
   runMode,
   supplementCasesWithAutoGold
@@ -89,7 +104,59 @@ assert.ok(cases.some((item) => item.expectedIds.includes('node_like_tea')), 'aut
 assert.ok(cases.some((item) => item.expectedIds.includes('wb_test_jasmine')), 'auto gold should include worldbook expected id');
 assert.ok(cases.every((item) => item.expectedIds.length > 0), 'all auto gold cases should be judged');
 assert.ok(new Set(cases.map((item) => item.facet)).size >= 2, 'auto gold should not collapse to one facet');
+writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [
+  goldMemoryNode,
+  {
+    id: 'node_other_user',
+    userId: 'u_other',
+    scopeType: 'personal',
+    status: 'active',
+    text: 'User prefers oolong tea.'
+  },
+  {
+    id: 'node_shared_group',
+    userId: 'u_group_sender',
+    groupId: 'g_shared',
+    scopeType: 'group',
+    status: 'active',
+    text: 'The group shared an anime character image.'
+  }
+]);
+const negativeCases = buildNegativeGoldCases(10);
+assert.ok(negativeCases.some((item) => item.id === 'negative-cross-user:node_like_tea'));
+assert.ok(!negativeCases.some((item) => item.id === 'negative-cross-user:node_shared_group'));
 assert.strictEqual(parseArgs(['--mode', 'lancedb', '--limit', '5']).mode, 'lancedb');
+const explicitCasesPath = path.join(tempRoot, 'explicit-cases.jsonl');
+fs.writeFileSync(explicitCasesPath, `${JSON.stringify({
+  id: 'explicit-only',
+  userId: 'u_gold',
+  query: 'jasmine tea',
+  expectedIds: ['node_like_tea']
+})}\n`, 'utf8');
+assert.strictEqual(parseArgs(['--cases', explicitCasesPath]).casesFile, explicitCasesPath);
+assert.deepStrictEqual(loadCases(10, { casesFile: explicitCasesPath }).map((item) => item.id), ['explicit-only']);
+const emptyCasesPath = path.join(tempRoot, 'empty-cases.jsonl');
+fs.writeFileSync(emptyCasesPath, '', 'utf8');
+assert.throws(() => loadCases(10, { casesFile: emptyCasesPath }), /empty/i);
+const invalidCasesPath = path.join(tempRoot, 'invalid-cases.jsonl');
+fs.writeFileSync(invalidCasesPath, '{invalid json}\n', 'utf8');
+assert.throws(() => loadCases(10, { casesFile: invalidCasesPath }), /invalid JSON.*line 1/i);
+assert.throws(() => loadCases(10, { casesFile: path.join(tempRoot, 'missing.jsonl') }), /not found/i);
+assert.throws(() => assertNonEmptyCases([], 'built cases'), /built cases.*empty/i);
+assert.throws(
+  () => assertExplicitCaseSource(parseArgs([])),
+  /--cases.*--auto-gold.*--build-cases/i
+);
+assert.doesNotThrow(() => assertExplicitCaseSource(parseArgs(['--cases', explicitCasesPath])));
+assert.doesNotThrow(() => assertExplicitCaseSource(parseArgs(['--auto-gold'])));
+assert.doesNotThrow(() => assertExplicitCaseSource(parseArgs(['--build-cases'])));
+const noInputCli = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'eval-memory-recall.js')], {
+  cwd: path.join(__dirname, '..'),
+  encoding: 'utf8',
+  env: process.env
+});
+assert.strictEqual(noInputCli.status, 1);
+assert.match(noInputCli.stderr, /--cases.*--auto-gold.*--build-cases/i);
 const supplementedCases = supplementCasesWithAutoGold([
   { id: 'manual_1', query: 'manual judged case', expectedIds: ['manual_node'] }
 ], 3, () => [
@@ -113,7 +180,6 @@ module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((resul
   assert.notStrictEqual(result.mrrAt5, null);
   assert.notStrictEqual(result.mrrAt8, null);
   assert.notStrictEqual(result.promptInjectionRate, null);
-  assert.strictEqual(typeof result.wrongHitRate, 'number');
   assert.notStrictEqual(result.answerRelevance, null);
   assert.notStrictEqual(result.faithfulness, null);
   assert.ok(result.bySource.preference || result.bySource.memory || result.byFacet.preference);
@@ -121,6 +187,22 @@ module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((resul
   assert.strictEqual(typeof result.categoryMismatches, 'number');
   assert.strictEqual(typeof result.recentRecallMisses, 'number');
   assert.ok(result.latency.stages.totalMs.p50Ms >= 0);
+  completeHarnessSuite(SUITE_ID, {
+    schemaVersion: SUITE_RESULT_SCHEMA_VERSION,
+    suiteId: SUITE_ID,
+    caseSchemaVersion: suite.caseSchemaVersion,
+    dataPolicy: suite.dataPolicy,
+    caseCount: result.cases,
+    completedCaseCount: result.cases,
+    metrics: {
+      recallAt5: result.recallAt5,
+      mrrAt5: result.mrrAt5,
+      wrongHitRate: result.wrongHitRate,
+      leakage: result.leakage,
+      lifecycleLeakage: result.lifecycleLeakage,
+      forbiddenHits: result.forbiddenHits
+    }
+  });
   console.log('memoryRecallAutoGoldEval.test.js passed');
 }).catch((error) => {
   console.error(error);

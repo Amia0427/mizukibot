@@ -25,7 +25,6 @@ function createFlow(overrides = {}) {
     },
     routeResolver: async () => ({}),
     routeExecution: { resolveRouteExecution: () => ({}) },
-    planDirectChat: async () => ({}),
     askAIDispatch: async () => {
       askCount += 1;
       return '主回复';

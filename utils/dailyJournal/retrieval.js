@@ -32,12 +32,14 @@ function createDailyJournalRetrieval(deps = {}) {
 
   function buildEmptyRetrievalBundle(options = {}) {
     const byLayer = {
+      segment: [],
       daily: [],
       fourDay: [],
       monthly: []
     };
     if (options.includeActiveRaw) byLayer.activeRaw = [];
     const stats = {
+      segmentCount: 0,
       dailyCount: 0,
       fourDayCount: 0,
       monthlyCount: 0,
@@ -180,7 +182,7 @@ function createDailyJournalRetrieval(deps = {}) {
               Math.max(600, Number(config.MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS || 160) * 12)
             ),
             items: structured.items || [],
-            byLayer: structured.byLayer || { daily: [], fourDay: [], monthly: [] },
+            byLayer: structured.byLayer || { segment: [], daily: [], fourDay: [], monthly: [] },
             continuity: structured.continuity || { sameSession: [], sameTopic: [] },
             query: structured.query || {},
             stats: structured.stats || {}

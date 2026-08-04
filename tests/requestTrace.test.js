@@ -97,7 +97,6 @@ module.exports = (async () => {
       stage: 'stream_complete',
       needsBackground: true,
       executor: 'direct',
-      planner: 'runtime_v2',
       stream: true,
       apiBaseUrl: 'https://user:pass@example.com/v1?api_key=base-secret',
       requestUrl: 'https://example.com/chat?token=request-secret&mode=stream',
@@ -113,14 +112,17 @@ module.exports = (async () => {
       allowTools: true,
       shouldUseTools: true,
       decisionSource: 'route_policy',
-      plannerDecisionSource: 'model',
+      decision: 'tools',
+      status: 'completed',
+      toolCallId: 'call_1',
       allowedToolCount: 2,
       allowedToolNames: ['search', 'weather'],
-      plannerFallbackUsed: false,
-      plannerModel: 'planner-model',
-      plannerMode: 'tool_plan',
-      plannerStepCount: 1,
-      plannerTools: ['search'],
+      toolRoundCount: 1,
+      toolCallCount: 2,
+      round: 1,
+      callCount: 2,
+      toolNames: ['search'],
+      forced: false,
       unavailableReason: 'none',
       fastPath: 'plain_private_chat',
       relationship: 'known',
@@ -134,7 +136,6 @@ module.exports = (async () => {
         openaiPromptCacheKey: 'stable-cache-key',
         downgradeReason: 'unsupported_retention'
       },
-      plannerMs: 12,
       executorMs: 34,
       streamMs: 56,
       error: 'failed {"authorization": "Bearer json-secret", "password" : "space-secret"}'
@@ -145,27 +146,27 @@ module.exports = (async () => {
     assert.deepStrictEqual({
       needsBackground: compatibilityEvent.needsBackground,
       executor: compatibilityEvent.executor,
-      planner: compatibilityEvent.planner,
+      decision: compatibilityEvent.decision,
       stream: compatibilityEvent.stream,
       retryCount: compatibilityEvent.retryCount,
       tool: compatibilityEvent.tool,
       replyPath: compatibilityEvent.replyPath,
       finishReason: compatibilityEvent.finishReason,
       streamCompleted: compatibilityEvent.streamCompleted,
-      plannerMs: compatibilityEvent.plannerMs,
+      toolRoundCount: compatibilityEvent.toolRoundCount,
       executorMs: compatibilityEvent.executorMs,
       streamMs: compatibilityEvent.streamMs
     }, {
       needsBackground: true,
       executor: 'direct',
-      planner: 'runtime_v2',
+      decision: 'tools',
       stream: true,
       retryCount: 2,
       tool: 'search',
       replyPath: 'direct_reply',
       finishReason: 'stop',
       streamCompleted: true,
-      plannerMs: 12,
+      toolRoundCount: 1,
       executorMs: 34,
       streamMs: 56
     });
@@ -174,7 +175,7 @@ module.exports = (async () => {
     assert.strictEqual(compatibilityEvent.apiBaseUrl, 'https://example.com');
     assert.strictEqual(compatibilityEvent.requestUrl, 'https://example.com');
     assert.deepStrictEqual(compatibilityEvent.allowedToolNames, ['search', 'weather']);
-    assert.deepStrictEqual(compatibilityEvent.plannerTools, ['search']);
+    assert.deepStrictEqual(compatibilityEvent.toolNames, ['search']);
     assert.strictEqual(compatibilityEvent.cache.openaiPromptCacheKey, 'stable-cache-key');
     assert.strictEqual(compatibilityEvent.cache.downgradeReason, 'unsupported_retention');
 

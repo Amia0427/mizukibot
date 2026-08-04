@@ -12,7 +12,6 @@ function createFlow(overrides = {}) {
     },
     routeResolver: async () => ({}),
     routeExecution: { resolveRouteExecution: () => ({}) },
-    planDirectChat: async () => ({}),
     askAIDispatch: async () => '',
     askToolTaskLocally: async () => '',
     askToolTaskWithSubagentReview: async () => '',

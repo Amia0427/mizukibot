@@ -174,18 +174,6 @@ module.exports = (async () => {
       return { success: true };
     };
 
-    const directChatPlanner = require('../core/directChatPlanner');
-    directChatPlanner.planDirectChat = async () => {
-      events.push('planner');
-      return {
-        shouldUseTools: false,
-        allowedTools: [],
-        allowedToolNames: [],
-        needsBackground: false,
-        executionPlan: { mode: 'chat_only', steps: [] }
-      };
-    };
-
     const routeFlowModule = require('../core/messageRouteFlow');
     const originalCreateMessageRouteFlow = routeFlowModule.createMessageRouteFlow;
     routeFlowModule.createMessageRouteFlow = (deps) => {
@@ -219,7 +207,6 @@ module.exports = (async () => {
     assert.ok(successEvents.indexOf('fast-runtime:success') < successEvents.indexOf('send:fast success reply'));
     assert.ok(successEvents.indexOf('send:fast success reply') < successEvents.indexOf('safety-emoji'));
     assert.ok(successEvents.indexOf('safety-emoji') < successEvents.indexOf('history:fast persisted reply'));
-    assert.ok(!successEvents.includes('planner'));
     assert.ok(!successEvents.includes('formal-dispatch'));
 
     events.length = 0;
@@ -228,13 +215,13 @@ module.exports = (async () => {
       messageId: 'fast_failure',
       rawText: 'failure'
     }));
-    assert.ok(events.indexOf('send:fast failure reply') < events.indexOf('planner'));
-    assert.ok(events.indexOf('planner') < events.indexOf('formal-dispatch'));
+    assert.ok(events.indexOf('send:fast failure reply') < events.indexOf('formal-dispatch'));
     assert.ok(events.indexOf('formal-dispatch') < events.indexOf('send:formal fallback reply'));
     assert.ok(!events.includes('history:fast failure reply'), 'a failed fast send must not persist fast-path history');
 
     console.log('normalFastReplyHandlerSource.test.js passed');
   } finally {
+    require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     restoreEnv(snapshot);
     clearProjectCache();
     fs.rmSync(tempDataDir, { recursive: true, force: true });

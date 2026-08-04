@@ -1,7 +1,6 @@
 const config = require('../../config');
 
 const CHECK_TYPES = Object.freeze([
-  'plan',
   'embedding',
   'rerank',
   'memory',

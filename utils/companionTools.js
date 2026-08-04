@@ -6,8 +6,14 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'get_context_stats',
   'url_safety_check',
   'read_shared_link',
+  'maimai_chart_search',
+  'maimai_chart_analyze',
+  'maimai_player_analysis',
+  'render_qq_visual',
   'getWeather',
+  'skill_earthquake_latest',
   'skill_weather',
+  'skill_weather_cloud',
   'notebook_search',
   'notebook_list_docs',
   'notebook_append_journal',
@@ -17,8 +23,9 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'cancel_scheduled_task'
 ]);
 
-const COMPANION_PLANNER_SAFE_READ_TOOLS = Object.freeze([
+const COMPANION_SAFE_READ_TOOLS = Object.freeze([
   'getWeather',
+  'skill_earthquake_latest',
   'skill_weather',
   'get_current_time',
   'get_context_stats',
@@ -26,7 +33,10 @@ const COMPANION_PLANNER_SAFE_READ_TOOLS = Object.freeze([
   'notebook_search',
   'notebook_list_docs',
   'url_safety_check',
-  'read_shared_link'
+  'read_shared_link',
+  'maimai_chart_search',
+  'maimai_chart_analyze',
+  'maimai_player_analysis'
 ]);
 
 function parseToolList(value = '') {
@@ -71,7 +81,7 @@ function filterCompanionToolExecutors(executors = {}, config = {}) {
 }
 
 module.exports = {
-  COMPANION_PLANNER_SAFE_READ_TOOLS,
+  COMPANION_SAFE_READ_TOOLS,
   COMPANION_TOOL_PRESET,
   filterCompanionAllowedTools,
   filterCompanionToolExecutors,

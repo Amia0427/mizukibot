@@ -17,6 +17,7 @@ const { startServer } = require('./web/server');
 const { startTickEngine } = require('./core/tickEngine');
 const { startDailyJournalSummaryScheduler } = require('./core/dailyJournalSummaryScheduler');
 const { createMessageHandler } = require('./core/messageHandler');
+const { createPrivateProactiveEngine } = require('./core/privateProactiveEngine');
 const { initializeMemeManager } = require('./core/memeManager');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
@@ -24,7 +25,7 @@ const { shutdownCycleTLS } = require('./api/httpClient');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
-const { sendGroupMessage, sendPrivateMessage } = require('./api/qqActionService');
+const { isAdminUser, sendGroupMessage, sendPrivateMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
@@ -39,6 +40,8 @@ const { createRuntimeReadiness } = require('./utils/runtimeReadiness');
 const { closeServer, waitForServerListening } = require('./utils/serverLifecycle');
 const { createMainProcessLifecycle } = require('./utils/mainProcessLifecycle');
 const { closeLoadedSqliteConnections } = require('./utils/sqliteRuntime');
+const { createMaimaiCommandHandler } = require('./src/features/maimai/commands');
+const { closeMaimaiRuntime, getMaimaiRuntime, peekMaimaiRuntime } = require('./src/features/maimai/runtime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -420,6 +423,10 @@ let dailyJournalSummaryStarted = false;
 let dailyJournalSummaryRuntime = null;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
+const privateProactiveEngine = createPrivateProactiveEngine({
+  config,
+  actionClient: napcatActionClient
+});
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
 function askAIByGraph(...args) {
@@ -435,10 +442,25 @@ async function sendWithRetry(payload, retries = 1, waitMs = 500) {
   });
 }
 
+const maimaiCommandHandler = createMaimaiCommandHandler({
+  getRuntime: getMaimaiRuntime,
+  isAdmin: isAdminUser,
+  sendReply: async (msg, replyText) => {
+    const isPrivate = String(msg?.message_type || '').trim().toLowerCase() === 'private';
+    await sendWithRetry({
+      action: isPrivate ? 'send_private_msg' : 'send_group_msg',
+      params: isPrivate
+        ? { user_id: String(msg?.user_id || '').trim(), message: replyText }
+        : { group_id: String(msg?.group_id || '').trim(), message: replyText }
+    }, 1, 300);
+  }
+});
+
 const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry,
-  actionClient: napcatActionClient
+  actionClient: napcatActionClient,
+  privateProactiveEngine
 });
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
   ? createMessageIngressDispatcher({
@@ -504,6 +526,12 @@ function startResourceSnapshots() {
 let httpReverseServer = null;
 
 function prepareNapCatEventPacket(msg) {
+  if (maimaiCommandHandler.shouldHandle(msg?.raw_message)) {
+    void maimaiCommandHandler.handle(msg).catch((error) => {
+      console.error('[maimai command] failed:', error?.message || error);
+    });
+    return true;
+  }
   appendNapcatPacketToLog(msg);
   if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
     void napcatLogFollower.handleLivePacket(msg).catch((error) => {
@@ -514,6 +542,8 @@ function prepareNapCatEventPacket(msg) {
 }
 
 function startConnectedRuntimes() {
+  getMaimaiRuntime()?.syncScheduler?.start();
+  privateProactiveEngine.start();
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {
     tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
     tickStarted = true;
@@ -703,6 +733,8 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     if (disconnectError) throw disconnectError;
   },
   stopRuntimes: [
+    { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
+    { name: 'private_proactive', run: () => privateProactiveEngine.stop() },
     { name: 'scheduler', run: () => schedulerRuntime.stop() },
     { name: 'tick', run: () => tickRuntime?.stop?.() },
     { name: 'daily_journal_summary', run: () => dailyJournalSummaryRuntime?.stop?.() },
@@ -733,6 +765,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
   ],
   finalize: [
     { name: 'hot_stores', run: () => flushAllHotStoresSync() },
+    { name: 'maimai_runtime', run: () => closeMaimaiRuntime() },
     { name: 'sqlite', run: () => closeLoadedSqliteConnections() },
     { name: 'single_instance_lock', run: () => cleanupSingleInstanceLock?.() }
   ],
@@ -870,6 +903,7 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       recordMainRuntimeState,
       runtimeStateFile: RUNTIME_STATE_FILE,
       runtimeReadiness,
+      privateProactiveEngine,
       scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {
         messageIngressDispatcher = dispatcher;

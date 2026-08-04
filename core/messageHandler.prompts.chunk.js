@@ -42,13 +42,8 @@ function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
 }
 
 function buildToolGuidancePrompt(route) {
-  const planner = route?.meta?.toolPlanner && typeof route.meta.toolPlanner === 'object'
-    ? route.meta.toolPlanner
-    : (route?.meta?.directChatPlanner && typeof route.meta.directChatPlanner === 'object'
-      ? route.meta.directChatPlanner
-      : null);
-  const toolHints = Array.isArray(planner?.allowedToolNames)
-    ? planner.allowedToolNames.filter(Boolean)
+  const toolHints = Array.isArray(route?.meta?.allowedTools)
+    ? route.meta.allowedTools.filter(Boolean)
     : [];
   if (!toolHints.length) return null;
 

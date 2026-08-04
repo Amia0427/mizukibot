@@ -10,7 +10,7 @@ config.IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT = 20000;
 config.VISION_ROUTE_USER_TEXT_MAX_TOKENS = 6000;
 config.VISION_ROUTE_SYSTEM_CONTEXT_MAX_TOKENS = 10000;
 
-const { createDirectReplyNode } = require('../api/runtimeV2/nodes/directReply');
+const { createAgentDecideNode } = require('../api/runtimeV2/nodes/agentDecide');
 const { buildVisionLiteTextContent } = require('../api/runtimeV2/context/service');
 const { buildMainModelRequest } = require('../api/runtimeV2/model/shared');
 const { prepareRequest } = require('../api/httpClient');
@@ -26,83 +26,40 @@ module.exports = (async () => {
     })
   ].join('\n');
   let capturedMessages = null;
-  let buildDirectReplyCalls = 0;
+  let buildReplyMessagesCalls = 0;
 
-  const directReplyNode = createDirectReplyNode({
-    normalizeObject: (value, fallback = {}) => (value && typeof value === 'object' ? value : fallback),
-    normalizeArray: (value) => (Array.isArray(value) ? value : []),
+  const agentDecide = createAgentDecideNode({
     createEvent: (type, payload = {}) => ({ type, ...payload }),
-    isReviewMode: () => false,
-    shouldBypassHumanizerForPolicy: () => false,
-    computeEffectiveAllowedTools: () => [],
-    getToolPlannerExecutionPlan: () => null,
-    isPlannerSingleAuthorityEnabled: () => false,
-    getRouteToolPlanner: () => null,
+    saveAndEmit: (state) => state,
     buildVisionMessageContent: (text) => text,
-    stripMemoryCliInstruction: (text) => String(text || ''),
-    getMainConversationSystemMessages: () => [
-      { role: 'system', content: 'stable system prompt' }
-    ],
+    getMainConversationSystemMessages: () => [{ role: 'system', content: 'stable system prompt' }],
     buildDirectReplyMessages(_state, messageContent) {
-      buildDirectReplyCalls += 1;
+      buildReplyMessagesCalls += 1;
       return {
         messages: [
           { role: 'system', content: 'stable system prompt' },
           {
             role: 'user',
-            content: [{
-              type: 'text',
-              text: buildVisionLiteTextContent(messageContent, 1)
-            }]
+            content: [{ type: 'text', text: buildVisionLiteTextContent(messageContent, 1) }]
           }
-        ],
-        disableMemoryContextSegments: true,
-        contextBudgetMode: 'vision_lite',
-        compactionPlan: {
-          diagnostics: {
-            modelWindowTokens: 28192,
-            usageRatio: 0.2,
-            level: 'normal'
-          }
-        },
-        canonicalSegments: {
-          current_user_turn: [{
-            role: 'user',
-            content: [{
-              type: 'text',
-              text: buildVisionLiteTextContent(messageContent, 1)
-            }]
-          }]
-        }
+        ]
       };
     },
-    buildLiveMainConversationSnapshot() {
-      return null;
-    },
-    ensureOutputStream: (_output, mode = 'none') => ({ mode, hadOutput: false, completed: false, fallbackToNonStream: false }),
-    createMemoryCliTurnState: (value) => value || null,
-    cloneDirectToolLoopState: (value) => ({ ...(value || {}) }),
-    normalizeMessageForToolLoop: (value) => value,
-    requestAssistantMessageImpl: async () => {
-      throw new Error('tool probe should not run');
-    },
-    compileDirectChatToolCallsToPlan: (toolCalls, plan) => ({ ...(plan || {}), steps: toolCalls }),
-    saveAndEmit: (state) => state,
-    mirrorStreamingFlags: () => ({}),
-    isPureToolCallMarkup: () => false,
+    isReviewMode: () => false,
     streamDirectReply: async () => {
       throw new Error('stream path should not run');
     },
-    async requestReplyImpl(messages) {
+    requestReplyImpl: async (messages) => {
       capturedMessages = messages;
       return '图片总结完成';
     },
+    requestAssistantMessageImpl: async () => {
+      throw new Error('tool path should not run');
+    },
+    ensureOutputStream: () => ({ mode: 'none' }),
     classifyDirectReplyError: () => 'generic_model_failure',
     summarizeDirectReplyError: (error) => String(error?.message || error || ''),
-    attemptDirectMemoryRecovery: async () => null,
-    getControlledFailureReply: () => 'controlled failure',
-    updateMemoryCliTurnStateAfterError: (state) => state,
-    classifyReplyFailure: () => ({ type: 'none' })
+    getControlledFailureReply: () => 'controlled failure'
   });
 
   const state = {
@@ -114,16 +71,10 @@ module.exports = (async () => {
       routeMeta: {
         chatMode: 'image_summary',
         chatType: 'group',
-        visualContext: {
-          worker: {
-            succeeded: true,
-            imageCount: 1
-          }
-        }
+        allowedTools: [],
+        visualContext: { worker: { succeeded: true, imageCount: 1 } }
       },
       topRouteType: 'direct_chat',
-      customPrompt: '',
-      allowTools: false,
       allowedTools: [],
       modelConfig: {
         model: 'claude-opus-4-6',
@@ -135,29 +86,27 @@ module.exports = (async () => {
       },
       imageUrl: null,
       imageUrls: [],
-      streaming: false,
-      reviewMode: ''
+      streaming: false
     },
-    execution: { mode: 'chat', memoryCliTurn: null, latencyBreakdown: {} },
+    execution: { agent: {} },
     memory: {
       dynamicPrompt: '',
-      affinity: null,
       preparedMainConversationContext: {
         messages: [
           { role: 'system', content: 'prepared full context should not be reused' },
           { role: 'user', content: hugeVisionPayload }
-        ],
-        contextBudgetMode: 'full'
+        ]
       }
     },
     output: { stream: {} },
-    plan: {}
+    messages: [],
+    events: []
   };
 
-  await directReplyNode(state);
-
-  assert.strictEqual(buildDirectReplyCalls, 1, 'vision route must rebuild instead of reusing prepared full context');
-  assert.ok(Array.isArray(capturedMessages), 'expected model messages to be captured');
+  const result = await agentDecide(state);
+  assert.strictEqual(result.output.draftReply, '图片总结完成');
+  assert.strictEqual(buildReplyMessagesCalls, 1);
+  assert.ok(Array.isArray(capturedMessages));
   const serialized = JSON.stringify(capturedMessages);
   assert.ok(!serialized.includes('prepared full context should not be reused'));
   assert.ok(serialized.includes('用户图片意图'));
@@ -167,12 +116,12 @@ module.exports = (async () => {
     stream: false,
     defaultMaxTokens: 512,
     trace: {
-      source: 'direct_reply',
+      source: 'agent_decide',
       routePolicyKey: 'transform/vision-summary',
       routeDebugKey: 'direct_chat/image_summary/summary',
       topRouteType: 'direct_chat',
-      dispatchBranch: 'direct_reply',
-      triggerBranch: 'direct_reply.non_stream'
+      dispatchBranch: 'agent',
+      triggerBranch: 'agent_decide.plain_reply'
     },
     routeMeta: state.request.routeMeta,
     topRouteType: 'direct_chat',
@@ -180,8 +129,8 @@ module.exports = (async () => {
   });
   const prepared = await prepareRequest(request.url, request.body);
   const promptIntegrity = summarizeRequest(prepared.requestBody).prompt_integrity;
-  assert.ok(promptIntegrity.token_budget.estimated_input_tokens < 20000, 'vision lite prompt should stay below hard limit');
-  assert.ok(promptIntegrity.token_budget.largest_messages[0].tokens < 10000, 'current user turn should be trimmed');
+  assert.ok(promptIntegrity.token_budget.estimated_input_tokens < 20000);
+  assert.ok(promptIntegrity.token_budget.largest_messages[0].tokens < 10000);
 
   console.log('imageSummaryVisionLiteBudget.test.js passed');
 })().catch((error) => {

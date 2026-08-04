@@ -32,6 +32,7 @@ const {
   findNaturalSplitIndex,
   getGroupChatStreamSendGapMs
 } = require('../core/streamingSegmentation');
+const { registerSensitivePromptContent } = require('../utils/promptSecurity');
 
 module.exports = (async () => {
   const sentPayloads = [];
@@ -343,6 +344,44 @@ module.exports = (async () => {
   await srcAdminSensitiveDispatcher.finish('这一段包含 src-stream-block');
   assert.strictEqual(srcAdminSensitivePayloads.length, 1);
   assert.strictEqual(srcAdminSensitivePayloads[0].params.message, '这一段包含 src-stream-block');
+
+  const splitPromptFragment = 'P'.repeat(600);
+  registerSensitivePromptContent(splitPromptFragment);
+  const protectedCorePayloads = [];
+  const protectedCoreDispatcher = createStreamingDispatcher({
+    runtimeConfig: { AI_STREAM_MAX_SEGMENTS: 1, AI_STREAM_SEND_GAP_MS: 0 },
+    sendWithRetry: async (payload) => {
+      protectedCorePayloads.push(payload);
+      return true;
+    },
+    chatType: 'private',
+    userId: 'protected_core_user',
+    senderId: 'protected_core_user'
+  });
+  await protectedCoreDispatcher.onDelta(splitPromptFragment.slice(0, 340), splitPromptFragment.slice(0, 340));
+  assert.strictEqual(protectedCorePayloads.length, 0, '敏感指纹未完整前不得提前发送前缀');
+  await protectedCoreDispatcher.onDelta(splitPromptFragment.slice(340), splitPromptFragment);
+  await protectedCoreDispatcher.finish(splitPromptFragment);
+  assert.strictEqual(protectedCorePayloads.length, 1);
+  assert.ok(!protectedCorePayloads[0].params.message.includes(splitPromptFragment.slice(0, 64)));
+
+  const protectedSrcPayloads = [];
+  const protectedSrcDispatcher = createSrcStreamingDispatcher({
+    runtimeConfig: { AI_STREAM_MAX_SEGMENTS: 1, AI_STREAM_SEND_GAP_MS: 0 },
+    sendWithRetry: async (payload) => {
+      protectedSrcPayloads.push(payload);
+      return true;
+    },
+    chatType: 'private',
+    userId: 'protected_src_user',
+    senderId: 'protected_src_user'
+  });
+  await protectedSrcDispatcher.onDelta(splitPromptFragment.slice(0, 340), splitPromptFragment.slice(0, 340));
+  assert.strictEqual(protectedSrcPayloads.length, 0);
+  await protectedSrcDispatcher.onDelta(splitPromptFragment.slice(340), splitPromptFragment);
+  await protectedSrcDispatcher.finish(splitPromptFragment);
+  assert.strictEqual(protectedSrcPayloads.length, 1);
+  assert.ok(!protectedSrcPayloads[0].params.message.includes(splitPromptFragment.slice(0, 64)));
 
   fs.rmSync(tempSensitiveDir, { recursive: true, force: true });
   console.log('messageReplyRuntimeFreshness.test.js passed');

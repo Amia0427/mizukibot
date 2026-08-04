@@ -1,5 +1,5 @@
-const context = require('./index');
+'use strict';
 
-module.exports = {
-  buildDirectedContextPromptSnippet: context.buildDirectedContextPromptSnippet
-};
+const { buildDirectedContextPromptSnippet } = require('./continuity');
+
+module.exports = { buildDirectedContextPromptSnippet };

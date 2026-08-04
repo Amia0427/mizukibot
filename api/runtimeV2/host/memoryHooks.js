@@ -2,6 +2,7 @@ const config = require('../../../config');
 const { postWithRetry } = require('../../httpClient');
 const { extractMessageContent } = require('../../parser');
 const { buildStructuredCompressionPrompt } = require('../../../utils/shortTermMemory');
+const { wrapUntrustedPromptContent } = require('../../../utils/promptSecurity');
 
 function appendMemoryEvent(...args) {
   return require('../../../utils/memory-v3').appendMemoryEvent(...args);
@@ -55,7 +56,10 @@ async function summarizeShortTermChunk(payload = {}) {
         },
         {
           role: 'user',
-          content: String(payload.chunkText || '').trim()
+          content: wrapUntrustedPromptContent([
+            `已有结构化状态：${JSON.stringify(payload.existingState || { summary: payload.existingSummary })}`,
+            `待压缩会话：\n${String(payload.chunkText || '').trim()}`
+          ].join('\n'))
         }
       ],
       max_tokens: summaryTokens,

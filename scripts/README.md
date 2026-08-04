@@ -6,6 +6,7 @@
 - `pre-release-smoke.js`：发布前最小冒烟入口；更新 2026-06-17 20:04 +08:00，支持 `npm run smoke:pre-release -- --root D:\mizuki_release`，串联 expected-shutdown 未确认重启保护、主模型 fallback 重启恢复、普通群纯文本短 debounce 与群/入站并发回归
 - `check-agent.js`：LangGraph / agent 自检
 - `check-prompts.js`：prompt 资源检查
+- `check-harness-eval-fixtures.js`：校验版本化 synthetic Harness fixture 的 manifest、case 数量、规范化摘要、唯一 ID、路径与递归隐私边界；`npm run eval:harness:ci` 会在运行三组评估前先执行该检查
 - `console.js`：本地控制台入口；更新 2026-06-25 23:19 +08:00，新增 `rag` / `memory-rag-explain` 子命令，复用 `diagnose-memory-rag-explain.js`，可用 `npm run console -- rag <userId> "<query>"` 快速按真实用户和问题跑 Memory RAG explain。
 - `lint.js`：轻量检查入口
 
@@ -62,7 +63,7 @@
 
 ## Migration / Maintenance
 
-- `migrate-memory-v3.js`
+- `migrate-memory-v3.js`：Memory V3 物化与存储收敛入口。默认只强制物化；旧数据增量导入使用 `--import-legacy`，禁止 `--force` 和 `--force-import-legacy`。收敛流程先运行 `node scripts/migrate-memory-v3.js --converge --dry-run` 生成带源文件 SHA-256、稳定迁移身份、预计事件数和 LanceDB 耗时的计划；维护窗口内用 `--apply-plan <runId|plan.json>` 应用，失败或停在 `applying` 时必须用 `--rollback-run <runId|plan.json>` 恢复。生成计划不会暂停进程、移动旧文件或修改 `.env`。从独立工作树读取部署数据时必须显式设置真实 `DATA_DIR` 和绝对 `MEMORY_LANCEDB_DIR`，相对 LanceDB 路径会按当前工作目录解析。
 - `import-memory-file.js`：导入 `.md/.txt` 到 Memory V3；更新 2026-05-23 11:04 +08:00：Markdown 按标题切块，写入前走版本化 update，重复导入不扩大 active chunk 数
 - 更新 2026-05-23 11:20 +08:00：Memory V3 维护脚本诊断时可结合 `tests/memoryV3GenericConflictResolution.test.js`、`tests/memoryV3RecentRecallFastPath.test.js` 验证冲突 loser 隐藏和近期召回快路径。
 - `check-native-migration.js`

@@ -24,6 +24,7 @@ const {
 
 const OUT_DIR = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval');
 const CASES_FILE = path.join(OUT_DIR, 'cases.jsonl');
+const EVAL_SCHEMA_VERSION = 'memory_recall_eval_v2';
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
@@ -31,6 +32,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     autoGold: false,
     baseline: '',
     candidate: '',
+    casesFile: '',
     mode: '',
     limit: 100,
     memoryCli: false
@@ -39,6 +41,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     const item = argv[index];
     if (item === '--build-cases') args.buildCases = true;
     else if (item === '--auto-gold') args.autoGold = true;
+    else if (item === '--cases') {
+      args.casesFile = normalizeText(argv[index + 1]);
+      index += 1;
+    }
     else if (item === '--mode') {
       args.mode = normalizeText(argv[index + 1]).toLowerCase();
       index += 1;
@@ -179,6 +185,7 @@ function buildMemoryGoldCases(limit = 100) {
       const query = buildGoldQuery(node);
       if (!query) return null;
       return {
+        schemaVersion: EVAL_SCHEMA_VERSION,
         id: `gold-memory:${node.id}`,
         evalSource: 'memory',
         userId: normalizeText(node.userId),
@@ -199,6 +206,7 @@ function buildMemoryGoldCases(limit = 100) {
       const query = buildGoldQuery(doc);
       if (!query) return null;
       return {
+        schemaVersion: EVAL_SCHEMA_VERSION,
         id: `gold-journal:${doc.id}`,
         evalSource: 'memory',
         userId: normalizeText(doc.userId),
@@ -229,6 +237,7 @@ function buildWorldbookGoldCases(limit = 100) {
       });
       if (!moduleId || !query) return null;
       return {
+        schemaVersion: EVAL_SCHEMA_VERSION,
         id: `gold-worldbook:${moduleId}`,
         evalSource: 'worldbook',
         userId: '',
@@ -246,12 +255,52 @@ function buildWorldbookGoldCases(limit = 100) {
     .slice(0, Math.max(1, Number(limit || 100) || 100));
 }
 
+function buildNegativeGoldCases(limit = 20) {
+  const max = Math.max(0, Math.min(20, Number(limit || 20) || 20));
+  if (max === 0) return [];
+  const nodes = loadMemoryNodes()
+    .filter((node) => normalizeText(node.id) && normalizeText(node.text) && normalizeText(node.userId))
+    .filter((node) => normalizeSource(node.scopeType) !== 'group');
+  const out = [];
+  const seen = new Set();
+  for (const node of nodes) {
+    if (out.length >= max) break;
+    const other = nodes.find((candidate) => (
+      normalizeText(candidate.id) !== normalizeText(node.id)
+      && normalizeText(candidate.userId) !== normalizeText(node.userId)
+    ));
+    if (!other) break;
+    const query = buildGoldQuery(node);
+    const key = `${other.userId}|${query}`;
+    if (!query || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      schemaVersion: EVAL_SCHEMA_VERSION,
+      id: `negative-cross-user:${node.id}`,
+      evalSource: 'memory',
+      userId: normalizeText(other.userId),
+      groupId: normalizeText(other.groupId),
+      query,
+      facet: inferGoldFacet(node),
+      expectedIds: [],
+      forbiddenIds: [normalizeText(node.id)],
+      allowEmpty: true,
+      source: 'negative_scope',
+      targetSource: 'negative_scope'
+    });
+  }
+  return out;
+}
+
 function buildAutoGoldCases(limit = 100) {
   const max = Math.max(1, Number(limit || 100) || 100);
   const worldbookLimit = Math.max(1, Math.min(Math.ceil(max * 0.2), 40));
-  const memoryLimit = Math.max(1, max - worldbookLimit);
-  const cases = buildMemoryGoldCases(memoryLimit).concat(buildWorldbookGoldCases(worldbookLimit));
-  return roundRobinGoldCases(cases, max, (item) => item.facet || item.targetSource || item.source);
+  const negativeLimit = Math.min(20, Math.floor(max * 0.2));
+  const positiveLimit = Math.max(1, max - negativeLimit);
+  const cases = buildMemoryGoldCases(Math.max(positiveLimit, max))
+    .concat(buildWorldbookGoldCases(worldbookLimit));
+  const positives = roundRobinGoldCases(cases, positiveLimit, (item) => item.facet || item.targetSource || item.source);
+  return positives.concat(buildNegativeGoldCases(negativeLimit)).slice(0, max);
 }
 
 function supplementCasesWithAutoGold(cases = [], limit = 100, buildGold = buildAutoGoldCases) {
@@ -325,6 +374,7 @@ function buildCases(args = {}) {
     if (seen.has(key)) continue;
     seen.add(key);
     cases.push({
+      schemaVersion: EVAL_SCHEMA_VERSION,
       id: `case_${cases.length + 1}`,
       userId,
       groupId: extractGroupId(row),
@@ -340,7 +390,33 @@ function buildCases(args = {}) {
   return cases;
 }
 
+function assertNonEmptyCases(cases, label = 'eval cases') {
+  if (!Array.isArray(cases) || cases.length === 0) throw new Error(`${label} is empty`);
+  return cases;
+}
+
+function readExplicitCases(filePath) {
+  const resolvedPath = path.resolve(filePath);
+  if (!fs.existsSync(resolvedPath)) throw new Error(`explicit cases file not found: ${filePath}`);
+  const lines = fs.readFileSync(resolvedPath, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const cases = lines.map((line, index) => {
+    try {
+      return JSON.parse(line);
+    } catch (error) {
+      throw new Error(`invalid JSON in explicit cases file on line ${index + 1}: ${error.message}`);
+    }
+  });
+  return assertNonEmptyCases(cases, `explicit cases file ${filePath}`);
+}
+
 function loadCases(limit = 100, options = {}) {
+  const explicitCasesFile = normalizeText(options.casesFile);
+  if (explicitCasesFile) {
+    return readExplicitCases(explicitCasesFile).slice(0, Math.max(1, Number(limit || 100) || 100));
+  }
   if (options.autoGold === true) return buildAutoGoldCases(limit);
   if (!fs.existsSync(CASES_FILE)) return buildCases({ limit });
   const max = Math.max(1, Number(limit || 100) || 100);
@@ -351,6 +427,17 @@ function loadCases(limit = 100, options = {}) {
 function normalizeExpectedIds(testCase = {}) {
   const explicit = Array.isArray(testCase.expectedIds) ? testCase.expectedIds : [];
   const aliases = Array.isArray(testCase.expected_ids) ? testCase.expected_ids : [];
+  return explicit.concat(aliases).map(normalizeText).filter(Boolean);
+}
+
+function assertExplicitCaseSource(args = {}) {
+  if (args.buildCases === true || args.autoGold === true || normalizeText(args.casesFile)) return;
+  throw new Error('choose an explicit case source with --cases, --auto-gold, or --build-cases');
+}
+
+function normalizeForbiddenIds(testCase = {}) {
+  const explicit = Array.isArray(testCase.forbiddenIds) ? testCase.forbiddenIds : [];
+  const aliases = Array.isArray(testCase.forbidden_ids) ? testCase.forbidden_ids : [];
   return explicit.concat(aliases).map(normalizeText).filter(Boolean);
 }
 
@@ -529,6 +616,12 @@ function countWrongHits(results = [], testCase = {}) {
   return meaningful.length > 0 ? 1 : 0;
 }
 
+function countForbiddenHits(results = [], testCase = {}) {
+  const forbidden = new Set(normalizeForbiddenIds(testCase));
+  if (forbidden.size === 0) return 0;
+  return (Array.isArray(results) ? results : []).filter((item) => forbidden.has(normalizeText(item.id || item.nodeId || item.moduleId))).length;
+}
+
 function countPromptInjectionHits(result = {}, expectedIds = []) {
   if (!expectedIds.length) return 0;
   const digest = normalizeText(result.digest);
@@ -585,6 +678,7 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   const byFacetRaw = {};
   let leakage = 0;
   let lifecycleLeakage = 0;
+  let forbiddenHits = 0;
   let categoryMismatches = 0;
   let recentRecallMisses = 0;
   let recallHits = 0;
@@ -661,6 +755,7 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     }
     if (!isWorldbookCase) leakage += countScopeLeaks(results, testCase);
     lifecycleLeakage += countLifecycleLeaks(results);
+    forbiddenHits += countForbiddenHits(results, testCase);
     categoryMismatches += countCategoryMismatches(results, testCase);
     recentRecallMisses += countRecentRecallMisses(results, testCase);
     promptChars += normalizeText(result.digest).length;
@@ -669,7 +764,7 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     const facetMetric = ensureSourceMetrics(byFacetRaw, testCase.facet || 'default');
     sourceMetric.cases += 1;
     facetMetric.cases += 1;
-    if (results.length === 0) {
+    if (results.length === 0 && testCase.allowEmpty !== true) {
       emptyResults += 1;
       noRetrieval += 1;
       sourceMetric.emptyResults += 1;
@@ -730,6 +825,8 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
       source: testCase.source || '',
       targetSource: testCase.targetSource || '',
       expectedIds,
+      forbiddenIds: normalizeForbiddenIds(testCase),
+      allowEmpty: testCase.allowEmpty === true,
       sources: results.map((item) => item.source),
       categories: results.map((item) => item.category || ''),
       lifecycleStatuses: results.map((item) => item.lifecycleStatus || ''),
@@ -758,6 +855,8 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     fallbackCounts,
     leakage,
     lifecycleLeakage,
+    forbiddenHits,
+    forbiddenHitRate: cases.length ? forbiddenHits / cases.length : 0,
     categoryMismatches,
     recentRecallMisses,
     weakTopHitRate: cases.length ? weakTopHits / cases.length : 0,
@@ -792,20 +891,22 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
 
 async function main() {
   const args = parseArgs();
-  ensureDir(OUT_DIR);
+  assertExplicitCaseSource(args);
   if (args.buildCases) {
-    const cases = buildCases(args);
+    const cases = assertNonEmptyCases(buildCases(args), 'built cases');
     console.log(JSON.stringify({ ok: true, cases: cases.length, file: CASES_FILE }, null, 2));
     return;
   }
 
   const mode = args.mode || args.candidate || args.baseline || 'local_jsonl';
-  const cases = loadCases(args.limit, {
-    autoGold: args.autoGold
-  });
+  const cases = assertNonEmptyCases(loadCases(args.limit, {
+    autoGold: args.autoGold,
+    casesFile: args.casesFile
+  }), 'memory recall eval cases');
   const result = await runMode(mode, cases, {
     memoryCli: args.memoryCli
   });
+  ensureDir(OUT_DIR);
   const outFile = path.join(OUT_DIR, `${mode}-${Date.now()}.json`);
   atomicWriteText(outFile, JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ ok: true, file: outFile, ...result, details: undefined }, null, 2));
@@ -821,18 +922,23 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertExplicitCaseSource,
+  assertNonEmptyCases,
   buildCases,
   buildAutoGoldCases,
+  buildNegativeGoldCases,
   buildCaseQueryOptions,
   buildMemoryGoldCases,
   buildWorldbookGoldCases,
   countCategoryMismatches,
   countLifecycleLeaks,
+  countForbiddenHits,
   countRecentRecallMisses,
   countScopeLeaks,
   isStableMemoryGoldCase,
   loadCases,
   normalizeExpectedIds,
+  normalizeForbiddenIds,
   parseArgs,
   percentile,
   runMode,

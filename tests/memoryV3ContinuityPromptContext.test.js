@@ -9,6 +9,7 @@ process.env.MEMORY_V3_DIR = path.join(tempRoot, 'memory-v3');
 process.env.MEMORY_V3_EVENTS_DIR = path.join(process.env.MEMORY_V3_DIR, 'events');
 process.env.MEMORY_V3_PROJECTIONS_DIR = path.join(process.env.MEMORY_V3_DIR, 'projections');
 process.env.MEMORY_V3_ENABLED = 'true';
+process.env.MEMORY_STORAGE_MODE = 'v3_only';
 process.env.MEMORY_HYBRID_RECALL_ENABLED = 'false';
 process.env.MEMORY_EMBEDDING_MODEL = '';
 

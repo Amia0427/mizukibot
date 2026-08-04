@@ -27,6 +27,7 @@ let serialActive = 0;
 let serialPeak = 0;
 const serialOrder = [];
 const checkpointStore = createCheckpointStore({
+  storeFile: path.join(tempDir, 'langgraph_v2.sqlite'),
   checkpointDir: path.join(tempDir, 'langgraph_v2_checkpoints'),
   eventDir: path.join(tempDir, 'langgraph_v2_events')
 });

@@ -1,0 +1,318 @@
+
+> mizukibot@1.0.0 diag:security
+> node scripts/diagnose-security.js --json
+
+Get-Acl : ��ģ�顰Microsoft.PowerShell.Security�����ҵ���Get-Acl��������޷����ظ�ģ�顣�й���ϸ��Ϣ�������С�Import-Module
+ Microsoft.PowerShell.Security����
+����λ�� ��:1 �ַ�: 8
++ $acl = Get-Acl -LiteralPath 'D:\waifu\.env'; $rules = foreach ($rule  ...
++        ~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-Acl:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CouldNotAutoloadMatchingModule
+ 
+Get-Acl : ��ģ�顰Microsoft.PowerShell.Security�����ҵ���Get-Acl��������޷����ظ�ģ�顣�й���ϸ��Ϣ�������С�Import-Module
+ Microsoft.PowerShell.Security����
+����λ�� ��:1 �ַ�: 8
++ $acl = Get-Acl -LiteralPath 'D:\waifu\data'; $rules = foreach ($rule  ...
++        ~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-Acl:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CouldNotAutoloadMatchingModule
+ 
+{
+  "status": "error",
+  "generatedAt": "2026-07-12T11:02:47.251Z",
+  "summary": {
+    "ok": 5,
+    "warn": 7,
+    "error": 1
+  },
+  "sections": {
+    "tokenPosture": {
+      "status": "ok",
+      "webToken": "configured",
+      "localCommandBridgeToken": "configured",
+      "webBindHost": "127.0.0.1",
+      "localCommandBridgeEnabled": true,
+      "localCommandBridgeExecution": "available",
+      "findings": [
+        {
+          "id": "token-posture-ok",
+          "level": "ok",
+          "title": "Tokens are configured",
+          "detail": "Web and command bridge tokens are present.",
+          "recommendation": ""
+        }
+      ]
+    },
+    "napCatReverseAuth": {
+      "status": "error",
+      "enabled": true,
+      "secret": "missing",
+      "mode": "signed-with-legacy-compatibility",
+      "findings": [
+        {
+          "id": "napcat-reverse-secret-missing",
+          "level": "error",
+          "title": "NapCat HTTP reverse secret is missing",
+          "detail": "The HTTP reverse ingress cannot start without NAPCAT_HTTP_REVERSE_SECRET.",
+          "recommendation": "Set a strong random NAPCAT_HTTP_REVERSE_SECRET before enabling HTTP reverse ingress."
+        }
+      ]
+    },
+    "ingressExposure": {
+      "status": "ok",
+      "webBindHost": "127.0.0.1",
+      "napCatBindHost": "127.0.0.1",
+      "findings": [
+        {
+          "id": "ingress-exposure-ok",
+          "level": "ok",
+          "title": "Ingress listeners are locally scoped",
+          "detail": "Web and enabled NapCat listeners bind to loopback.",
+          "recommendation": ""
+        }
+      ]
+    },
+    "apiBaseUrls": {
+      "status": "ok",
+      "items": [
+        {
+          "key": "API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "AI_FALLBACK_API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "AI_ROUTER_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "MEMORY_API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "IMAGE_API_BASE_URL",
+          "status": "missing"
+        },
+        {
+          "key": "ADMIN_API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "ADMIN_AI_FALLBACK_API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "ADMIN_IMAGE_API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "VISION_CAPTION_WORKER_API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        },
+        {
+          "key": "MC_API_BASE_URL",
+          "status": "ok",
+          "configured": true
+        }
+      ],
+      "findings": [
+        {
+          "id": "api-base-urls-ok",
+          "level": "ok",
+          "title": "API Base URLs look safe",
+          "detail": "Configured API endpoints are not local/private URLs.",
+          "recommendation": ""
+        }
+      ]
+    },
+    "logRetention": {
+      "status": "warn",
+      "maxFiles": "unbounded",
+      "findings": [
+        {
+          "id": "log-retention-unbounded",
+          "level": "warn",
+          "title": "Rotated log retention is unbounded",
+          "detail": "LOG_ROTATE_MAX_FILES is missing, zero, or invalid, so rotated archives can grow without a file-count limit.",
+          "recommendation": "Set LOG_ROTATE_MAX_FILES to a positive value and monitor the data volume."
+        }
+      ]
+    },
+    "sensitivePathAcls": {
+      "status": "ok",
+      "findings": [
+        {
+          "id": "sensitive-path-acl-ok",
+          "level": "ok",
+          "title": "Sensitive path ACLs are restricted",
+          "detail": "No broad Windows principal was found on existing sensitive paths.",
+          "recommendation": ""
+        }
+      ]
+    },
+    "containerBaseline": {
+      "status": "warn",
+      "findings": [
+        {
+          "id": "compose-mizukibot-rootfs-writable",
+          "level": "warn",
+          "title": "mizukibot root filesystem is writable",
+          "detail": "read_only: true is not configured for this service.",
+          "recommendation": "Use a read-only root filesystem and explicit writable volumes or tmpfs mounts."
+        },
+        {
+          "id": "compose-mizukibot-capabilities-not-dropped",
+          "level": "warn",
+          "title": "mizukibot does not drop all capabilities",
+          "detail": "cap_drop: ALL is not configured for this service.",
+          "recommendation": "Drop all capabilities and add back only those proven necessary."
+        },
+        {
+          "id": "compose-mizukibot-new-privileges-allowed",
+          "level": "warn",
+          "title": "mizukibot does not enforce no-new-privileges",
+          "detail": "security_opt lacks no-new-privileges:true for this service.",
+          "recommendation": "Set no-new-privileges:true for this service."
+        },
+        {
+          "id": "compose-post-reply-worker-rootfs-writable",
+          "level": "warn",
+          "title": "post-reply-worker root filesystem is writable",
+          "detail": "read_only: true is not configured for this service.",
+          "recommendation": "Use a read-only root filesystem and explicit writable volumes or tmpfs mounts."
+        },
+        {
+          "id": "compose-post-reply-worker-capabilities-not-dropped",
+          "level": "warn",
+          "title": "post-reply-worker does not drop all capabilities",
+          "detail": "cap_drop: ALL is not configured for this service.",
+          "recommendation": "Drop all capabilities and add back only those proven necessary."
+        },
+        {
+          "id": "compose-post-reply-worker-new-privileges-allowed",
+          "level": "warn",
+          "title": "post-reply-worker does not enforce no-new-privileges",
+          "detail": "security_opt lacks no-new-privileges:true for this service.",
+          "recommendation": "Set no-new-privileges:true for this service."
+        }
+      ]
+    },
+    "sourceSecrets": {
+      "status": "ok",
+      "hits": [],
+      "findings": [
+        {
+          "id": "known-hardcoded-token-clean",
+          "level": "ok",
+          "title": "Known leaked token not found",
+          "detail": "Source scan found no full leaked token string.",
+          "recommendation": ""
+        }
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "token-posture-ok",
+      "level": "ok",
+      "title": "Tokens are configured",
+      "detail": "Web and command bridge tokens are present.",
+      "recommendation": ""
+    },
+    {
+      "id": "napcat-reverse-secret-missing",
+      "level": "error",
+      "title": "NapCat HTTP reverse secret is missing",
+      "detail": "The HTTP reverse ingress cannot start without NAPCAT_HTTP_REVERSE_SECRET.",
+      "recommendation": "Set a strong random NAPCAT_HTTP_REVERSE_SECRET before enabling HTTP reverse ingress."
+    },
+    {
+      "id": "ingress-exposure-ok",
+      "level": "ok",
+      "title": "Ingress listeners are locally scoped",
+      "detail": "Web and enabled NapCat listeners bind to loopback.",
+      "recommendation": ""
+    },
+    {
+      "id": "api-base-urls-ok",
+      "level": "ok",
+      "title": "API Base URLs look safe",
+      "detail": "Configured API endpoints are not local/private URLs.",
+      "recommendation": ""
+    },
+    {
+      "id": "log-retention-unbounded",
+      "level": "warn",
+      "title": "Rotated log retention is unbounded",
+      "detail": "LOG_ROTATE_MAX_FILES is missing, zero, or invalid, so rotated archives can grow without a file-count limit.",
+      "recommendation": "Set LOG_ROTATE_MAX_FILES to a positive value and monitor the data volume."
+    },
+    {
+      "id": "sensitive-path-acl-ok",
+      "level": "ok",
+      "title": "Sensitive path ACLs are restricted",
+      "detail": "No broad Windows principal was found on existing sensitive paths.",
+      "recommendation": ""
+    },
+    {
+      "id": "compose-mizukibot-rootfs-writable",
+      "level": "warn",
+      "title": "mizukibot root filesystem is writable",
+      "detail": "read_only: true is not configured for this service.",
+      "recommendation": "Use a read-only root filesystem and explicit writable volumes or tmpfs mounts."
+    },
+    {
+      "id": "compose-mizukibot-capabilities-not-dropped",
+      "level": "warn",
+      "title": "mizukibot does not drop all capabilities",
+      "detail": "cap_drop: ALL is not configured for this service.",
+      "recommendation": "Drop all capabilities and add back only those proven necessary."
+    },
+    {
+      "id": "compose-mizukibot-new-privileges-allowed",
+      "level": "warn",
+      "title": "mizukibot does not enforce no-new-privileges",
+      "detail": "security_opt lacks no-new-privileges:true for this service.",
+      "recommendation": "Set no-new-privileges:true for this service."
+    },
+    {
+      "id": "compose-post-reply-worker-rootfs-writable",
+      "level": "warn",
+      "title": "post-reply-worker root filesystem is writable",
+      "detail": "read_only: true is not configured for this service.",
+      "recommendation": "Use a read-only root filesystem and explicit writable volumes or tmpfs mounts."
+    },
+    {
+      "id": "compose-post-reply-worker-capabilities-not-dropped",
+      "level": "warn",
+      "title": "post-reply-worker does not drop all capabilities",
+      "detail": "cap_drop: ALL is not configured for this service.",
+      "recommendation": "Drop all capabilities and add back only those proven necessary."
+    },
+    {
+      "id": "compose-post-reply-worker-new-privileges-allowed",
+      "level": "warn",
+      "title": "post-reply-worker does not enforce no-new-privileges",
+      "detail": "security_opt lacks no-new-privileges:true for this service.",
+      "recommendation": "Set no-new-privileges:true for this service."
+    },
+    {
+      "id": "known-hardcoded-token-clean",
+      "level": "ok",
+      "title": "Known leaked token not found",
+      "detail": "Source scan found no full leaked token string.",
+      "recommendation": ""
+    }
+  ]
+}

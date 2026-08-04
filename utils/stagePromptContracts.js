@@ -184,32 +184,6 @@ function buildReviewStageRoutePrompt(options = {}) {
   });
 }
 
-function buildPlannerStageSystemPrompt(toolCatalog = [], options = {}) {
-  const catalogBlock = Array.isArray(toolCatalog) && toolCatalog.length > 0
-    ? toolCatalog.map((tool) => {
-      const name = normalizeText(tool?.name);
-      if (!name) return '';
-      const desc = normalizeText(tool?.description || tool?.plannerRole || tool?.bucket);
-      return `- ${name}${desc ? `: ${desc}` : ''}`;
-    }).filter(Boolean).join('\n')
-    : '(none)';
-
-  return [
-    buildSecuritySystemPrompt(),
-    'You are the direct-chat planner stage.',
-    'Your responsibility is task judgment, evidence policy, and tool planning only.',
-    'Make the final planner decision in one pass; do not request or depend on a second planner pass.',
-    'You may also decide at most 2 persona modules for the main reply.',
-    'Only choose persona modules from the provided personaModuleCatalog.',
-    'Do not imitate the full main persona.',
-    'Optimize for factuality, continuity, and specialized tool choice.',
-    'Return JSON only.',
-    'Available tools:',
-    catalogBlock,
-    normalizeText(options.extraInstruction)
-  ].filter(Boolean).join('\n');
-}
-
 function buildRouterStageSystemPrompt(options = {}) {
   return [
     buildSecuritySystemPrompt(),
@@ -224,7 +198,6 @@ function buildRouterStageSystemPrompt(options = {}) {
 module.exports = {
   buildMainStageBlocks,
   buildMainStableSystemBlocks,
-  buildPlannerStageSystemPrompt,
   buildReviewStageRoutePrompt,
   buildReviewStageSystemPrompt,
   buildRouterStageSystemPrompt

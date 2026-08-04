@@ -31,6 +31,11 @@ const LANCEDB_ROW_COLUMNS = [
   'intent',
   'privacyLevel',
   'model',
+  'modelVersion',
+  'lifecycleStatus',
+  'versionRoot',
+  'sourceTs',
+  'confidence',
   'vector',
   'preview'
 ];
@@ -87,6 +92,7 @@ function buildMemoryVectorRow(node = {}, embeddingRow = {}, options = {}) {
   const text = normalizeText(node.text);
   const canonicalKey = normalizeText(node.canonicalKey || embeddingRow.canonicalKey || canonicalizeText(text)).toLowerCase();
   const model = normalizeText(embeddingRow.model || options.model || config.MEMORY_EMBEDDING_MODEL);
+  const modelVersion = normalizeText(embeddingRow.modelVersion || options.modelVersion || config.MEMORY_EMBEDDING_MODEL_VERSION || model);
   const textHash = normalizeText(embeddingRow.textHash) || buildTextHash(text, canonicalKey);
   const metadata = deriveMemoryMetadata(node);
   return {
@@ -109,6 +115,11 @@ function buildMemoryVectorRow(node = {}, embeddingRow = {}, options = {}) {
     intent: metadata.intent,
     privacyLevel: metadata.privacyLevel,
     model,
+    modelVersion,
+    lifecycleStatus: normalizeText(node.lifecycleStatus || node.meta?.lifecycleStatus || node.payload?.lifecycleStatus || node.status || 'active').toLowerCase(),
+    versionRoot: normalizeText(node.versionRoot || node.rootVersion || node.versionRootId || node.conflictKey),
+    sourceTs: Number(node.sourceTs || node.createdAt || node.updatedAt || embeddingRow.updatedAt || 0) || 0,
+    confidence: Number(node.confidence || 0) || 0,
     vector,
     preview: clampText(text, Number(options.previewChars || 160) || 160)
   };
@@ -120,6 +131,7 @@ function buildWorldbookVectorRow(doc = {}, embeddingRow = {}, options = {}) {
   if (!moduleId || vector.length === 0) return null;
   const text = normalizeText(doc.text || doc.purpose);
   const model = normalizeText(embeddingRow.model || options.model || config.MEMORY_EMBEDDING_MODEL);
+  const modelVersion = normalizeText(embeddingRow.modelVersion || options.modelVersion || config.MEMORY_EMBEDDING_MODEL_VERSION || model);
   const textHash = normalizeText(embeddingRow.textHash) || buildTextHash(text, moduleId);
   const metadata = deriveMemoryMetadata({
     ...doc,
@@ -150,6 +162,11 @@ function buildWorldbookVectorRow(doc = {}, embeddingRow = {}, options = {}) {
     intent: metadata.intent,
     privacyLevel: metadata.privacyLevel,
     model,
+    modelVersion,
+    lifecycleStatus: 'active',
+    versionRoot: normalizeText(doc.moduleId || doc.id || moduleId),
+    sourceTs: Number(doc.fileMtimeMs || embeddingRow.updatedAt || embeddingRow.lastEmbeddedAt || 0) || 0,
+    confidence: Number(doc.confidence || 1) || 1,
     vector,
     preview: clampText([doc.purpose, text].filter(Boolean).join('\n'), Number(options.previewChars || 160) || 160)
   };
@@ -167,6 +184,9 @@ function normalizeSourceFilter(source = 'all') {
 function buildMemoryFilter(input = {}) {
   const userId = normalizeText(input.userId);
   const source = normalizeSourceFilter(input.source);
+  const allowedSources = Array.from(new Set((Array.isArray(input.allowedSources) ? input.allowedSources : [])
+    .map(normalizeSourceFilter)
+    .filter((item) => item && item !== 'all'))).sort();
   const currentGroup = normalizeText(input.groupId);
   const allowedGroups = Array.from(new Set([
     ...(Array.isArray(input.allowedGroupIds) ? input.allowedGroupIds : []),
@@ -181,6 +201,9 @@ function buildMemoryFilter(input = {}) {
     } else {
       clauses.push(`source = ${quoteSql(source)}`);
     }
+  }
+  if (allowedSources.length > 0) {
+    clauses.push(`source IN (${allowedSources.map(quoteSql).join(', ')})`);
   }
   const category = normalizeText(input.category || input.memoryCategory).toLowerCase();
   if (category) clauses.push(`category = ${quoteSql(category)}`);
@@ -202,6 +225,7 @@ function buildMemoryFilter(input = {}) {
     sql: clauses.join(' AND '),
     userId,
     source,
+    allowedSources,
     category,
     intentFilter: intent,
     privacyLevel,
@@ -218,6 +242,8 @@ function rowPassesMemoryFilter(row = {}, filter = {}) {
   if (lifecycleStatus === 'stale' || lifecycleStatus === 'suspect' || lifecycleStatus === 'superseded') return false;
   const source = normalizeSourceFilter(filter.source);
   const rowSource = normalizeText(row.source).toLowerCase();
+  const allowedSources = Array.isArray(filter.allowedSources) ? filter.allowedSources.map(normalizeText).filter(Boolean) : [];
+  if (allowedSources.length > 0 && !allowedSources.includes(rowSource)) return false;
   if (source !== 'all') {
     if (source === 'personal') {
       if (rowSource !== 'personal' && rowSource !== 'profile') return false;
@@ -357,7 +383,13 @@ function chunkList(values = [], size = 100) {
 }
 
 function resolveVectorCandidates(rows = [], localCandidates = [], context = {}) {
-  const filter = context.filter || buildMemoryFilter(context);
+  const filter = {
+    ...buildMemoryFilter(context),
+    ...(context.filter || {}),
+    allowedSources: Array.isArray(context.allowedSources)
+      ? context.allowedSources
+      : (context.filter?.allowedSources || [])
+  };
   const localById = new Map((Array.isArray(localCandidates) ? localCandidates : [])
     .map((item) => [normalizeText(item.id || item.nodeId), item])
     .filter(([key]) => key));

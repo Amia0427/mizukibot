@@ -1,12 +1,6 @@
 const config = require('../../config');
 const router = require('../../core/router');
 const routeExecution = require('../../core/routeExecution');
-const {
-  attachExecutablePlanToPlannerDecision,
-  buildExecutablePlanFromPlannerDecision
-} = require('../../core/executablePlan');
-const planning = require('../../api/runtimeV2/planning/service');
-const { planDirectChat } = require('../../core/directChatPlanner');
 const { diagnoseProjectionFreshness } = require('../memory-v3/diagnostics');
 const { getApiProvider } = require('../modelProvider');
 const {
@@ -42,7 +36,6 @@ const {
 } = require('./branch');
 const {
   buildGuardSummary,
-  buildPlannerSummary,
   compactProjectionFreshness
 } = require('./reportSections');
 
@@ -92,88 +85,6 @@ async function resolveDiagnosticRoute(context = {}, input = {}, deps = {}) {
   return {
     route,
     source: routeResolver === router.detectIntentHybrid ? 'detectIntentHybrid' : 'injected'
-  };
-}
-
-function buildRulePlannerDecision(route = {}, context = {}, input = {}) {
-  const available = planning.collectAvailableToolSummary(route, {
-    userId: context.userId,
-    allowedTools: route?.meta?.allowedTools
-  });
-  const decisionV2 = planning.buildRuleBasedPlannerDecision(route, {
-    userId: context.userId,
-    allowedTools: route?.meta?.allowedTools,
-    toolCatalog: available.toolCatalog,
-    contextSummary: context.contextSummary,
-    directedContext: context.directedContext,
-    continuitySignals: normalizeObject(input.continuitySignals)
-  });
-  const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decisionV2, route, {
-    toolCatalog: available.toolCatalog
-  });
-  return attachExecutablePlanToPlannerDecision(
-    directChatDecision,
-    buildExecutablePlanFromPlannerDecision(directChatDecision, routeExecution.resolvePolicyKey(route), route)
-  );
-}
-
-async function resolveDiagnosticPlanner(route = {}, context = {}, input = {}, deps = {}) {
-  const provided = input.plannerDecision && typeof input.plannerDecision === 'object'
-    ? input.plannerDecision
-    : (route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null);
-  if (provided) {
-    return {
-      plannerDecision: provided,
-      source: 'provided'
-    };
-  }
-  if (route?.topRouteType !== 'direct_chat') {
-    return {
-      plannerDecision: null,
-      source: 'not_applicable'
-    };
-  }
-
-  const mode = normalizeText(input.plannerMode || deps.plannerMode || 'live').toLowerCase();
-  if (typeof deps.planDirectChat === 'function') {
-    return {
-      plannerDecision: await deps.planDirectChat(route, {
-        userId: context.userId,
-        allowedTools: route?.meta?.allowedTools,
-        contextSummary: context.contextSummary,
-        directedContext: context.directedContext,
-        continuitySignals: normalizeObject(input.continuitySignals)
-      }),
-      source: 'injected'
-    };
-  }
-  if (mode === 'rule' || mode === 'local' || mode === 'offline') {
-    return {
-      plannerDecision: buildRulePlannerDecision(route, context, input),
-      source: 'rule'
-    };
-  }
-  return {
-    plannerDecision: await planDirectChat(route, {
-      userId: context.userId,
-      allowedTools: route?.meta?.allowedTools,
-      contextSummary: context.contextSummary,
-      directedContext: context.directedContext,
-      continuitySignals: normalizeObject(input.continuitySignals)
-    }),
-    source: 'live'
-  };
-}
-
-function attachPlannerToRoute(route = {}, plannerDecision = null) {
-  if (!plannerDecision) return route;
-  return {
-    ...route,
-    meta: {
-      ...(route.meta || {}),
-      toolPlanner: plannerDecision,
-      directChatPlanner: plannerDecision
-    }
   };
 }
 
@@ -237,20 +148,18 @@ async function buildMainReplyDiagnosticReport(rawInput = {}, deps = {}) {
   const input = parseMainReplyDiagnosticInput(rawInput);
   const context = normalizeDiagnosticContext(input);
   const routeResult = await resolveDiagnosticRoute(context, input, deps);
-  const plannerResult = await resolveDiagnosticPlanner(routeResult.route, context, input, deps);
-  const routeWithPlanner = attachPlannerToRoute(routeResult.route, plannerResult.plannerDecision);
-  const executionResult = resolveExecutionPlan(routeWithPlanner, input);
+  const executionResult = resolveExecutionPlan(routeResult.route, input);
   const branch = buildBranchSummary(executionResult.plan);
   const routePolicyKey = normalizeText(executionResult.plan.policyKey || executionResult.plan.routePolicyKey || executionResult.plan.routeDebugKey);
   const routeDebugKey = normalizeText(executionResult.plan.routeDebugKey || routePolicyKey);
-  const model = buildModelSummary(context.userId, routeWithPlanner.meta || {});
-  const routeFallbackReason = resolveRouteFallbackReason(routeWithPlanner, executionResult.plan);
+  const model = buildModelSummary(context.userId, routeResult.route.meta || {});
+  const routeFallbackReason = resolveRouteFallbackReason(routeResult.route, executionResult.plan);
   const memoryFreshness = compactProjectionFreshness(diagnoseProjectionFreshness({
     userId: context.userId,
     sessionKey: context.sessionKey,
     groupId: context.groupId
   }), context.sessionKey);
-  const guards = buildGuardSummary(context, routeWithPlanner, executionResult.plan);
+  const guards = buildGuardSummary(context, routeResult.route, executionResult.plan);
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -279,20 +188,19 @@ async function buildMainReplyDiagnosticReport(rawInput = {}, deps = {}) {
       source: routeResult.source,
       routeDebugKey,
       routePolicyKey,
-      topRouteType: normalizeText(executionResult.plan.topRouteType || routeWithPlanner.topRouteType),
+      topRouteType: normalizeText(executionResult.plan.topRouteType || routeResult.route.topRouteType),
       executor: normalizeText(executionResult.plan.executor),
       fallbackReason: routeFallbackReason,
-      routerReason: normalizeText(routeWithPlanner?.meta?.reason),
+      routerReason: normalizeText(routeResult.route?.meta?.reason),
       routeTrace: executionResult.plan.routeTrace || null
     },
-    planner: buildPlannerSummary(plannerResult.plannerDecision, plannerResult.source),
     branch,
     model,
     memoryFreshness,
     guards,
     diagnostics: {
       routeSource: routeResult.source,
-      plannerSource: plannerResult.source,
+      agentSource: 'native_react',
       executionPlanSource: executionResult.source,
       apiBaseUrlHost: model.apiBaseUrlHost
     }

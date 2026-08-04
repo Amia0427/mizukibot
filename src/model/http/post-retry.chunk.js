@@ -161,7 +161,10 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         trace,
         prepared.requestUrl,
         prepared.requestBody,
-        getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
+        {
+          ...getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup),
+          __disableTlsImpersonation: body?.__disableTlsImpersonation === true
+        }
       );
       emitHttpTrace(trace, 'http_client_success', {
         stage: 'http_client_success',

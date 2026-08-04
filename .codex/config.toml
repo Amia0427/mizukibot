@@ -1,0 +1,41 @@
+[mcp_servers.amap-maps]
+command = "node"
+args = [
+    "scripts/local-mcp-server.js",
+    "amap-maps",
+]
+
+[mcp_servers.bing-search]
+command = "node"
+args = [
+    "scripts/local-mcp-server.js",
+    "bing-search",
+]
+
+[mcp_servers.fetch]
+command = "node"
+args = [
+    "scripts/local-mcp-server.js",
+    "fetch",
+]
+
+[mcp_servers.howtocook-mcp]
+command = "node"
+args = [
+    "scripts/local-mcp-server.js",
+    "howtocook-mcp",
+]
+
+[mcp_servers.memos-api-mcp]
+command = "npx"
+args = [
+    "-y",
+    "@memtensor/memos-api-mcp@1.1.2",
+]
+env_vars = [
+    "MEMOS_API_KEY",
+    "MEMOS_USER_ID",
+]
+
+[mcp_servers.memos-api-mcp.env]
+MEMOS_CHANNEL = "MODELSCOPE"

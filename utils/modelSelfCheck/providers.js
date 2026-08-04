@@ -1,36 +1,6 @@
 const config = require('../../config');
 const { normalizeText } = require('./common');
 
-function getPlannerApiBaseUrl() {
-  return normalizeText(
-    config.PLAN_API_BASE_URL
-    || process.env.PLANNER_API_BASE_URL
-    || process.env.PLAN_API_BASEURI
-    || process.env.PLANNER_API_BASEURI
-    || config.AI_ROUTER_BASE_URL
-    || config.PASSIVE_AWARENESS_REPLY_API_BASE_URL
-    || config.PASSIVE_AWARENESS_API_BASE_URL
-    || config.API_BASE_URL
-  );
-}
-
-function getPlannerApiKey() {
-  return normalizeText(
-    config.PLAN_API_KEY
-    || process.env.PLANNER_API_KEY
-    || process.env.PLAN_APIKEY
-    || process.env.PLANNER_APIKEY
-    || config.AI_ROUTER_API_KEY
-    || config.PASSIVE_AWARENESS_REPLY_API_KEY
-    || config.PASSIVE_AWARENESS_API_KEY
-    || config.API_KEY
-  );
-}
-
-function getPlannerModel() {
-  return normalizeText(config.PLAN_MODEL || config.AI_ROUTER_MODEL || config.AI_MODEL || 'gpt-5.4-mini') || 'gpt-5.4-mini';
-}
-
 function getMemoryCompletionsUrl(ensureChatCompletionsUrl) {
   return ensureChatCompletionsUrl(config.MEMORY_API_BASE_URL || config.API_BASE_URL || '');
 }
@@ -125,9 +95,6 @@ module.exports = {
   getPassiveAwarenessReplyModel,
   getPassiveAwarenessReplyApiProvider,
   inferProviderFromExplicitEndpoint,
-  getPlannerApiBaseUrl,
-  getPlannerApiKey,
-  getPlannerModel,
   isPassiveAwarenessDecisionConfigured,
   isPassiveAwarenessReplyConfigured
 };

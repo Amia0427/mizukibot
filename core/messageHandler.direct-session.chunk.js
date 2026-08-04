@@ -153,25 +153,12 @@ function isToolStyleRoute(routeKey = '') {
 
 function buildRoutePlanLogPayload(routeExecutionPlan = {}, extra = {}, route = null) {
   const allowedToolNames = Array.isArray(routeExecutionPlan?.allowedTools) ? routeExecutionPlan.allowedTools : [];
-  const planner = route?.meta?.toolPlanner && typeof route.meta.toolPlanner === 'object'
-    ? route.meta.toolPlanner
-    : (route?.meta?.directChatPlanner && typeof route.meta.directChatPlanner === 'object'
-      ? route.meta.directChatPlanner
-      : {});
-  const plannerExecutionPlan = planner?.executionPlan && typeof planner.executionPlan === 'object'
-    ? planner.executionPlan
-    : {};
-  const plannerSteps = Array.isArray(plannerExecutionPlan.steps) ? plannerExecutionPlan.steps : [];
   return {
     routeDebugKey: String(routeExecutionPlan?.routeDebugKey || 'direct_chat/text_chat/answer'),
     topRouteType: String(routeExecutionPlan?.topRouteType || 'direct_chat'),
     executor: String(routeExecutionPlan?.executor || 'direct'),
-    plannerModel: String(planner?.plannerModel || '').trim(),
-    shouldUseTools: Boolean(planner?.shouldUseTools),
-    plannerMode: String(plannerExecutionPlan.mode || '').trim(),
-    plannerStepCount: plannerSteps.length,
-    plannerTools: plannerSteps.map((step) => String(step?.action || '').trim()).filter(Boolean),
-    plannerFallbackUsed: Boolean(planner?.plannerFallbackUsed),
+    decisionSource: 'router',
+    shouldUseTools: routeExecutionPlan?.allowTools === true,
     allowedToolNames,
     allowedToolBuckets: Array.isArray(routeExecutionPlan?.allowedToolBuckets) ? routeExecutionPlan.allowedToolBuckets : [],
     needsBackground: Boolean(routeExecutionPlan?.needsBackground),

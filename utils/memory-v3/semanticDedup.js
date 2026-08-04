@@ -1,7 +1,7 @@
 const config = require('../../config');
 const { normalizeText, stableSortByScore } = require('./helpers');
 const { appendSelectionReason } = require('./queryDiagnostics');
-const { cosineArray } = require('../vectorMemory');
+const { cosineArray } = require('../memoryEmbedding');
 
 const LONG_TERM_SOURCES = new Set(['personal', 'profile']);
 const LONG_TERM_PREFERRED_FACETS = new Set(['preference', 'identity', 'relationship']);

@@ -31,6 +31,7 @@ module.exports = [
     ignores: [
       '**/node_modules/**',
       '**/data/**',
+      '**/artifacts/**',
       '.claude/**',
       '.codex/**',
       '**/NapCat.Shell (2)/**',

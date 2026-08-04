@@ -84,7 +84,6 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_API_BASE_URL = ' ';
     process.env.PASSIVE_AWARENESS_API_KEY = ' ';
     process.env.PASSIVE_AWARENESS_MODEL = ' ';
-    process.env.DIRECT_CHAT_PLANNER_ENABLED = 'false';
     process.env.MEME_MANAGER_ENABLED = 'false';
     process.env.NORMAL_FAST_REPLY_ENABLED = 'false';
 
@@ -149,7 +148,6 @@ module.exports = (async () => {
     },
     routeResolver: async () => null,
     routeExecution: {},
-    planDirectChat: async () => null,
     askAIDispatch: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, replyOptions) => {
       replyOptionsSeen.push({ ...(replyOptions || {}) });
       replyOptions.persistedReplyText = 'clean persisted reply';

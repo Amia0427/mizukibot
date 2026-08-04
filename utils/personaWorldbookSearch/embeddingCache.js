@@ -3,6 +3,10 @@ const crypto = require('crypto');
 const config = require('../../config');
 const { getLastEmbeddingFailure } = require('../memoryEmbeddingClient');
 const {
+  requestEmbedding,
+  shouldUseRemoteEmbedding
+} = require('../memoryEmbedding');
+const {
   ensureDir,
   safeReadJsonLines,
   writeJsonLines,
@@ -26,25 +30,12 @@ function sha1(value = '') {
   return crypto.createHash('sha1').update(String(value || ''), 'utf8').digest('hex');
 }
 
-function getVectorMemory() {
-  try {
-    return require('../vectorMemory');
-  } catch (_) {
-    return {};
-  }
-}
-
 function shouldUsePersonaWorldbookRemoteEmbedding() {
-  const vectorMemory = getVectorMemory();
-  return typeof vectorMemory.shouldUseRemoteEmbedding === 'function'
-    ? vectorMemory.shouldUseRemoteEmbedding()
-    : false;
+  return shouldUseRemoteEmbedding();
 }
 
 async function requestPersonaWorldbookEmbedding(text = '') {
-  const vectorMemory = getVectorMemory();
-  if (typeof vectorMemory.requestEmbedding !== 'function') return null;
-  return vectorMemory.requestEmbedding(text);
+  return requestEmbedding(text);
 }
 
 function resolveBackfillLimit(options = {}) {

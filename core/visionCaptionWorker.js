@@ -2,6 +2,10 @@ const config = require('../config');
 const { runStructuredSubagent } = require('./structuredSubagent');
 const { buildVisionCaptionWorkerModelConfig } = require('../utils/imageModelConfigResolver');
 const { trimTextByTokenBudget } = require('../utils/contextBudget');
+const {
+  sanitizePersistentModelText,
+  wrapUntrustedPromptContent
+} = require('../utils/promptSecurity');
 
 const ALLOWED_IMAGE_SOURCES = new Set(['current', 'reply', 'forward']);
 
@@ -154,6 +158,12 @@ function sanitizeStringList(value) {
   return normalizeArray(value).map((item) => normalizeText(item)).filter(Boolean);
 }
 
+function sanitizePersistentStringList(value) {
+  return sanitizeStringList(value)
+    .map((item) => sanitizePersistentModelText(item))
+    .filter(Boolean);
+}
+
 function sanitizeVisionCaptionOutput(output = {}) {
   const confidence = Math.max(0, Math.min(1, Number(output.confidence) || 0));
   return {
@@ -169,7 +179,7 @@ function sanitizeVisionCaptionOutput(output = {}) {
       relationships: sanitizeStringList(item?.relationships),
       appearance_details: sanitizeStringList(item?.appearance_details),
       object_details: sanitizeStringList(item?.object_details),
-      visible_text: sanitizeStringList(item?.visible_text),
+      visible_text: sanitizePersistentStringList(item?.visible_text),
       scene_context: sanitizeStringList(item?.scene_context),
       layout: sanitizeStringList(item?.layout),
       composition: sanitizeStringList(item?.composition),
@@ -185,9 +195,9 @@ function sanitizeVisionCaptionOutput(output = {}) {
     })),
     cross_image_relations: sanitizeStringList(output.cross_image_relations),
     user_relevant_facts: sanitizeStringList(output.user_relevant_facts),
-    ocr_text: sanitizeStringList(output.ocr_text),
+    ocr_text: sanitizePersistentStringList(output.ocr_text),
     recommended_prompt_context: normalizeText(output.recommended_prompt_context),
-    short_persist_summary: normalizeText(output.short_persist_summary),
+    short_persist_summary: sanitizePersistentModelText(output.short_persist_summary),
     confidence,
     uncertainties: sanitizeStringList(output.uncertainties)
   };
@@ -217,14 +227,16 @@ function buildRuntimeQuestionText(originalUserText = '', visionJson = {}) {
     compactOriginal ? `用户原始文本：${compactOriginal}` : '用户原始文本：（用户只发送了图片）',
     `图片数量：${Math.max(1, Number(imageCount || 0) || 1)}`,
     '视觉证据摘要：',
-    trimTextByTokenBudget(evidence || normalizeText(visionJson.short_persist_summary), evidenceBudget, 'head'),
+    wrapUntrustedPromptContent(
+      trimTextByTokenBudget(evidence || normalizeText(visionJson.short_persist_summary), evidenceBudget, 'head')
+    ),
     '约束：后续主链只能把上面的视觉证据摘要作为依据，不要假设自己直接看到了图片。'
   ].join('\n');
 }
 
 function buildPersistUserText(originalUserText = '', shortPersistSummary = '') {
   const original = normalizeText(originalUserText);
-  const summary = normalizeText(shortPersistSummary);
+  const summary = sanitizePersistentModelText(shortPersistSummary);
   return [
     original ? `用户原始文本：${original}` : '用户原始文本：（用户只发送了图片）',
     summary ? `视觉摘要：${summary}` : ''
@@ -332,5 +344,6 @@ module.exports = {
   buildPersistUserText,
   buildRuntimeQuestionText,
   buildVisionCaptionSystemPrompt,
-  runVisionCaptionWorker
+  runVisionCaptionWorker,
+  sanitizeVisionCaptionOutput
 };

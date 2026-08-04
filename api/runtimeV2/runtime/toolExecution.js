@@ -4,7 +4,14 @@ const {
   normalizeToolNames
 } = require('../../../utils/localToolAccess');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
+const { executeAuthorizedToolCall: executeAuthorizedToolCallDefault } = require('../../toolAuthorization');
 const { routeHasReadableCardContext } = require('../../../utils/cardContext');
+const {
+  getPolicy: getManifestPolicy,
+  hasPublicToolPolicy: hasManifestPublicToolPolicy,
+  resolveToolPolicy: resolveManifestToolPolicy,
+  sanitizeToolArgsForLog
+} = require('../../../utils/toolPolicy');
 const {
   WEB_LOOKUP_ALLOWED_TOOLS,
   routeHasExplicitWebSearchRequirement
@@ -46,7 +53,11 @@ function createToolExecutionHelpers(deps = {}) {
     config,
     stableHash,
     summarizeToolLogValue,
-    getPolicy,
+    getPolicy = getManifestPolicy,
+    resolveToolPolicy = resolveManifestToolPolicy,
+    hasPublicToolPolicy = hasManifestPublicToolPolicy,
+    isDynamicToolRegistered,
+    executeAuthorizedToolCall = executeAuthorizedToolCallDefault,
     enforceToolPolicy,
     shouldRunParallel,
     capabilityRegistry,
@@ -58,7 +69,6 @@ function createToolExecutionHelpers(deps = {}) {
     decideMemoryCliTurnAction,
     safeParseMemoryCliResult,
     captureToolFailure,
-    isPlannerSingleAuthorityEnabled,
     toolExecutors,
     resolveToolExecutor
   } = deps;
@@ -220,6 +230,8 @@ function createToolExecutionHelpers(deps = {}) {
   }
 
   function isSideEffectPolicy(policy = {}) {
+    const effect = String(policy.effect || '').trim().toLowerCase();
+    if (effect) return effect !== 'none';
     return isWriteLikeCapability(policy.capability) || String(policy.risk || '').trim().toLowerCase() === 'high';
   }
 
@@ -302,13 +314,7 @@ function createToolExecutionHelpers(deps = {}) {
     if (existingUrl) return stepInputs;
 
     const previousEnvelopes = normalizeArray(state.execution?.toolResults);
-    const previousSteps = normalizeArray(state.plan?.steps);
-    const webSearchResult = [...previousEnvelopes].reverse().find((item) => String(item?.tool_name || '').trim() === 'web_search' && String(item?.status || '').trim() === 'completed')
-      || previousSteps
-        .filter((candidate) => String(candidate?.tool || '').trim() === 'web_search')
-        .flatMap((candidate) => normalizeArray(candidate?.evidence))
-        .reverse()
-        .find((item) => String(item?.status || '').trim() === 'completed');
+    const webSearchResult = [...previousEnvelopes].reverse().find((item) => String(item?.tool_name || '').trim() === 'web_search' && String(item?.status || '').trim() === 'completed');
     const rows = parseSearchResultRows(webSearchResult?.result || '');
     if (rows.length === 0) {
       throw new Error('web_fetch could not resolve url from previous web_search result');
@@ -347,6 +353,10 @@ function createToolExecutionHelpers(deps = {}) {
       : null;
     return {
       userId: String(request.userId || '').trim(),
+      question: String(request.question || '').trim(),
+      rawText: String(routeMeta.rawText || request.question || '').trim(),
+      cleanText: String(routeMeta.cleanText || request.question || '').trim(),
+      chatType: String(routeMeta.chatType || routeMeta.chat_type || (routeMeta.groupId || routeMeta.group_id ? 'group' : 'private')).trim(),
       routePolicyKey: String(request.routePolicyKey || '').trim(),
       topRouteType: String(request.topRouteType || '').trim(),
       routeMeta,
@@ -364,6 +374,78 @@ function createToolExecutionHelpers(deps = {}) {
     };
   }
 
+  function buildAuthorizationActor(state = {}) {
+    const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const groupId = normalizeText(routeMeta.groupId || routeMeta.group_id);
+    const chatType = normalizeText(
+      routeMeta.chatType || routeMeta.chat_type || (groupId ? 'group' : 'private')
+    ).toLowerCase();
+    return {
+      userId: normalizeText(request.userId),
+      chatType,
+      groupId: chatType === 'group' ? groupId : ''
+    };
+  }
+
+  function buildAuthorizationInvocationKey(step = {}, state = {}, source = 'runtime_v2_direct') {
+    const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const traceId = normalizeText(request.requestTrace?.requestId || routeMeta.requestTrace?.requestId);
+    const scopeId = normalizeText(
+      state.thread?.threadId || traceId || request.sessionKey || request.userId
+    );
+    const stepId = normalizeText(step.directToolCallId || step.toolCallId || step.id);
+    return [source, scopeId, stepId, normalizeText(step.tool)].filter(Boolean).join(':');
+  }
+
+  function buildAuthorizedEnvelope(step = {}, authorizationResult = {}, policy = {}) {
+    if (authorizationResult.status === 'completed') {
+      return computeToolEnvelope(step, authorizationResult.result, policy);
+    }
+    const reason = normalizeText(authorizationResult.reason || authorizationResult.status)
+      || 'authorization_denied';
+    const result = normalizeText(authorizationResult.result)
+      || 'Tool authorization denied: ' + reason;
+    return {
+      ...computeToolEnvelope(step, result, policy),
+      status: authorizationResult.status === 'confirmation_required'
+        ? 'confirmation_required'
+        : 'blocked',
+      retryable: false,
+      result,
+      blockedReason: reason,
+      authorization: normalizeObject(authorizationResult.authorization, null),
+      authorizationEvent: normalizeObject(authorizationResult.auditEvent, null)
+    };
+  }
+
+  async function runAuthorizedExecutor({
+    step,
+    state,
+    rawArgs,
+    normalizedArgs,
+    policy,
+    executor,
+    toolContext,
+    runtimeOptions = {}
+  }) {
+    const authorize = typeof runtimeOptions.executeAuthorizedToolCall === 'function'
+      ? runtimeOptions.executeAuthorizedToolCall
+      : executeAuthorizedToolCall;
+    const result = await authorize({
+      toolName: normalizeText(step.tool),
+      rawArgs: normalizeObject(rawArgs, {}),
+      normalizedArgs: normalizeObject(normalizedArgs, {}),
+      policy,
+      actor: buildAuthorizationActor(state),
+      invocationKey: buildAuthorizationInvocationKey(step, state),
+      toolContext,
+      executor
+    });
+    return buildAuthorizedEnvelope({ ...step, inputs: normalizedArgs }, result, policy);
+  }
+
   function logToolExecution(envelope = {}, step = {}, state = {}, extra = {}) {
     const status = String(envelope.status || '').trim().toLowerCase();
     if (status === 'completed' && config.GRAPH_TOOL_SUCCESS_LOG_ENABLED !== true) {
@@ -372,8 +454,7 @@ function createToolExecutionHelpers(deps = {}) {
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
     const args = normalizeObject(envelope.args, normalizeObject(step.inputs, {}));
-    const sanitizedArgs = { ...args };
-    delete sanitizedArgs.__context;
+    const sanitizedArgs = sanitizeToolArgsForLog(String(envelope.tool_name || step.tool || '').trim(), args);
     console.log('[graph-tool]', {
       node: String(extra.node || state.execution?.currentNode || '').trim() || 'unknown',
       topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
@@ -401,6 +482,7 @@ function createToolExecutionHelpers(deps = {}) {
     if (status === 'completed') return;
     const blockedReason = normalizeText(envelope?.blockedReason).toLowerCase();
     if (blockedReason.startsWith('runtime_binding_unresolved:')) return;
+    if (blockedReason === 'confirmation_required') return;
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
     try {
@@ -427,7 +509,7 @@ function createToolExecutionHelpers(deps = {}) {
 
   function buildBlockedToolEnvelope(step = {}, memoryCliTurn = null, reason = 'tool_not_allowed') {
     const toolName = String(step?.tool || '').trim();
-    const policy = getPolicy(toolName);
+    const policy = getPolicy(toolName, step.inputs || {});
     const blockedResult = `Tool not allowed: ${toolName || 'unknown'}`;
     let nextMemoryCliTurn = createMemoryCliTurnState(memoryCliTurn);
     let invalidateMemoryPrompt = false;
@@ -452,11 +534,10 @@ function createToolExecutionHelpers(deps = {}) {
 
   function getPreviousMemorySearchResult(state = {}, currentStepId = '') {
     const currentId = normalizeText(currentStepId);
-    const planEvidence = normalizeArray(state.plan?.steps)
-      .filter((candidate) => normalizeText(candidate?.id) !== currentId)
-      .flatMap((candidate) => normalizeArray(candidate?.evidence));
     const executionEvidence = normalizeArray(state.execution?.toolResults);
-    const candidates = [...executionEvidence, ...planEvidence].reverse();
+    const candidates = executionEvidence
+      .filter((candidate) => normalizeText(candidate?.step_id) !== currentId)
+      .reverse();
     for (const envelope of candidates) {
       const resultText = String(envelope?.result || '').trim();
       if (!resultText) continue;
@@ -493,7 +574,7 @@ function createToolExecutionHelpers(deps = {}) {
 
   async function runToolStep(step, state, runtimeOptions = {}) {
     const toolName = String(step.tool || '').trim();
-    const policy = getPolicy(toolName);
+    let policy = getPolicy(toolName, step.inputs || {});
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
     const executionState = normalizeObject(state.execution, {});
@@ -537,6 +618,23 @@ function createToolExecutionHelpers(deps = {}) {
       return envelope;
     }
 
+    const dynamicTool = typeof isDynamicToolRegistered === 'function'
+      && isDynamicToolRegistered(toolName);
+    const baseResolution = resolveToolPolicy(toolName);
+    const publicTool = hasPublicToolPolicy(toolName);
+    if (!publicTool && !dynamicTool) {
+      const reason = baseResolution.policy?.exposure === 'internal'
+        ? 'internal_capability'
+        : 'unknown_capability';
+      const envelope = buildBlockedToolEnvelope(step, executionState.memoryCliTurn, reason);
+      maybeCaptureToolFailure(envelope, step, state);
+      logToolExecution(envelope, step, state, {
+        node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+        allowedTools
+      });
+      return envelope;
+    }
+
     try {
       let preparedArgs = step.inputs || {};
       if (toolName === 'web_fetch') {
@@ -568,6 +666,21 @@ function createToolExecutionHelpers(deps = {}) {
       let normalizedArgs = enforceToolPolicy(toolName, preparedArgs, {
         userId: state.request.userId
       });
+      const policyResolution = resolveToolPolicy(toolName, normalizedArgs);
+      policy = dynamicTool ? getPolicy(toolName, normalizedArgs) : policyResolution.policy;
+      if (!dynamicTool && policyResolution.reason === 'unknown_action') {
+        const envelope = buildBlockedToolEnvelope(
+          { ...step, inputs: normalizedArgs },
+          executionState.memoryCliTurn,
+          'unknown_action'
+        );
+        maybeCaptureToolFailure(envelope, { ...step, inputs: normalizedArgs }, state);
+        logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
+          node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+          allowedTools
+        });
+        return envelope;
+      }
       const cachedEnvelope = readCachedEnvelope(step, state, normalizedArgs);
       if (cachedEnvelope) {
         logToolExecution(cachedEnvelope, { ...step, inputs: normalizedArgs }, state, {
@@ -577,19 +690,6 @@ function createToolExecutionHelpers(deps = {}) {
         return cachedEnvelope;
       }
       if (toolName === 'memory_cli') {
-        if (isPlannerSingleAuthorityEnabled()) {
-          const commandText = normalizeText(normalizedArgs.command);
-          if (/^mem open --ref\s+\"mc_ref:planner_pending:/i.test(commandText)) {
-            const previousResult = safeParseMemoryCliResult(getPreviousMemorySearchResult(state, step.id));
-            const previousRef = normalizeText(previousResult?.results?.[0]?.ref);
-            if (previousRef) {
-              normalizedArgs = {
-                ...normalizedArgs,
-                command: `mem open --ref ${JSON.stringify(previousRef)}`
-              };
-            }
-          }
-        }
         if (isUnresolvedMemoryOpenCommand(normalizedArgs.command)) {
           const envelope = buildUnresolvedMemoryRefEnvelope(step, normalizedArgs, policy, executionState);
           logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
@@ -653,19 +753,25 @@ function createToolExecutionHelpers(deps = {}) {
           preparedInputs,
           policy,
           async () => {
-            const out = await executor({
-              ...normalizedArgs,
-              command: decision.preparedCommand || normalizedArgs.command,
-              __context: buildToolContext(state, toolContextOverrides)
+            const envelope = await runAuthorizedExecutor({
+              step: { ...step, inputs: preparedInputs },
+              state,
+              rawArgs: preparedArgs,
+              normalizedArgs: preparedInputs,
+              policy,
+              executor,
+              toolContext: buildToolContext(state, toolContextOverrides),
+              runtimeOptions
             });
-            const envelope = computeToolEnvelope({
-              ...step,
-              inputs: preparedInputs
-            }, out, policy);
+            if (envelope.status !== 'completed') return envelope;
             return {
               ...envelope,
               memoryCliTurn: createMemoryCliTurnState(
-                updateMemoryCliTurnStateAfterResult(executionState.memoryCliTurn, decision.parsed, out)
+                updateMemoryCliTurnStateAfterResult(
+                  executionState.memoryCliTurn,
+                  decision.parsed,
+                  envelope.result
+                )
               ),
               invalidateMemoryPrompt: true,
               repairApplied: Boolean(decision.repairApplied),
@@ -700,11 +806,16 @@ function createToolExecutionHelpers(deps = {}) {
         normalizedArgs,
         policy,
         async () => {
-          const out = await executor({
-            ...normalizedArgs,
-            __context: buildToolContext(state, toolContextOverrides)
+          return runAuthorizedExecutor({
+            step: { ...step, inputs: normalizedArgs },
+            state,
+            rawArgs: preparedArgs,
+            normalizedArgs,
+            policy,
+            executor,
+            toolContext: buildToolContext(state, toolContextOverrides),
+            runtimeOptions
           });
-          return computeToolEnvelope({ ...step, inputs: normalizedArgs }, out, policy);
         }
       );
       maybeCaptureToolFailure(envelope, { ...step, inputs: normalizedArgs }, state);

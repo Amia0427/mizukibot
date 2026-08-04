@@ -10,7 +10,7 @@ module.exports = (async () => {
   const schema = {
     type: 'function',
     function: {
-      name: 'lookup',
+      name: 'json_validate',
       parameters: {
         type: 'object',
         properties: {
@@ -22,15 +22,15 @@ module.exports = (async () => {
     }
   };
 
-  const missing = validateToolCallArgs('lookup', {}, schema);
+  const missing = validateToolCallArgs('json_validate', {}, schema);
   assert.strictEqual(missing.ok, false);
   assert.strictEqual(missing.error.type, 'missing_required');
 
-  const wrongType = validateToolCallArgs('lookup', { query: 123 }, schema);
+  const wrongType = validateToolCallArgs('json_validate', { query: 123 }, schema);
   assert.strictEqual(wrongType.ok, false);
   assert.strictEqual(wrongType.error.type, 'type_mismatch');
 
-  const valid = validateToolCallArgs('lookup', { query: 'abc', limit: 2 }, schema);
+  const valid = validateToolCallArgs('json_validate', { query: 'abc', limit: 2 }, schema);
   assert.strictEqual(valid.ok, true);
 
   let executed = false;
@@ -43,7 +43,7 @@ module.exports = (async () => {
     shouldRunParallel: () => false,
     capabilityRegistry: { byName: new Map() },
     buildLiveMainConversationSnapshot: () => ({}),
-    computeEffectiveAllowedTools: () => ['lookup'],
+    computeEffectiveAllowedTools: () => ['json_validate'],
     createMemoryCliTurnState: (value) => value || {},
     updateMemoryCliTurnStateAfterError: (state) => state,
     updateMemoryCliTurnStateAfterResult: (state) => state,
@@ -52,7 +52,7 @@ module.exports = (async () => {
     captureToolFailure: () => {},
     isPlannerSingleAuthorityEnabled: () => false,
     toolExecutors: {
-      lookup: async () => {
+      json_validate: async () => {
         executed = true;
         return 'should not run';
       }
@@ -60,8 +60,8 @@ module.exports = (async () => {
   });
 
   const envelope = await helpers.runToolStep(
-    { id: 's1', tool: 'lookup', inputs: {} },
-    { request: { allowedTools: ['lookup'] }, execution: {} },
+    { id: 's1', tool: 'json_validate', inputs: {} },
+    { request: { allowedTools: ['json_validate'] }, execution: {} },
     { getToolSchemaByName: () => schema }
   );
   assert.strictEqual(executed, false);

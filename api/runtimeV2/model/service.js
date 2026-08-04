@@ -42,7 +42,6 @@ const {
   normalizeTextContent,
   withMainModelFallback
 } = require('./shared');
-const { shouldUsePlanModeForRequest } = require('../planning/service');
 const { normalizeRequestTrace } = require('../../../utils/requestTrace');
 const {
   buildModelRouteDiagnostics,
@@ -779,12 +778,6 @@ function shouldUseStreamingReply(question = '', customPrompt = null, imageUrl = 
   if (options.disableStream) return false;
   if (options.modelConfig && typeof options.modelConfig === 'object') return false;
   if (imageUrl) return false;
-  if (shouldUsePlanModeForRequest(question, {
-    customPrompt,
-    imageUrl,
-    routePolicyKey: options?.routePolicyKey,
-    topRouteType: options?.topRouteType
-  })) return false;
   return true;
 }
 

@@ -2,11 +2,48 @@
 function normalizeWeatherArgs(args = {}) {
   const next = {};
   const location = String(args.location ?? args.city ?? args.text ?? '').trim();
-  if (!location) throw new Error('skill_weather requires location');
   if (location.length > 120) throw new Error('skill_weather location too long');
   if (/[\r\n<>`]/.test(location)) throw new Error('skill_weather location contains unsafe characters');
   next.location = location;
   return next;
+}
+
+function normalizeEarthquakeArgs(args = {}) {
+  const scope = String(args.scope || 'global').trim().toLowerCase();
+  if (!new Set(['global', 'china']).has(scope)) throw new Error('skill_earthquake_latest scope must be global or china');
+  const timeWindow = String(args.time_window || 'day').trim().toLowerCase();
+  if (!new Set(['hour', 'day', 'week', 'month']).has(timeWindow)) {
+    throw new Error('skill_earthquake_latest time_window must be hour, day, week, or month');
+  }
+
+  const defaultMagnitude = scope === 'china' ? 2.5 : 4.5;
+  const minMagnitude = args.min_magnitude === undefined ? defaultMagnitude : Number(args.min_magnitude);
+  if (!Number.isFinite(minMagnitude) || minMagnitude < 0 || minMagnitude > 10) {
+    throw new Error('skill_earthquake_latest min_magnitude must be between 0 and 10');
+  }
+  const limit = args.limit === undefined ? 5 : Number(args.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+    throw new Error('skill_earthquake_latest limit must be an integer between 1 and 10');
+  }
+
+  return {
+    scope,
+    time_window: timeWindow,
+    min_magnitude: minMagnitude,
+    limit
+  };
+}
+
+function normalizeWeatherCloudArgs(args = {}) {
+  const channel = String(args.channel || 'infrared').trim().toLowerCase();
+  if (!new Set(['infrared', 'visible', 'water_vapor']).has(channel)) {
+    throw new Error('skill_weather_cloud channel must be infrared, visible, or water_vapor');
+  }
+  const area = String(args.area || 'china').trim().toLowerCase();
+  if (!new Set(['china', 'full_disk']).has(area)) {
+    throw new Error('skill_weather_cloud area must be china or full_disk');
+  }
+  return { channel, area };
 }
 
 function normalizeArxivList(raw) {
@@ -56,7 +93,9 @@ function normalizeArxivLatestArgs(args = {}) {
 }
 
 module.exports = {
+  normalizeEarthquakeArgs,
   normalizeWeatherArgs,
+  normalizeWeatherCloudArgs,
   normalizeArxivList,
   normalizeArxivSearchArgs,
   normalizeArxivGetArgs,

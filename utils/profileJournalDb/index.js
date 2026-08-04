@@ -47,6 +47,7 @@ const PROFILE_FIELDS = new Set([
 const PROFILE_STATUS = new Set(['active', 'candidate', 'stale', 'superseded', 'archived', 'rejected']);
 const JOURNAL_STATUS = new Set(['active', 'unsafe', 'skipped', 'archived', 'stale']);
 const ROLLUP_LEVELS = new Set(['segment', 'daily', '4day', 'monthly']);
+const JOURNAL_COMPACTION_STATUS = new Set(['pending', 'processing', 'completed', 'failed']);
 
 let dbInstance = null;
 let dbError = null;
@@ -163,7 +164,9 @@ function initSchema(db) {
       assistant_text TEXT NOT NULL,
       safety TEXT,
       status TEXT NOT NULL,
-      topic_tags_json TEXT
+      topic_tags_json TEXT,
+      turn_seq INTEGER,
+      compaction_batch_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_journal_entries_user_day ON journal_entries(user_id, day, status);
     CREATE INDEX IF NOT EXISTS idx_journal_entries_user_ts ON journal_entries(user_id, ts DESC);
@@ -183,6 +186,23 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_journal_rollups_user_level ON journal_rollups(user_id, level, status);
     CREATE INDEX IF NOT EXISTS idx_journal_rollups_user_day ON journal_rollups(user_id, day, start_day, end_day, status);
 
+    CREATE TABLE IF NOT EXISTS journal_compaction_batches (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      start_seq INTEGER NOT NULL,
+      end_seq INTEGER NOT NULL,
+      entry_ids_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      lease_until INTEGER NOT NULL DEFAULT 0,
+      summary_rollup_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_journal_compaction_user_status
+      ON journal_compaction_batches(user_id, status, updated_at);
+
     CREATE TABLE IF NOT EXISTS memory_cleanups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       target_table TEXT NOT NULL,
@@ -196,6 +216,40 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_memory_cleanups_created ON memory_cleanups(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_memory_cleanups_target ON memory_cleanups(target_table, target_id);
   `);
+
+  const columns = new Set(db.pragma('table_info(journal_entries)').map((row) => row.name));
+  let addedCompactionColumn = false;
+  if (!columns.has('turn_seq')) {
+    db.exec('ALTER TABLE journal_entries ADD COLUMN turn_seq INTEGER');
+  }
+  if (!columns.has('compaction_batch_id')) {
+    db.exec('ALTER TABLE journal_entries ADD COLUMN compaction_batch_id TEXT');
+    addedCompactionColumn = true;
+  }
+
+  const users = db.prepare('SELECT DISTINCT user_id FROM journal_entries').all();
+  const rowsByUser = db.prepare(`
+    SELECT id FROM journal_entries
+    WHERE user_id = ? AND (turn_seq IS NULL OR turn_seq <= 0)
+    ORDER BY ts ASC, id ASC
+  `);
+  const setSequence = db.prepare('UPDATE journal_entries SET turn_seq = ? WHERE id = ?');
+  for (const user of users) {
+    let sequence = Number(db.prepare('SELECT COALESCE(MAX(turn_seq), 0) AS value FROM journal_entries WHERE user_id = ?').get(user.user_id)?.value || 0) || 0;
+    for (const row of rowsByUser.all(user.user_id)) {
+      sequence += 1;
+      setSequence.run(sequence, row.id);
+    }
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_journal_entries_compaction ON journal_entries(user_id, status, compaction_batch_id, turn_seq)');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_journal_entries_user_turn_seq ON journal_entries(user_id, turn_seq) WHERE turn_seq IS NOT NULL');
+  if (addedCompactionColumn) {
+    db.prepare(`
+      UPDATE journal_entries
+      SET compaction_batch_id = 'legacy'
+      WHERE compaction_batch_id IS NULL
+    `).run();
+  }
 }
 
 function getDb(options = {}) {
@@ -636,7 +690,11 @@ function syncMemoryEvent(event = {}, options = {}) {
         confidence: event.confidence,
         importance: event.importance,
         textKind: payload.textKind,
-        sourceFile: payload.sourceFile
+        sourceFile: payload.sourceFile,
+        batchId: payload.batchId,
+        startSeq: payload.startSeq,
+        endSeq: payload.endSeq,
+        entryCount: payload.entryCount
       }
     });
   }
@@ -881,7 +939,9 @@ function normalizeJournalEntryInput(input = {}, options = {}) {
   const turnId = normalizeText(input.turnId || input.turn_id || options.turnId);
   const sessionKey = normalizeText(input.sessionKey || input.session_key || options.sessionKey);
   return {
-    id: normalizeText(input.id) || stableId('je', [userId, day, ts, sessionKey, turnId, userText, assistantText]),
+    id: normalizeText(input.id) || stableId('je', turnId
+      ? [userId, 'turn', turnId]
+      : [userId, day, ts, sessionKey, userText, assistantText]),
     userId,
     day,
     ts,
@@ -891,7 +951,8 @@ function normalizeJournalEntryInput(input = {}, options = {}) {
     assistantText,
     safety: normalizeText(input.safety || input.unsafeReason || (status === 'unsafe' ? 'unsafe' : 'safe')),
     status,
-    topicTags: Array.isArray(input.topicTags) ? input.topicTags.map(normalizeText).filter(Boolean).slice(0, 16) : []
+    topicTags: Array.isArray(input.topicTags) ? input.topicTags.map(normalizeText).filter(Boolean).slice(0, 16) : [],
+    turnSeq: Math.max(0, Number(input.turnSeq || input.turn_seq || 0) || 0)
   };
 }
 
@@ -900,29 +961,59 @@ function upsertJournalEntry(input = {}, options = {}) {
   if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable' };
   const entry = normalizeJournalEntryInput(input, options);
   if (!entry) return { ok: false, reason: 'invalid_journal_entry' };
-  db.prepare(`
-    INSERT INTO journal_entries (
-      id, user_id, day, ts, session_key, turn_id, user_text, assistant_text, safety, status, topic_tags_json
-    )
-    VALUES (
-      @id, @userId, @day, @ts, @sessionKey, @turnId, @userText, @assistantText, @safety, @status, @topicTagsJson
-    )
-    ON CONFLICT(id) DO UPDATE SET
-      user_id = excluded.user_id,
-      day = excluded.day,
-      ts = excluded.ts,
-      session_key = excluded.session_key,
-      turn_id = excluded.turn_id,
-      user_text = excluded.user_text,
-      assistant_text = excluded.assistant_text,
-      safety = excluded.safety,
-      status = excluded.status,
-      topic_tags_json = excluded.topic_tags_json
-  `).run({
-    ...entry,
-    topicTagsJson: jsonStringify(entry.topicTags, [])
+  const write = db.transaction(() => {
+    const existing = db.prepare('SELECT turn_seq, compaction_batch_id, status FROM journal_entries WHERE id = ?').get(entry.id);
+    if (existing) {
+      db.prepare(`
+        UPDATE journal_entries
+        SET user_id = @userId,
+            day = @day,
+            ts = @ts,
+            session_key = @sessionKey,
+            turn_id = @turnId,
+            user_text = @userText,
+            assistant_text = @assistantText,
+            safety = @safety,
+            status = CASE
+              WHEN journal_entries.status IN ('archived', 'unsafe', 'skipped') THEN journal_entries.status
+              ELSE @status
+            END,
+            topic_tags_json = @topicTagsJson
+        WHERE id = @id
+      `).run({
+        ...entry,
+        topicTagsJson: jsonStringify(entry.topicTags, [])
+      });
+      return {
+        ...entry,
+        turnSeq: Number(existing.turn_seq || entry.turnSeq || 0) || 0,
+        compactionBatchId: existing.compaction_batch_id || '',
+        status: existing.status || entry.status
+      };
+    }
+
+    const nextSeq = entry.turnSeq || (Number(db.prepare('SELECT COALESCE(MAX(turn_seq), 0) AS value FROM journal_entries WHERE user_id = ?').get(entry.userId)?.value || 0) + 1);
+    db.prepare(`
+      INSERT INTO journal_entries (
+        id, user_id, day, ts, session_key, turn_id, user_text, assistant_text, safety, status, topic_tags_json, turn_seq, compaction_batch_id
+      )
+      VALUES (
+        @id, @userId, @day, @ts, @sessionKey, @turnId, @userText, @assistantText, @safety, @status, @topicTagsJson, @turnSeq, NULL
+      )
+    `).run({
+      ...entry,
+      turnSeq: nextSeq,
+      topicTagsJson: jsonStringify(entry.topicTags, [])
+    });
+    return {
+      ...entry,
+      turnSeq: nextSeq,
+      compactionBatchId: '',
+      status: entry.status
+    };
   });
-  return { ok: true, id: entry.id, entry };
+  const written = write();
+  return { ok: true, id: entry.id, entry: written };
 }
 
 function normalizeRollupInput(input = {}) {
@@ -948,11 +1039,7 @@ function normalizeRollupInput(input = {}) {
   };
 }
 
-function upsertJournalRollup(input = {}) {
-  const db = getDb();
-  if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable' };
-  const rollup = normalizeRollupInput(input);
-  if (!rollup) return { ok: false, reason: 'invalid_journal_rollup' };
+function writeJournalRollupRow(db, rollup = {}) {
   db.prepare(`
     INSERT INTO journal_rollups (
       id, user_id, level, day, start_day, end_day, text, status, source_event_ids_json, quality_json
@@ -975,6 +1062,15 @@ function upsertJournalRollup(input = {}) {
     sourceEventIdsJson: jsonStringify(rollup.sourceEventIds, []),
     qualityJson: jsonStringify(rollup.quality, {})
   });
+  return rollup;
+}
+
+function upsertJournalRollup(input = {}) {
+  const db = getDb();
+  if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable' };
+  const rollup = normalizeRollupInput(input);
+  if (!rollup) return { ok: false, reason: 'invalid_journal_rollup' };
+  writeJournalRollupRow(db, rollup);
   return { ok: true, id: rollup.id, rollup };
 }
 
@@ -992,7 +1088,9 @@ function rowToJournalEntry(row = {}) {
     assistant: row.assistant_text || '',
     safety: row.safety || '',
     status: row.status,
-    topicTags: parseJson(row.topic_tags_json, [])
+    topicTags: parseJson(row.topic_tags_json, []),
+    turnSeq: Math.max(0, Number(row.turn_seq || 0) || 0),
+    compactionBatchId: row.compaction_batch_id || ''
   };
 }
 
@@ -1010,6 +1108,224 @@ function rowToRollup(row = {}) {
     sourceEventIds: parseJson(row.source_event_ids_json, []),
     quality: parseJson(row.quality_json, {})
   };
+}
+
+function normalizeCompactionStatus(value = 'pending') {
+  const status = normalizeText(value).toLowerCase();
+  return JOURNAL_COMPACTION_STATUS.has(status) ? status : 'pending';
+}
+
+function rowToCompactionBatch(row = {}, entries = []) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    startSeq: Math.max(0, Number(row.start_seq || 0) || 0),
+    endSeq: Math.max(0, Number(row.end_seq || 0) || 0),
+    entryIds: parseJson(row.entry_ids_json, []),
+    status: normalizeCompactionStatus(row.status),
+    attempts: Math.max(0, Number(row.attempts || 0) || 0),
+    leaseUntil: Math.max(0, Number(row.lease_until || 0) || 0),
+    summaryRollupId: row.summary_rollup_id || '',
+    error: row.error || '',
+    createdAt: Math.max(0, Number(row.created_at || 0) || 0),
+    updatedAt: Math.max(0, Number(row.updated_at || 0) || 0),
+    entries: Array.isArray(entries) ? entries.map(rowToJournalEntry) : []
+  };
+}
+
+function selectCompactionBatchEntries(db, batchId) {
+  return db.prepare(`
+    SELECT * FROM journal_entries
+    WHERE compaction_batch_id = ?
+    ORDER BY turn_seq ASC, ts ASC, id ASC
+  `).all(batchId);
+}
+
+function claimJournalTurnBatch(userId, options = {}) {
+  const db = getDb();
+  if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable' };
+  const uid = normalizeText(userId);
+  if (!uid) return { ok: false, reason: 'missing_user_id' };
+  const limit = Math.max(1, Math.min(500, Number(options.limit || config.DAILY_JOURNAL_TURN_COMPACTION_THRESHOLD || 50) || 50));
+  const force = options.force === true;
+  const beforeTs = Math.max(0, Number(options.beforeTs || 0) || 0);
+  const beforeDay = normalizeDay(options.beforeDay);
+  const now = nowMs(options);
+  const leaseMs = Math.max(60 * 1000, Number(options.leaseMs || 15 * 60 * 1000) || 15 * 60 * 1000);
+
+  const claim = db.transaction(() => {
+    db.prepare(`
+      UPDATE journal_compaction_batches
+      SET status = 'pending', lease_until = 0, updated_at = ?
+      WHERE user_id = ? AND status = 'processing' AND lease_until > 0 AND lease_until <= ?
+    `).run(now, uid, now);
+
+    const retry = db.prepare(`
+      SELECT * FROM journal_compaction_batches
+      WHERE user_id = ? AND status IN ('pending', 'failed')
+      ORDER BY updated_at ASC, created_at ASC
+      LIMIT 1
+    `).get(uid);
+    if (retry) {
+      const entries = selectCompactionBatchEntries(db, retry.id);
+      if (entries.length > 0) {
+        db.prepare(`
+          UPDATE journal_compaction_batches
+          SET status = 'processing', attempts = attempts + 1, lease_until = ?, updated_at = ?, error = NULL
+          WHERE id = ?
+        `).run(now + leaseMs, now, retry.id);
+        return rowToCompactionBatch({
+          ...retry,
+          status: 'processing',
+          attempts: Number(retry.attempts || 0) + 1,
+          lease_until: now + leaseMs,
+          updated_at: now,
+          error: null
+        }, entries);
+      }
+      db.prepare(`
+        UPDATE journal_compaction_batches
+        SET status = 'failed', error = ?, lease_until = 0, updated_at = ?
+        WHERE id = ?
+      `).run('compaction_entries_missing', now, retry.id);
+    }
+
+    const where = [
+      'user_id = ?',
+      "status = 'active'",
+      'compaction_batch_id IS NULL',
+      "(safety IS NULL OR (safety != 'unsafe' AND safety NOT LIKE 'unsafe_%'))"
+    ];
+    const params = [uid];
+    if (beforeTs > 0) {
+      where.push('ts < ?');
+      params.push(beforeTs);
+    }
+    if (beforeDay) {
+      where.push('day <= ?');
+      params.push(beforeDay);
+    }
+    const rows = db.prepare(`
+      SELECT * FROM journal_entries
+      WHERE ${where.join(' AND ')}
+      ORDER BY turn_seq ASC, ts ASC, id ASC
+      LIMIT ?
+    `).all(...params, limit);
+    if (rows.length === 0 || (!force && rows.length < limit)) return null;
+
+    const batchId = stableId('jcb', [uid, rows[0].turn_seq, rows[rows.length - 1].turn_seq, now, process.pid]);
+    const entryIds = rows.map((row) => row.id);
+    db.prepare(`
+      INSERT INTO journal_compaction_batches (
+        id, user_id, start_seq, end_seq, entry_ids_json, status, attempts, lease_until, summary_rollup_id, error, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, 'processing', 1, ?, NULL, NULL, ?, ?)
+    `).run(
+      batchId,
+      uid,
+      Number(rows[0].turn_seq || 0) || 0,
+      Number(rows[rows.length - 1].turn_seq || 0) || 0,
+      jsonStringify(entryIds, []),
+      now + leaseMs,
+      now,
+      now
+    );
+    const mark = db.prepare('UPDATE journal_entries SET compaction_batch_id = ? WHERE id = ? AND compaction_batch_id IS NULL');
+    for (const id of entryIds) mark.run(batchId, id);
+    return rowToCompactionBatch({
+      id: batchId,
+      user_id: uid,
+      start_seq: rows[0].turn_seq,
+      end_seq: rows[rows.length - 1].turn_seq,
+      entry_ids_json: jsonStringify(entryIds, []),
+      status: 'processing',
+      attempts: 1,
+      lease_until: now + leaseMs,
+      created_at: now,
+      updated_at: now
+    }, rows);
+  });
+
+  const batch = claim();
+  return batch || { ok: true, batch: null };
+}
+
+function completeJournalTurnBatch(batchId, input = {}, options = {}) {
+  const db = getDb();
+  if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable' };
+  const id = normalizeText(batchId);
+  const text = normalizeText(input.text);
+  if (!id || !text) return { ok: false, reason: 'invalid_compaction_result' };
+  const keepActive = Math.max(0, Number(options.keepActive || config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES || 8) || 8);
+  const completedAt = nowMs(options);
+  const commit = db.transaction(() => {
+    const batch = db.prepare('SELECT * FROM journal_compaction_batches WHERE id = ?').get(id);
+    if (!batch) return { ok: false, reason: 'compaction_batch_not_found' };
+    const rows = selectCompactionBatchEntries(db, id);
+    if (rows.length === 0) return { ok: false, reason: 'compaction_entries_missing' };
+    const endDay = rows[rows.length - 1].day || '';
+    const startDay = rows[0].day || endDay;
+    const rollup = normalizeRollupInput({
+      id: input.rollupId || `turn:${batch.user_id}:${id}`,
+      userId: batch.user_id,
+      level: 'segment',
+      day: endDay,
+      startDay,
+      endDay,
+      text,
+      status: 'active',
+      sourceEventIds: input.sourceEventIds,
+      quality: {
+        source: 'turn_compaction',
+        textKind: 'journal_turn_summary',
+        batchId: id,
+        startSeq: Number(batch.start_seq || 0) || 0,
+        endSeq: Number(batch.end_seq || 0) || 0,
+        entryCount: rows.length,
+        startTs: Number(rows[0].ts || 0) || 0,
+        endTs: Number(rows[rows.length - 1].ts || 0) || 0,
+        sourceEntryIds: rows.map((row) => row.id),
+        ...(input.quality && typeof input.quality === 'object' ? input.quality : {})
+      }
+    });
+    if (!rollup) return { ok: false, reason: 'invalid_journal_rollup' };
+    writeJournalRollupRow(db, rollup);
+    const archiveRows = rows.slice(0, Math.max(0, rows.length - keepActive));
+    const archive = db.prepare(`
+      UPDATE journal_entries
+      SET status = 'archived'
+      WHERE id = ? AND compaction_batch_id = ? AND status = 'active'
+    `);
+    for (const row of archiveRows) archive.run(row.id, id);
+    db.prepare(`
+      UPDATE journal_compaction_batches
+      SET status = 'completed', lease_until = 0, summary_rollup_id = ?, error = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(rollup.id, completedAt, id);
+    return {
+      ok: true,
+      batchId: id,
+      rollup,
+      archivedCount: archiveRows.length,
+      activeCount: rows.length - archiveRows.length
+    };
+  });
+  return commit();
+}
+
+function failJournalTurnBatch(batchId, error, options = {}) {
+  const db = getDb();
+  if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable' };
+  const id = normalizeText(batchId);
+  if (!id) return { ok: false, reason: 'missing_compaction_batch_id' };
+  const message = normalizeText(error?.message || error).slice(0, 1000) || 'turn_compaction_failed';
+  const updatedAt = nowMs(options);
+  const result = db.prepare(`
+    UPDATE journal_compaction_batches
+    SET status = 'failed', lease_until = 0, error = ?, updated_at = ?
+    WHERE id = ? AND status IN ('processing', 'pending', 'failed')
+  `).run(message, updatedAt, id);
+  return { ok: true, batchId: id, changed: result.changes > 0, error: message };
 }
 
 function listJournalEntries(options = {}) {
@@ -1063,18 +1379,18 @@ function searchJournalEntries(userId, query = '', options = {}) {
   const rows = day
     ? db.prepare(`
       SELECT * FROM journal_entries
-      WHERE user_id = ? AND day = ? AND status = 'active'
+      WHERE user_id = ? AND day = ? AND status IN ('active', 'archived')
       ORDER BY ts DESC
       LIMIT 200
     `).all(uid, day)
     : db.prepare(`
       SELECT * FROM journal_entries
-      WHERE user_id = ? AND status = 'active'
+      WHERE user_id = ? AND status IN ('active', 'archived')
       ORDER BY ts DESC
       LIMIT 300
     `).all(uid);
   const q = normalizeText(query);
-  const results = rows.map(rowToJournalEntry)
+  const entryResults = rows.map(rowToJournalEntry)
     .map((entry) => {
       const text = `User: ${entry.userText}\nAssistant: ${entry.assistantText}`;
       const score = q ? scoreTextMatch(q, text) + 0.28 : 0.5;
@@ -1098,6 +1414,37 @@ function searchJournalEntries(userId, query = '', options = {}) {
       };
     })
     .filter((item) => !q || item.score > 0)
+  const rollupRows = db.prepare(`
+    SELECT * FROM journal_rollups
+    WHERE user_id = ? AND level = 'segment' AND status = 'active'
+    ORDER BY end_day DESC, id DESC
+    LIMIT 200
+  `).all(uid);
+  const rollupResults = rollupRows.map(rowToRollup).map((rollup) => {
+    const score = q ? scoreTextMatch(q, rollup.text) + 0.34 : 0.55;
+    return {
+      ref: `mc_ref:journal-db:${rollup.id}`,
+      source: 'journal',
+      sourceKind: 'profile_journal_db',
+      type: 'journal_segment_summary',
+      id: rollup.id,
+      logicalId: rollup.id,
+      title: `Journal turns ${rollup.startDay || rollup.day}..${rollup.endDay || rollup.day}`,
+      preview: sanitizePreviewText(rollup.text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
+      text: rollup.text,
+      score,
+      updatedAt: Number(rollup.quality?.endTs || 0) || 0,
+      confidence: 0.9,
+      tier: 'A',
+      matchMode: q ? 'sqlite_lexical' : 'sqlite_recent',
+      status: rollup.status,
+      day: rollup.day,
+      startDay: rollup.startDay,
+      endDay: rollup.endDay,
+      rollupLevel: 'segment'
+    };
+  }).filter((item) => !q || item.score > 0);
+  const results = entryResults.concat(rollupResults)
     .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
     .slice(0, limit);
   return { ok: true, results, count: results.length };
@@ -1113,10 +1460,18 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
   const yearMonth = normalizeYearMonth(options.yearMonth);
   const includeActiveRaw = Boolean(options.includeActiveRaw);
   let dailyRows = [];
+  let segmentRows = [];
   let fourDayRows = [];
   let monthlyRows = [];
   let activeRawRows = [];
   if (targetDay) {
+    segmentRows = db.prepare(`
+      SELECT * FROM journal_rollups
+      WHERE user_id = ? AND level = 'segment' AND status = 'active'
+        AND start_day <= ? AND end_day >= ?
+      ORDER BY end_day DESC, id DESC
+      LIMIT ?
+    `).all(uid, targetDay, targetDay, Math.max(1, Number(options.segmentLimit || config.DAILY_JOURNAL_TURN_COMPACTION_RECALL_LIMIT) || 8));
     dailyRows = db.prepare(`
       SELECT * FROM journal_rollups WHERE user_id = ? AND level = 'daily' AND day = ? AND status = 'active'
     `).all(uid, targetDay);
@@ -1143,6 +1498,13 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
       `).all(uid, targetDay, Math.max(1, Number(options.activeRawMaxEntries || config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES) || 8)).reverse();
     }
   } else if (yearMonth) {
+    segmentRows = db.prepare(`
+      SELECT * FROM journal_rollups
+      WHERE user_id = ? AND level = 'segment' AND status = 'active'
+        AND (substr(day, 1, 7) = ? OR substr(start_day, 1, 7) = ? OR substr(end_day, 1, 7) = ?)
+      ORDER BY end_day DESC, id DESC
+      LIMIT ?
+    `).all(uid, yearMonth, yearMonth, yearMonth, Math.max(1, Number(options.segmentLimit || config.DAILY_JOURNAL_TURN_COMPACTION_RECALL_LIMIT) || 8));
     monthlyRows = db.prepare(`
       SELECT * FROM journal_rollups
       WHERE user_id = ? AND level = 'monthly' AND status = 'active'
@@ -1151,6 +1513,12 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
       LIMIT ?
     `).all(uid, yearMonth, yearMonth, yearMonth, Math.max(1, Number(options.maxMonthlyFiles || config.DAILY_JOURNAL_MONTHLY_PROMPT_MAX_FILES) || 3));
   } else {
+    segmentRows = db.prepare(`
+      SELECT * FROM journal_rollups
+      WHERE user_id = ? AND level = 'segment' AND status = 'active'
+      ORDER BY end_day DESC, id DESC
+      LIMIT ?
+    `).all(uid, Math.max(1, Number(options.segmentLimit || config.DAILY_JOURNAL_TURN_COMPACTION_RECALL_LIMIT) || 8));
     dailyRows = db.prepare(`
       SELECT * FROM journal_rollups
       WHERE user_id = ? AND level = 'daily' AND status = 'active'
@@ -1198,9 +1566,10 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
     };
   };
   const daily = dailyRows.map(toItem);
+  const segment = segmentRows.map(toItem);
   const fourDay = fourDayRows.map(toItem);
   const monthly = monthlyRows.map(toItem);
-  const items = [...activeRaw, ...daily, ...fourDay, ...monthly];
+  const items = [...activeRaw, ...segment, ...daily, ...fourDay, ...monthly];
   if (!items.length) return { ok: false, reason: 'empty_profile_journal_db_bundle' };
   return {
     ok: true,
@@ -1208,6 +1577,7 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
     text: items.map((item) => item.text).filter(Boolean).join('\n\n'),
     items,
     byLayer: {
+      segment,
       daily,
       fourDay,
       monthly,
@@ -1219,6 +1589,7 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
     },
     query: {
       lookbackDays,
+      segmentLimit: Math.max(1, Number(options.segmentLimit || config.DAILY_JOURNAL_TURN_COMPACTION_RECALL_LIMIT) || 8),
       maxFourDayFiles: Math.max(0, Number(options.maxFourDayFiles || config.DAILY_JOURNAL_4DAY_PROMPT_MAX_FILES) || 0),
       maxMonthlyFiles: Math.max(0, Number(options.maxMonthlyFiles || config.DAILY_JOURNAL_MONTHLY_PROMPT_MAX_FILES) || 0),
       timestamp: options.timestamp ?? null,
@@ -1226,6 +1597,7 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
       yearMonth: yearMonth || (targetDay ? targetDay.slice(0, 7) : '')
     },
     stats: {
+      segmentCount: segment.length,
       dailyCount: daily.length,
       fourDayCount: fourDay.length,
       monthlyCount: monthly.length,
@@ -1385,9 +1757,12 @@ function getDiagnostics(options = {}) {
 
 module.exports = {
   applyProfileAutoClean,
+  claimJournalTurnBatch,
   cleanJournalEntries,
   cleanProfileFacts,
   closeDb,
+  completeJournalTurnBatch,
+  failJournalTurnBatch,
   getDb,
   getDbFile,
   getDiagnostics,

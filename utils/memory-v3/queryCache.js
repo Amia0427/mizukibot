@@ -8,7 +8,7 @@ function getNowMs() {
 }
 
 function getQueryEmbeddingCacheTtlMs() {
-  return Math.max(0, Number(config.MEMORY_EMBEDDING_CACHE_TTL_MS || 0) || 0);
+  return Math.max(0, Number(config.MEMORY_QUERY_EMBEDDING_CACHE_TTL_MS || config.MEMORY_EMBEDDING_CACHE_TTL_MS || 0) || 0);
 }
 
 function getQueryEmbeddingCacheMaxEntries() {
@@ -21,8 +21,12 @@ function buildQueryEmbeddingCacheKey(query = '', facet = 'default', options = {}
     facet: normalizeText(facet).toLowerCase(),
     userId: normalizeText(options.userId),
     groupId: normalizeText(options.groupId),
+    groupIds: Array.isArray(options.groupIds) ? options.groupIds.map(normalizeText).filter(Boolean).sort() : [],
     sessionKey: normalizeText(options.sessionKey || options.sessionId),
+    scopeType: normalizeText(options.scopeType || options.scope?.scopeType),
     source: normalizeText(options.source || 'all').toLowerCase(),
+    allowedSources: Array.isArray(options.allowedSources) ? options.allowedSources.map(normalizeText).filter(Boolean).sort() : [],
+    modelVersion: normalizeText(options.modelVersion || config.MEMORY_EMBEDDING_MODEL_VERSION || config.MEMORY_EMBEDDING_MODEL),
     rewrites: Array.isArray(options.rewrites) ? options.rewrites.map(normalizeText).filter(Boolean) : []
   });
 }

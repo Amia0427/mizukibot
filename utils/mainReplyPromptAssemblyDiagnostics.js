@@ -98,7 +98,7 @@ function isMainReplyModelCall(row = {}) {
   const trigger = normalizeText(row.trigger_branch || row.triggerBranch);
   const dispatch = normalizeText(row.dispatch_branch || row.dispatchBranch);
   if (MAIN_REPLY_MODEL_CALL_SOURCES.has(source)) return true;
-  return /direct_reply|draft_reply/i.test(trigger) || /direct_reply|tool_plan/i.test(dispatch);
+  return /direct_reply|draft_reply/i.test(trigger) || /direct_reply|agent/i.test(dispatch);
 }
 
 function latestRow(rows = []) {

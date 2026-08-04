@@ -1,20 +1,30 @@
-const path = require('path');
-const { createRequire } = require('module');
-const { runCommonJsChunks } = require('../../shared/chunkedModule');
+'use strict';
 
-const legacyContextDir = path.resolve(__dirname, '../../../api/runtimeV2/context');
-const legacyContextFile = path.join(legacyContextDir, 'service.js');
-const legacyRequire = createRequire(legacyContextFile);
+const { buildBaseDynamicPrompt } = require('./base');
+const {
+  buildDirectedContextPromptSnippet,
+  buildRoleplayInnerProtocolPromptSnippet,
+  buildRoleplayRuntimeContextPromptSnippet,
+  buildShortTermContinuityPrompt
+} = require('./continuity');
+const { promptLayerCache } = require('./cache');
+const { buildDynamicPrompt } = require('./dynamic');
+const { mergeAllowedToolsWithMemoryCli, shouldExposeMemoryCli } = require('./memory-inputs');
+const { formatResearchBriefsForPrompt } = require('./support');
+const vision = require('./vision-runtime');
 
-module.exports = runCommonJsChunks(legacyContextDir, module, [
-  'service-core.chunk.js',
-  'dynamic-plan.chunk.js',
-  'cache-blocks.chunk.js',
-  'prompt-inputs.chunk.js',
-  'render-helpers.chunk.js',
-  'base-dynamic-prompt.chunk.js',
-  'base-dynamic-prompt-02.chunk.js',
-  'dynamic-prompt.chunk.js',
-  'dynamic-prompt-02.chunk.js',
-  'vision.chunk.js',
-], { require: legacyRequire, filename: legacyContextFile });
+module.exports = {
+  buildBaseDynamicPrompt,
+  buildDirectedContextPromptSnippet,
+  buildDynamicPrompt,
+  buildRoleplayInnerProtocolPromptSnippet,
+  buildRoleplayRuntimeContextPromptSnippet,
+  buildShortTermContinuityPrompt,
+  buildVisionLiteTextContent: vision.buildVisionLiteTextContent,
+  buildVisionMessageContent: vision.buildVisionMessageContent,
+  formatResearchBriefsForPrompt,
+  mergeAllowedToolsWithMemoryCli,
+  promptLayerCache,
+  shouldBypassHumanizerForPolicy: vision.shouldBypassHumanizerForPolicy,
+  shouldExposeMemoryCli
+};

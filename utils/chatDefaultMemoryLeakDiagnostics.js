@@ -391,7 +391,8 @@ function summarizeExplicitRecallEvidence(modelCall = {}, traceEvents = [], obser
 function summarizeRequestTrace(requestId = '', events = []) {
   const latestWithRoute = events.slice().reverse().find((event) => routePolicyKeyOf(event)) || {};
   const ingress = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'message_ingress') || events[0] || {};
-  const plannerDone = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'planner_done') || {};
+  const agentDecisions = events.filter((event) => normalizeText(event.stage) === 'agent_decision');
+  const latestAgentDecision = agentDecisions[agentDecisions.length - 1] || {};
   return {
     requestId,
     eventCount: events.length,
@@ -406,9 +407,10 @@ function summarizeRequestTrace(requestId = '', events = []) {
     routeDebugKey: routeDebugKeyOf(latestWithRoute),
     topRouteType: topRouteTypeOf(latestWithRoute),
     dispatchBranch: dispatchBranchOf(latestWithRoute),
-    shouldUseTools: plannerDone.shouldUseTools === true,
-    plannerMode: normalizeText(plannerDone.plannerMode),
-    needsBackground: plannerDone.needsBackground === true || latestWithRoute.needsBackground === true
+    shouldUseTools: agentDecisions.some((event) => normalizeText(event.decision) === 'tools'),
+    agentDecision: normalizeText(latestAgentDecision.decision),
+    forcedFinal: events.some((event) => normalizeText(event.stage) === 'agent_forced_final'),
+    needsBackground: latestWithRoute.needsBackground === true
   };
 }
 

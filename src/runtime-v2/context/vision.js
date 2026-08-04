@@ -1,6 +1,11 @@
-const context = require('./index');
+'use strict';
+
+const {
+  buildVisionMessageContent,
+  shouldBypassHumanizerForPolicy
+} = require('./vision-runtime');
 
 module.exports = {
-  buildVisionMessageContent: context.buildVisionMessageContent,
-  shouldBypassHumanizerForPolicy: context.shouldBypassHumanizerForPolicy
+  buildVisionMessageContent,
+  shouldBypassHumanizerForPolicy
 };

@@ -7,6 +7,7 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-journal-pollution
 process.env.DATA_DIR = tempRoot;
 process.env.DAILY_JOURNAL_DIR = path.join(tempRoot, 'daily_journal');
 process.env.DAILY_JOURNAL_ENABLED = 'true';
+process.env.DAILY_JOURNAL_TURN_COMPACTION_ENABLED = 'false';
 process.env.MEMORY_JOURNAL_UNSAFE_REPLY_FILTER = 'true';
 process.env.MEMORY_FILE = path.join(tempRoot, 'memories.json');
 process.env.DATA_FILE = path.join(tempRoot, 'favorites.json');

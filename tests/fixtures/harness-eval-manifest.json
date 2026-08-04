@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "harness_eval_manifest_v2",
+  "version": "2.0.0",
+  "profiles": {
+    "ci": {
+      "suites": [
+        "memory-recall-routing-stability",
+        "memory-recall-auto-gold",
+        "post-reply-learning"
+      ]
+    },
+    "nightly:verify": {
+      "suites": [
+        "memory-recall-routing-stability",
+        "memory-recall-auto-gold",
+        "post-reply-learning",
+        "live-model-tasks",
+        "redacted-replay"
+      ]
+    }
+  },
+  "suites": [
+    {
+      "id": "memory-recall-routing-stability",
+      "caseSchemaVersion": "memory_recall_stability_v1",
+      "dataPolicy": "synthetic_only",
+      "runner": {
+        "type": "node",
+        "path": "tests/memoryRecallStabilityCases.test.js",
+        "timeoutMs": 60000,
+        "maxOutputBytes": 262144
+      },
+      "source": {
+        "type": "fixture",
+        "path": "memory-recall-stability-cases.jsonl",
+        "caseCount": 30,
+        "canonicalSha256": "f6562db1164d654798b7c0109f9edae0dd05db4c48b169dc634eded2bb494051"
+      },
+      "thresholds": {
+        "passRate": { "min": 1 },
+        "failedCases": { "max": 0 }
+      }
+    },
+    {
+      "id": "memory-recall-auto-gold",
+      "caseSchemaVersion": "memory_recall_eval_v2",
+      "dataPolicy": "synthetic_only",
+      "runner": {
+        "type": "node",
+        "path": "tests/memoryRecallAutoGoldEval.test.js",
+        "timeoutMs": 60000,
+        "maxOutputBytes": 262144
+      },
+      "source": {
+        "type": "generated"
+      },
+      "thresholds": {
+        "recallAt5": { "min": 0.5 },
+        "mrrAt5": { "min": 0.5 },
+        "wrongHitRate": { "max": 0 },
+        "leakage": { "max": 0 },
+        "lifecycleLeakage": { "max": 0 },
+        "forbiddenHits": { "max": 0 }
+      }
+    },
+    {
+      "id": "post-reply-learning",
+      "caseSchemaVersion": "post_reply_learning_v1",
+      "dataPolicy": "synthetic_only",
+      "runner": {
+        "type": "node",
+        "path": "tests/postReplyLearningEval.test.js",
+        "timeoutMs": 60000,
+        "maxOutputBytes": 262144
+      },
+      "source": {
+        "type": "fixture",
+        "path": "post-reply-learning-cases.jsonl",
+        "caseCount": 22,
+        "canonicalSha256": "c0670cd804e324120ea046d0a443e8b9baed3ce7d4c155ba6225e9af26a2f1c7"
+      },
+      "thresholds": {
+        "passRate": { "min": 1 },
+        "failedCases": { "max": 0 }
+      }
+    },
+    {
+      "id": "live-model-tasks",
+      "caseSchemaVersion": "live_model_task_v1",
+      "dataPolicy": "synthetic_only",
+      "runner": {
+        "type": "external_result",
+        "resultFileEnv": "HARNESS_EVAL_LIVE_MODEL_RESULT_FILE",
+        "maxBytes": 262144,
+        "maxAgeHours": 48,
+        "minCaseCount": 20
+      },
+      "source": {
+        "type": "external"
+      },
+      "thresholds": {
+        "passRate": { "min": 1 },
+        "failedCases": { "max": 0 }
+      }
+    },
+    {
+      "id": "redacted-replay",
+      "caseSchemaVersion": "redacted_replay_v1",
+      "dataPolicy": "redacted_only",
+      "runner": {
+        "type": "external_result",
+        "resultFileEnv": "HARNESS_EVAL_REDACTED_REPLAY_RESULT_FILE",
+        "maxBytes": 262144,
+        "maxAgeHours": 48,
+        "minCaseCount": 50
+      },
+      "source": {
+        "type": "external"
+      },
+      "thresholds": {
+        "passRate": { "min": 1 },
+        "failedCases": { "max": 0 },
+        "privacyViolations": { "max": 0 }
+      }
+    }
+  ]
+}

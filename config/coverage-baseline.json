@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "generatedWith": "c8@11.0.0",
+  "generatedWithNode": "20.x",
+  "include": [
+    "index.js",
+    "api/**/*.js",
+    "config/**/*.js",
+    "core/**/*.js",
+    "src/**/*.js",
+    "utils/**/*.js",
+    "web/**/*.js"
+  ],
+  "scopes": [
+    {
+      "name": "overall-production",
+      "selector": { "all": true },
+      "minimum": { "lines": 69, "statements": 69, "functions": 78, "branches": 61 }
+    },
+    {
+      "name": "web",
+      "selector": { "prefixes": ["web/"] },
+      "minimum": { "lines": 78, "statements": 78, "functions": 83, "branches": 79 }
+    },
+    {
+      "name": "runtime-v2-non-chunk",
+      "selector": {
+        "prefixes": ["src/runtime-v2/", "api/runtimeV2/"],
+        "excludeSuffixes": [".chunk.js"]
+      },
+      "minimum": { "lines": 74, "statements": 74, "functions": 63, "branches": 58 }
+    },
+    {
+      "name": "stable-boundaries",
+      "selector": {
+        "files": [
+          "web/auth.js",
+          "web/securityHeaders.js",
+          "web/sessionManager.js",
+          "utils/networkSafety.js",
+          "utils/requestTrace.js",
+          "utils/securityDiagnostics.js",
+          "utils/toolPolicy/skillArgs.js",
+          "api/runtimeV2/contracts.js",
+          "api/runtimeV2/state.js",
+          "api/runtimeV2/host/routePredicates.js"
+        ]
+      },
+      "minimum": { "lines": 84, "statements": 84, "functions": 80, "branches": 70 }
+    }
+  ]
+}

@@ -92,18 +92,6 @@ module.exports = (async () => {
 
     clearProjectCache();
 
-    const directChatPlanner = require('../core/directChatPlanner');
-    directChatPlanner.planDirectChat = async () => ({
-      shouldUseTools: false,
-      allowedToolNames: [],
-      allowedTools: [],
-      needsBackground: false,
-      executionPlan: {
-        mode: 'chat_only',
-        steps: []
-      }
-    });
-
     const routeFlowModule = require('../core/messageRouteFlow');
     const originalCreateMessageRouteFlow = routeFlowModule.createMessageRouteFlow;
     let releaseFirstDispatch = null;

@@ -7,8 +7,8 @@
  * - 提供 askAI 作为非 LangGraph 场景的兼容入口。
  * - 处理 Anthropic /v1/messages 这类不能直接走 agentGraph 的请求。
  * - 处理 Minecraft 专用模型覆盖这类需要独立 modelConfig 的请求。
- * - 提供 Plan-and-Solve、工具执行、流式/非流式回复、人性化改写等旧链路能力。
- * - 导出若干仍被其他模块复用的辅助函数，例如规划相关函数、buildVisionMessageContent、getLatestReasoning。
+ * - 提供工具执行、流式/非流式回复、人性化改写等兼容能力。
+ * - 导出仍被其他模块复用的辅助函数，例如 buildVisionMessageContent、getLatestReasoning。
  *
  * 现在不能做什么：
  * - 不是普通聊天的默认主入口；默认聊天主链路在 api/agentGraph.js。
@@ -116,21 +116,12 @@ const { appendDailyJournalEntry } = require('../../utils/dailyJournal');
 const { recordMemoryScope } = require('../../utils/memoryScopeIndex');
 const { isToolSchemaValidationError } = require('../../utils/modelCompat');
 const { getPolicy, enforceToolPolicy } = require('../../utils/toolPolicy');
-const { getPolicyDefinition } = require('../../core/routeProfiles');
-const { buildExecutablePlanFromLegacyPlan } = require('../../core/executablePlan');
-const { deriveSuccessCriteria, verifyExecutionResult, buildRepairPlan } = require('../../utils/agentLoop');
+const { executeAuthorizedToolCall: executeAuthorizedToolCallDefault } = require('../toolAuthorization');
+const { deriveSuccessCriteria } = require('../../utils/agentLoop');
 const agentRuntime = require('../../utils/agentRuntime');
 const {
   buildMainModelRequest
 } = require('../runtimeV2/model/shared');
-
-function getConfig() {
-  try {
-    return require('../../config');
-  } catch (_) {
-    return config;
-  }
-}
 
 function getAgentRuntime() {
   try {
@@ -146,29 +137,23 @@ const startTaskStep = (...args) => getAgentRuntime().startTaskStep(...args);
 const finishTaskStep = (...args) => getAgentRuntime().finishTaskStep(...args);
 const addTaskArtifact = (...args) => getAgentRuntime().addTaskArtifact(...args);
 const setTaskStage = (...args) => getAgentRuntime().setTaskStage(...args);
-let cachedVectorMemoryModule = undefined;
-
-function getVectorMemoryModule() {
-  if (cachedVectorMemoryModule !== undefined) return cachedVectorMemoryModule;
-  try {
-    cachedVectorMemoryModule = require('../../utils/vectorMemory');
-  } catch (error) {
-    cachedVectorMemoryModule = null;
-    if (error?.code !== 'MODULE_NOT_FOUND') throw error;
-    console.warn('[legacy/aiHost] vectorMemory unavailable:', error.message);
-  }
-  return cachedVectorMemoryModule;
-}
-
-function addMemoryItemSafe(...args) {
-  const vectorMemory = getVectorMemoryModule();
-  if (typeof vectorMemory?.addMemoryItem !== 'function') return null;
-  return vectorMemory.addMemoryItem(...args);
+async function addMemoryItemSafe(userId, text, type = 'fact', meta = {}, weight = 1) {
+  const { writeMemoryBatch } = require('../../utils/memory-v3');
+  const result = await writeMemoryBatch([{
+    userId,
+    text,
+    type,
+    weight,
+    source: meta.source,
+    sourceKind: meta.sourceKind,
+    status: meta.status,
+    confidence: meta.confidence,
+    importance: meta.importance,
+    meta
+  }], { phase: 'legacy_ai_host_write' });
+  return result.ids[0] || null;
 }
 const setTaskSuccessCriteria = (...args) => getAgentRuntime().setTaskSuccessCriteria(...args);
-const setTaskCheckpoint = (...args) => getAgentRuntime().setTaskCheckpoint(...args);
-const mergeWorkspace = (...args) => getAgentRuntime().mergeWorkspace(...args);
-const appendWorkspaceItem = (...args) => getAgentRuntime().appendWorkspaceItem(...args);
 const completeTask = (...args) => getAgentRuntime().completeTask(...args);
 const failTask = (...args) => getAgentRuntime().failTask(...args);
 
@@ -207,44 +192,6 @@ function pickRecentTopic(text) {
   return t.length > 18 ? `${t.slice(0, 18)}...` : t;
 }
 
-function shouldUsePlanAndSolve(question = '', customPrompt = null, imageUrl = null) {
-  if (!config.ENABLE_PLAN_SOLVE) return false;
-  if (customPrompt) return false;
-  if (imageUrl) return false;
-
-  const q = String(question || '').trim();
-  if (!q) return false;
-
-  // Use Unicode escapes to avoid encoding-related keyword corruption in source files.
-  const planningSignal = /(?:\u89c4\u5212|\u8ba1\u5212|\u65b9\u6848|\u6b65\u9aa4|\u62c6\u89e3|\u5bf9\u6bd4|\u5206\u6790|\u8bc4\u4f30|\u8bc1\u660e|\u6392\u67e5|\u8bca\u65ad|\u5982\u4f55|\u600e\u4e48|plan|roadmap|checklist|debug|investigate|compare|strategy|proposal|design|architecture|step\s*by\s*step|root\s*cause)/i;
-  if (planningSignal.test(q)) return true;
-
-  // Long or structurally complex prompts usually benefit from explicit planning.
-  if (q.length >= 100) return true;
-  if (/[\r\n]/.test(q) && /(?:^|\s)(?:\d+\.|[-*]|\u2460|\u2461|\u2462)/m.test(q)) return true;
-
-  const questionMarks = (q.match(/[?\uff1f]/g) || []).length;
-  if (questionMarks >= 2) return true;
-
-  return false;
-}
-
-// Route guidance should not disable planner mode. Only a true custom prompt should.
-function shouldUsePlanModeForRequest(question = '', options = {}) {
-  const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
-  if (routePolicyKey) {
-    const routeCapability = String(getPolicyDefinition(routePolicyKey)?.capability || '').trim().toLowerCase();
-    if (routeCapability === 'direct') return false;
-  }
-  const customPrompt = options && Object.prototype.hasOwnProperty.call(options, 'customPrompt')
-    ? options.customPrompt
-    : null;
-  const imageUrl = options && Object.prototype.hasOwnProperty.call(options, 'imageUrl')
-    ? options.imageUrl
-    : null;
-  return shouldUsePlanAndSolve(question, customPrompt, imageUrl);
-}
-
 function shouldUseStreamingReply(question = '', customPrompt = null, imageUrl = null, options = {}) {
   if (!config.AI_STREAM_ENABLED) return false;
   if (config.HUMANIZER_FORCE_NON_STREAM) return false;
@@ -252,12 +199,6 @@ function shouldUseStreamingReply(question = '', customPrompt = null, imageUrl = 
   if (options.disableStream) return false;
   if (options.modelConfig && typeof options.modelConfig === 'object') return false;
   if (imageUrl) return false;
-  if (shouldUsePlanModeForRequest(question, {
-    customPrompt,
-    imageUrl,
-    routePolicyKey: options?.routePolicyKey,
-    topRouteType: options?.topRouteType
-  })) return false;
   return true;
 }
 
@@ -316,57 +257,6 @@ function getTopP(overrides = null) {
   return Math.max(0, Math.min(1, n));
 }
 
-function getPlannerModelName(overrides = null) {
-  const currentConfig = getConfig();
-  const plannerModel = overrides && typeof overrides === 'object'
-    ? (overrides.plannerModel || overrides.model)
-    : '';
-  return String(plannerModel || currentConfig.PLAN_MODEL || currentConfig.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
-}
-
-function getPlannerTemperature(overrides = null) {
-  const overridden = overrides && typeof overrides === 'object'
-    ? (overrides.plannerTemperature ?? overrides.temperature)
-    : undefined;
-  if (overridden !== undefined && overridden !== null && overridden !== '') {
-    const n = Number(overridden);
-    if (!Number.isFinite(n)) return 0.2;
-    return Math.max(0, Math.min(2, n));
-  }
-
-  const raw = process.env.PLAN_TEMPERATURE;
-  const n = raw === undefined || raw === null || raw === '' ? 0.2 : Number(raw);
-  if (!Number.isFinite(n)) return 0.2;
-  return Math.max(0, Math.min(2, n));
-}
-
-function getPlannerApiBaseUrl(overrides = null) {
-  const currentConfig = getConfig();
-  const plannerApiBaseUrl = overrides && typeof overrides === 'object'
-    ? (overrides.plannerApiBaseUrl || overrides.apiBaseUrl)
-    : '';
-  return String(
-    plannerApiBaseUrl
-    || currentConfig.PASSIVE_AWARENESS_REPLY_API_BASE_URL
-    || currentConfig.PASSIVE_AWARENESS_API_BASE_URL
-    || currentConfig.API_BASE_URL
-    || ''
-  ).trim();
-}
-
-function getPlannerApiKey(overrides = null) {
-  const currentConfig = getConfig();
-  const plannerApiKey = overrides && typeof overrides === 'object'
-    ? (overrides.plannerApiKey || overrides.apiKey)
-    : '';
-  return String(
-    plannerApiKey
-    || currentConfig.PASSIVE_AWARENESS_REPLY_API_KEY
-    || currentConfig.PASSIVE_AWARENESS_API_KEY
-    || currentConfig.API_KEY
-    || ''
-  ).trim();
-}
 
 function getMaxTokens(defaultValue = getMainReplyDefaultMaxTokens(), overrides = null) {
   const raw = overrides && typeof overrides === 'object' && overrides.maxTokens !== undefined
@@ -501,58 +391,6 @@ function buildImageModelConfig(overrides = null, userId = '', options = {}) {
     imageApiBaseUrl,
     apiKey: imageApiKey,
     imageApiKey
-  };
-}
-
-function fallbackReplyPlan(question = '') {
-  const plan = {
-    goal: String(question || '').trim(),
-    need_tools: false,
-    steps: [{ id: 1, action: 'reply', args: {}, purpose: 'Reply directly' }]
-  };
-  return {
-    ...plan,
-    executablePlan: buildExecutablePlanFromLegacyPlan(plan, { source: 'legacy_fallback' })
-  };
-}
-
-function sanitizePlan(rawPlan, question = '') {
-  if (!rawPlan || !Array.isArray(rawPlan.steps)) {
-    return fallbackReplyPlan(question);
-  }
-
-  const maxSteps = Math.max(1, Math.min(8, Number(config.PLAN_MAX_STEPS) || 5));
-  const sanitizedSteps = rawPlan.steps
-    .slice(0, maxSteps)
-    .map((step, index) => ({
-      id: Number(step?.id) || (index + 1),
-      action: String(step?.action || '').trim(),
-      args: step && typeof step.args === 'object' ? step.args : {},
-      purpose: String(step?.purpose || '').trim()
-    }))
-    .filter((step) => {
-      if (!step.action) return false;
-      if (step.action === 'reply') return true;
-      return Boolean(getToolExecutors()[step.action]);
-    });
-
-  const steps = sanitizedSteps.length > 0
-    ? sanitizedSteps
-    : [{ id: 1, action: 'reply', args: {}, purpose: 'Reply directly' }];
-
-  const hasToolStep = steps.some((step) => step.action !== 'reply');
-
-  const plan = {
-    goal: String(rawPlan.goal || question),
-    need_tools: hasToolStep && Boolean(rawPlan.need_tools !== false),
-    steps
-  };
-  return {
-    ...plan,
-    executablePlan: buildExecutablePlanFromLegacyPlan(plan, {
-      policyKey: rawPlan.routePolicyKey || rawPlan.policyKey || '',
-      source: rawPlan.source || 'legacy_planner'
-    })
   };
 }
 
@@ -805,8 +643,7 @@ function buildConversationMessagesWithCompression(
     task_memory: normalizeArray(options.memoryContext?.segments?.taskMemory),
     group_memory: normalizeArray(options.memoryContext?.segments?.groupMemory),
     style_signals: normalizeArray(options.memoryContext?.segments?.styleSignals),
-    tool_evidence: normalizeArray(options.toolEvidenceMessages),
-    planner_artifacts: normalizeArray(options.plannerArtifactMessages)
+    tool_evidence: normalizeArray(options.toolEvidenceMessages)
   };
   const compactionPlan = buildContextCompactionPlan({
     segments,
@@ -1049,8 +886,82 @@ function isToolAllowed(toolName, context = {}) {
   return allowedSet.has(String(toolName || '').trim());
 }
 
+function buildLegacyAuthorizationActor(context = {}) {
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object'
+    ? context.routeMeta
+    : {};
+  const groupId = String(routeMeta.groupId || routeMeta.group_id || context.groupId || '').trim();
+  const chatType = String(
+    routeMeta.chatType || routeMeta.chat_type || context.chatType || (groupId ? 'group' : 'private')
+  ).trim().toLowerCase();
+  return {
+    userId: String(context.userId || '').trim(),
+    chatType,
+    groupId: chatType === 'group' ? groupId : ''
+  };
+}
+
+function buildLegacyAuthorizationInvocationKey(toolName = '', context = {}) {
+  const toolCallId = String(context.toolCallId || context.tool_call_id || '').trim();
+  if (toolCallId) return ['legacy', 'tool-call', toolCallId, toolName].join(':');
+  const stepId = String(context.planStepId || '').trim();
+  if (stepId) {
+    return [
+      'legacy',
+      String(context.taskId || context.requestId || context.userId || '').trim(),
+      stepId,
+      String(context.planRound || context.round || 1),
+      toolName
+    ].filter(Boolean).join(':');
+  }
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object'
+    ? context.routeMeta
+    : {};
+  const requestId = String(
+    context.requestId
+    || context.requestTrace?.requestId
+    || routeMeta.requestTrace?.requestId
+    || routeMeta.messageId
+    || routeMeta.message_id
+    || context.taskId
+    || ''
+  ).trim();
+  return requestId ? ['legacy', requestId, toolName].join(':') : '';
+}
+
+function buildLegacyToolContext(context = {}) {
+  return {
+    userId: String(context.userId || '').trim(),
+    routePolicyKey: String(context.routePolicyKey || '').trim(),
+    topRouteType: String(context.topRouteType || '').trim(),
+    routeMeta: context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {}
+  };
+}
+
+async function runLegacyAuthorizedTool({
+  toolName,
+  rawArgs,
+  normalizedArgs,
+  policy,
+  executor,
+  context
+}) {
+  const authorize = typeof context.executeAuthorizedToolCall === 'function'
+    ? context.executeAuthorizedToolCall
+    : executeAuthorizedToolCallDefault;
+  return authorize({
+    toolName,
+    rawArgs,
+    normalizedArgs,
+    policy,
+    actor: buildLegacyAuthorizationActor(context),
+    invocationKey: buildLegacyAuthorizationInvocationKey(toolName, context),
+    toolContext: buildLegacyToolContext(context),
+    executor
+  });
+}
+
 async function executeToolCall(toolName, rawArgs = {}, context = {}) {
-  const policy = getPolicy(toolName);
   const executor = getToolExecutors()[toolName];
   if (!isToolAllowed(toolName, context)) {
     throw new Error(`Tool not allowed: ${toolName}`);
@@ -1060,6 +971,7 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
   }
 
   const normalizedArgs = enforceToolPolicy(toolName, rawArgs, context);
+  const policy = getPolicy(toolName, normalizedArgs);
   if (toolName === 'memory_cli') {
     const decision = decideMemoryCliTurnAction(normalizedArgs.command, context.memoryCliTurn);
     if (!decision.ok) {
@@ -1092,14 +1004,19 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
       });
     }
     normalizedArgs.command = decision.preparedCommand || decision.parsed?.raw || normalizedArgs.command;
-    normalizedArgs.__context = {
-      userId: String(context.userId || '').trim(),
-      routePolicyKey: String(context.routePolicyKey || '').trim(),
-      topRouteType: String(context.topRouteType || '').trim(),
-      routeMeta: context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {}
-    };
     try {
-      const out = await executor(normalizedArgs);
+      const authorizationResult = await runLegacyAuthorizedTool({
+        toolName,
+        rawArgs,
+        normalizedArgs,
+        policy,
+        executor,
+        context
+      });
+      if (authorizationResult.status !== 'completed') {
+        return String(authorizationResult.result || authorizationResult.reason || 'Tool authorization denied');
+      }
+      const out = authorizationResult.result;
       const normalizedOut = typeof out === 'string' ? out : JSON.stringify(out);
       context.memoryCliTurn = updateMemoryCliTurnStateAfterResult(context.memoryCliTurn, decision.parsed, normalizedOut);
       console.log('[memory] memory_cli turn state updated', {
@@ -1127,24 +1044,25 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
     }
   }
 
-  // If this tool call comes from plan-mode execution, stitch the plan step id into the
-  // persisted task step id so debugging can be done with a single id namespace.
-  const planStepIdRaw = Object.prototype.hasOwnProperty.call(context, 'planStepId')
-    ? context.planStepId
-    : undefined;
-  const planRoundRaw = Object.prototype.hasOwnProperty.call(context, 'planRound')
-    ? context.planRound
-    : (Object.prototype.hasOwnProperty.call(context, 'round') ? context.round : undefined);
-  const planStepId = planStepIdRaw === undefined || planStepIdRaw === null ? '' : String(planStepIdRaw).trim();
-  const planRoundNum = Number(planRoundRaw);
-  const planRound = Number.isFinite(planRoundNum) ? Math.max(1, Math.floor(planRoundNum)) : null;
-  const plannedTaskStepId = planStepId
-    ? (planRound ? `plan_${planStepId}_r${planRound}` : `plan_${planStepId}`)
-    : '';
+  if (policy.confirmation !== 'none') {
+    const authorizationResult = await runLegacyAuthorizedTool({
+      toolName,
+      rawArgs,
+      normalizedArgs,
+      policy,
+      executor,
+      context
+    });
+    return typeof authorizationResult.result === 'string'
+      ? authorizationResult.result
+      : JSON.stringify(authorizationResult.result || {
+          status: authorizationResult.status,
+          reason: authorizationResult.reason
+        });
+  }
 
   const stepId = context.taskId
     ? startTaskStep(context.taskId, {
-        ...(plannedTaskStepId ? { id: plannedTaskStepId } : {}),
         kind: 'tool',
         name: toolName,
         purpose: context.purpose || '',
@@ -1169,7 +1087,15 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
   }
 
   try {
-    const out = await executor(normalizedArgs);
+    const authorizationResult = await runLegacyAuthorizedTool({
+      toolName,
+      rawArgs,
+      normalizedArgs,
+      policy,
+      executor,
+      context
+    });
+    const out = authorizationResult.result;
     const normalizedOut = typeof out === 'string' ? out : JSON.stringify(out);
 
     if (context.taskId && stepId) {
@@ -1198,332 +1124,6 @@ async function executeToolCall(toolName, rawArgs = {}, context = {}) {
     }
     throw error;
   }
-}
-
-async function buildPlan(question, dynamicPrompt, modelConfig = null) {
-  const plannerPrompt = [
-    'You are a task planner. Break the user request into executable steps.',
-    'Output JSON only.',
-    '{',
-    '  "goal": "string",',
-    '  "need_tools": true,',
-    '  "steps": [',
-    '    { "id": 1, "action": "tool_name_or_reply", "args": {}, "purpose": "string" }',
-    '  ]',
-    '}',
-    'Requirements:',
-    '1) at most 5 steps',
-    '2) action must come from the available tool names when a tool is needed',
-    '3) use action "reply" when no tool is needed',
-    '4) do not reveal reasoning, only return JSON'
-  ].join('\n');
-
-  const toolNames = getVisibleToolNames(modelConfig || {});
-  // Unit-test anchor: keep the no-arg calls visible in source for stability checks.
-  // (The actual request uses the modelConfig-aware calls below.)
-  if (false) void ({ model: getPlannerModelName(), temperature: getPlannerTemperature() });
-  const resolvedConfig = modelConfig && typeof modelConfig === 'object' ? modelConfig : {};
-  const resp = await postWithRetry(
-    ensureChatCompletionsUrl(getPlannerApiBaseUrl(resolvedConfig)),
-    {
-      model: getPlannerModelName(resolvedConfig),
-      temperature: getPlannerTemperature(resolvedConfig),
-      messages: [
-        { role: 'system', content: plannerPrompt },
-        { role: 'system', content: `Available tools: ${toolNames.join(', ')}` },
-        { role: 'system', content: `Role context:
-${dynamicPrompt.slice(0, 1200)}` },
-        { role: 'user', content: question }
-      ],
-      max_tokens: getMaxTokens(1200, resolvedConfig),
-      stream: false
-    },
-    getRetries(1, resolvedConfig),
-    getPlannerApiKey(resolvedConfig)
-  );
-
-  const msg = extractMessageContent(resp);
-  const plan = extractJsonSafely(normalizeTextContent(msg?.content));
-  return sanitizePlan(plan, question);
-}
-
-async function executePlan(plan, context = {}) {
-  const currentConfig = getConfig();
-  const logs = [];
-  const maxSteps = Math.max(1, Math.min(8, Number(currentConfig.PLAN_MAX_STEPS) || 5));
-  const timeoutMs = Math.max(3000, Number(currentConfig.PLAN_TIMEOUT_MS) || 12000);
-  const steps = Array.isArray(plan?.steps) ? plan.steps.slice(0, maxSteps) : [];
-
-  for (const step of steps) {
-    const action = String(step.action || '').trim();
-    const args = step.args && typeof step.args === 'object' ? step.args : {};
-    const row = {
-      id: step.id,
-      action,
-      args,
-      purpose: step.purpose || '',
-      ok: false,
-      result: '',
-      error: ''
-    };
-
-    if (!action || action === 'reply') {
-      row.ok = true;
-      row.result = 'No tool execution required for this step';
-      logs.push(row);
-      continue;
-    }
-
-    if (!getToolExecutors()[action]) {
-      row.error = `Unknown tool: ${action}`;
-      logs.push(row);
-      continue;
-    }
-
-    let taskStepId = '';
-    try {
-      const toolPromise = executeToolCall(action, args, {
-        ...context,
-        purpose: row.purpose,
-        planStepId: row.id,
-        planRound: context.round,
-        onTaskStepStarted: (startedStepId) => {
-          taskStepId = String(startedStepId || '').trim();
-        }
-      });
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error(`Tool timeout (${timeoutMs}ms)`)), timeoutMs);
-      });
-
-      const out = await Promise.race([toolPromise, timeoutPromise]);
-      row.ok = true;
-      row.result = typeof out === 'string' ? out : JSON.stringify(out);
-
-      if (context.taskId) {
-        appendWorkspaceItem(context.taskId, 'completed_steps', {
-          id: row.id,
-          action: row.action,
-          purpose: row.purpose
-        }, 40);
-      }
-    } catch (e) {
-      row.error = e.message || 'tool execution failed';
-      if (context.taskId) {
-        appendWorkspaceItem(context.taskId, 'failed_steps', {
-          id: row.id,
-          action: row.action,
-          purpose: row.purpose,
-          error: row.error
-        }, 40);
-
-        // Timeout fallback should mark the task step as failed immediately.
-        // Late tool completion cannot override this because finishTaskStep is idempotent.
-        if (/^Tool timeout \(/i.test(row.error) && taskStepId) {
-          const timeoutFinished = finishTaskStep(context.taskId, taskStepId, {
-            ok: false,
-            error: row.error
-          });
-          if (timeoutFinished) {
-            appendTaskLog(context.taskId, {
-              level: 'warn',
-              type: 'tool_timeout',
-              message: `Tool ${row.action} timed out`,
-              data: {
-                plan_step_id: row.id,
-                task_step_id: taskStepId,
-                error: row.error
-              }
-            });
-          }
-        }
-      }
-    }
-
-    logs.push(row);
-  }
-
-  return logs;
-}
-
-async function executePlanLoop(question, dynamicPrompt, initialPlan, context = {}) {
-  const maxRounds = Math.max(1, Math.min(3, Number(config.AGENT_MAX_ROUNDS) || 3));
-  const rounds = [];
-  let currentPlan = initialPlan;
-  let verification = null;
-
-  for (let round = 1; round <= maxRounds && currentPlan; round += 1) {
-    if (context.taskId) {
-      setTaskStage(context.taskId, round === 1 ? 'executing' : 'replanning', {
-        round,
-        plan_goal: currentPlan.goal || question
-      });
-      setTaskCheckpoint(context.taskId, {
-        round,
-        stage: round === 1 ? 'executing' : 'replanning'
-      });
-      addTaskArtifact(context.taskId, {
-        type: round === 1 ? 'plan' : 'repair_plan',
-        label: `plan_round_${round}`,
-        content: currentPlan
-      });
-    }
-
-    const execLogs = await executePlan(currentPlan, { ...context, round, dynamicPrompt });
-    verification = verifyExecutionResult({
-      question,
-      plan: currentPlan,
-      execLogs,
-      round,
-      maxRounds
-    });
-
-    rounds.push({ round, plan: currentPlan, execLogs, verification });
-
-    if (context.taskId) {
-      setTaskStage(context.taskId, 'verifying', {
-        round,
-        done: verification.done,
-        confidence: verification.confidence
-      });
-      setTaskCheckpoint(context.taskId, {
-        round,
-        verification: {
-          done: verification.done,
-          confidence: verification.confidence,
-          missing: verification.missing
-        }
-      });
-      mergeWorkspace(context.taskId, {
-        candidate_next_actions: verification.next_action ? [verification.next_action] : [],
-        evidence: verification.evidence,
-        pending_facts: verification.missing
-      });
-      addTaskArtifact(context.taskId, {
-        type: 'verification',
-        label: `verification_round_${round}`,
-        content: verification
-      });
-      appendTaskLog(context.taskId, {
-        type: 'verification',
-        message: `Verification round ${round}`,
-        data: {
-          done: verification.done,
-          confidence: verification.confidence,
-          missing: verification.missing
-        }
-      });
-    }
-
-    if (verification.done) {
-      return {
-        rounds,
-        finalPlan: currentPlan,
-        finalExecLogs: execLogs,
-        verification
-      };
-    }
-
-    currentPlan = buildRepairPlan({ previousPlan: currentPlan, verification, round });
-    if (!currentPlan) break;
-  }
-
-  const lastRound = rounds[rounds.length - 1] || {
-    plan: initialPlan,
-    execLogs: [],
-    verification: verification || verifyExecutionResult({ question, plan: initialPlan, execLogs: [] })
-  };
-
-  return {
-    rounds,
-    finalPlan: lastRound.plan,
-    finalExecLogs: lastRound.execLogs,
-    verification: lastRound.verification
-  };
-}
-
-async function synthesizeFromPlan(question, dynamicPrompt, plan, execLogs, verification = null, modelConfig = null, options = null) {
-  const synthesisPrompt = [
-    'You must write the final answer from the plan, execution logs, and verification result.',
-    'Requirements:',
-    '1) follow the role prompt',
-    '2) do not expose hidden reasoning or internal chain-of-thought',
-    '3) if evidence is weak or a tool failed, clearly mark uncertainty',
-    '4) reply directly and keep it actionable',
-    '5) prefer evidence-backed claims over speculation',
-    '6) if a [ContinuityState] system message is present, treat it as the authoritative current-thread carry-over context',
-    '7) continue from that continuity context instead of claiming missing context unless the continuity state itself is empty',
-    '8) do not say this is the first conversation, do not say you lack prior context, and do not ask the user to restate prior steps when [ContinuityState] is present',
-    '9) do not mention hidden tools, memory probes, search commands, or internal retrieval steps'
-  ].join('\n');
-
-  const normalizedOptions = options && typeof options === 'object' ? options : {};
-  const extraSystemMessages = Array.isArray(normalizedOptions.systemMessages)
-    ? normalizedOptions.systemMessages
-      .filter((item) => item && typeof item === 'object')
-      .map((item) => ({
-        role: String(item.role || 'system').trim() || 'system',
-        content: item.content
-      }))
-    : [];
-
-  const baseMessages = [
-    { role: 'system', content: dynamicPrompt },
-    ...extraSystemMessages,
-    { role: 'system', content: HUMANIZER_SYSTEM_PROMPT },
-    { role: 'system', content: synthesisPrompt },
-    {
-      role: 'user',
-      content: [
-        `User question: ${question || ''}`,
-        `Plan (JSON): ${JSON.stringify(plan).slice(0, 4000)}`,
-        `Execution logs (JSON): ${JSON.stringify(execLogs).slice(0, 8000)}`,
-        `Verification (JSON): ${JSON.stringify(verification || {}).slice(0, 4000)}`
-      ].join('\n\n')
-    }
-  ];
-
-  const resp = await withMainModelFallback(async (resolvedConfig) => {
-    const mainUrl = ensureChatCompletionsUrl(getApiBaseUrl(resolvedConfig));
-    const requestOnce = (messages) => postWithRetry(
-      mainUrl,
-      {
-        model: getModelName(resolvedConfig),
-        temperature: getTemperature(resolvedConfig),
-        top_p: getTopP(resolvedConfig),
-        messages,
-        max_tokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
-        stream: false
-      },
-      getRetries(1, resolvedConfig),
-      getApiKey(resolvedConfig)
-    );
-
-    try {
-      return await requestOnce(baseMessages);
-    } catch (error) {
-      if (!isContextOverflowError(error)) throw error;
-      const retryPayload = buildReactiveRetryMessages(baseMessages, {
-        ...normalizedOptions,
-        source: String(normalizedOptions.source || 'legacy_plan_synthesis').trim() || 'legacy_plan_synthesis',
-        routeMeta: normalizedOptions.routeMeta
-      }, resolvedConfig);
-      try {
-        return await requestOnce(retryPayload.messages);
-      } catch (retryError) {
-        if (isContextOverflowError(retryError)) {
-          throw wrapContextHardBlockError(retryError, retryPayload.compactionPlan);
-        }
-        throw retryError;
-      }
-    }
-  }, modelConfig, '', { routeMeta: normalizedOptions.routeMeta });
-
-  const msg = extractMessageContent(resp);
-  return finalizeReplyText(msg?.content, 'I could not organize the result just now. Please try again.', {
-    question,
-    dynamicPrompt,
-    modelConfig
-  });
 }
 
 function appendChatHistory(userId, userContent, assistantContent, userInfo = {}, options = {}) {
@@ -1680,6 +1280,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
       try {
         toolResult = await executeToolCall(fn, args, {
           ...context,
+          toolCallId: toolCall?.id,
           purpose: 'model requested tool call'
         });
       } catch (e) {
@@ -1770,7 +1371,7 @@ async function askAI(question, userInfo, userId, customPrompt = null, imageUrl =
       sessionKey
     });
     if (!bridgeRestore.restored && shouldRehydrateShortTermMemory(question, userId, customPrompt, options)) {
-      rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question, userInfo, {
+      await rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question, userInfo, {
         chatHistory,
         shortTermMemory,
         routeMeta,
@@ -1838,14 +1439,8 @@ async function askAI(question, userInfo, userId, customPrompt = null, imageUrl =
     ? buildImageModelConfig(modelConfig, userId, { routeMeta })
     : modelConfig;
   const routePrompt = String(options.routePrompt || '').trim() || null;
-  const usePlanMode = shouldUsePlanModeForRequest(question, {
-    customPrompt,
-    imageUrl,
-    routePolicyKey: options?.routePolicyKey,
-    topRouteType: options?.topRouteType
-  });
   const runContext = createRunContext(question, userId, {
-    kind: usePlanMode ? 'plan_run' : 'chat_run',
+    kind: 'chat_run',
     source: 'chat',
     imageUrl,
     customPrompt
@@ -1860,71 +1455,6 @@ async function askAI(question, userInfo, userId, customPrompt = null, imageUrl =
     ...options,
     memoryCliTurn: runContext.memoryCliTurn
   });
-
-  if (usePlanMode) {
-    try {
-      setTaskStage(runContext.taskId, 'planning', { source: 'plan_mode' });
-      const planModelConfig = modelConfig ? { ...modelConfig, allowedTools: runContext.allowedTools } : { allowedTools: runContext.allowedTools };
-      const plan = await buildPlan(question || '', dynamicPrompt, planModelConfig);
-      const successCriteria = deriveSuccessCriteria(question || '', plan);
-      setTaskSuccessCriteria(runContext.taskId, successCriteria);
-      appendTaskLog(runContext.taskId, {
-        type: 'plan_built',
-        message: 'Plan built',
-        data: { step_count: Array.isArray(plan.steps) ? plan.steps.length : 0 }
-      });
-      addTaskArtifact(runContext.taskId, { type: 'plan', label: 'plan', content: plan });
-
-      const loopResult = await executePlanLoop(question || '', dynamicPrompt, plan, {
-        ...runContext,
-        dynamicPrompt
-      });
-      const rawReply = await synthesizeFromPlan(
-        question || '',
-        dynamicPrompt,
-        loopResult.finalPlan,
-        loopResult.finalExecLogs,
-        loopResult.verification,
-        modelConfig
-      );
-
-      mergeWorkspace(runContext.taskId, {
-        drafts: [{ type: 'final_reply', content: String(rawReply || '').slice(0, 4000) }]
-      });
-      persistConversation(userId, question || '', rawReply, pickRecentTopic(question), userInfo, {
-        customPrompt,
-        routePolicyKey: options.routePolicyKey,
-        topRouteType: options.topRouteType,
-        reviewMode: options.reviewMode,
-        routeMeta: options.routeMeta
-      });
-      appendDailyJournalIfNeeded(question, rawReply, userInfo, userId, customPrompt, options);
-
-      if (loopResult.verification && !loopResult.verification.done) {
-        failTask(runContext.taskId, loopResult.verification.reason || 'verification failed', {
-          rounds: loopResult.rounds.length,
-          verification: loopResult.verification
-        });
-      } else {
-        completeTask(runContext.taskId, {
-          reply: rawReply.slice(0, 4000),
-          mode: 'plan',
-          verification: loopResult.verification
-        });
-      }
-
-      return rawReply;
-    } catch (e) {
-      appendTaskLog(runContext.taskId, {
-        level: 'error',
-        type: 'plan_error',
-        message: 'Plan-and-solve failed',
-        data: { error: e.message || 'plan failed' }
-      });
-      failTask(runContext.taskId, e.message || 'plan failed');
-      console.error('Plan-and-solve failed, fallback to default chain:', e.message);
-    }
-  }
 
   const messageContent = imageUrl
     ? buildVisionMessageContent(question || '', imageUrl)
@@ -2164,7 +1694,7 @@ function inferExtractorTier(type, confidence = 0.8) {
   return 'B';
 }
 
-function persistLearnedMemories(userId, type, values, confidence = 0.8) {
+async function persistLearnedMemories(userId, type, values, confidence = 0.8) {
   for (const raw of values) {
     const value = String(raw || '').trim();
     if (!shouldPersistMemoryCandidate(type, value, confidence)) continue;
@@ -2172,37 +1702,37 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8) {
     const meta = { source: 'extractor', confidence, importanceTier };
 
     if (type === 'fact') {
-      addMemoryItemSafe(userId, value, 'fact', meta, 1.15);
+      await addMemoryItemSafe(userId, value, 'fact', meta, 1.15);
       addUserFact(userId, value, 30);
       continue;
     }
 
     if (type === 'like') {
-      addMemoryItemSafe(userId, `likes: ${value}`, 'like', meta, 1.05);
+      await addMemoryItemSafe(userId, `likes: ${value}`, 'like', meta, 1.05);
       addProfileItem(userId, 'likes', value, 20);
       continue;
     }
 
     if (type === 'dislike') {
-      addMemoryItemSafe(userId, `dislikes: ${value}`, 'dislike', meta, 1.05);
+      await addMemoryItemSafe(userId, `dislikes: ${value}`, 'dislike', meta, 1.05);
       addProfileItem(userId, 'dislikes', value, 20);
       continue;
     }
 
     if (type === 'goal') {
-      addMemoryItemSafe(userId, `goal: ${value}`, 'goal', meta, 1.2);
+      await addMemoryItemSafe(userId, `goal: ${value}`, 'goal', meta, 1.2);
       addProfileItem(userId, 'goals', value, 20);
       continue;
     }
 
     if (type === 'impression') {
-      addMemoryItemSafe(userId, `impression: ${value}`, 'impression', meta, 1.35);
+      await addMemoryItemSafe(userId, `impression: ${value}`, 'impression', meta, 1.35);
       setUserImpression(userId, value);
       continue;
     }
 
     if (type === 'topic') {
-      addMemoryItemSafe(userId, `recent topic: ${value}`, 'topic', meta, 0.95);
+      await addMemoryItemSafe(userId, `recent topic: ${value}`, 'topic', meta, 0.95);
       addProfileItem(userId, 'recent_topics', value, 12);
     }
   }
@@ -2261,12 +1791,12 @@ Rules:
     const topics = Array.isArray(obj.topics) ? obj.topics : [];
     const confidence = Number(obj.confidence || 0.8) || 0.8;
 
-    persistLearnedMemories(userId, 'fact', facts, confidence);
-    persistLearnedMemories(userId, 'like', likes, confidence);
-    persistLearnedMemories(userId, 'dislike', dislikes, confidence);
-    persistLearnedMemories(userId, 'goal', goals, confidence);
-    persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82));
-    persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9));
+    await persistLearnedMemories(userId, 'fact', facts, confidence);
+    await persistLearnedMemories(userId, 'like', likes, confidence);
+    await persistLearnedMemories(userId, 'dislike', dislikes, confidence);
+    await persistLearnedMemories(userId, 'goal', goals, confidence);
+    await persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82));
+    await persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9));
   } catch (e) {
     console.error('memory extraction failed:', e.message);
   }
@@ -2279,18 +1809,8 @@ module.exports = {
   getLatestReasoning,
   buildVisionMessageContent,
   shouldUseStreamingReply,
-  shouldUsePlanModeForRequest,
-  getPlannerModelName,
-  getPlannerTemperature,
-  getPlannerApiBaseUrl,
-  getPlannerApiKey,
-  fallbackReplyPlan,
-  sanitizePlan,
-  buildPlan,
   buildDynamicPrompt,
-  executePlan,
-  executePlanLoop,
-  synthesizeFromPlan,
+  executeToolCall,
   requestStreamingReply,
   finalizeStreamingReplyWithHumanizer,
   requestNonStreamingReply,

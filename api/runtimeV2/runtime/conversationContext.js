@@ -51,29 +51,17 @@ function createConversationContextHelpers(deps = {}) {
     config,
     normalizeToolNames,
     filterAllowedToolsForMemoryCliTurn,
-    mergeAllowedToolsWithMemoryCli,
-    isPlannerSingleAuthorityEnabled,
-    getRouteToolPlanner,
     resolveModelTokenLimit,
     buildSecuritySystemPrompt
   } = deps;
 
   function computeEffectiveAllowedTools(request = {}, memoryCliTurn = null) {
-    if (isPlannerSingleAuthorityEnabled()) {
-      const planner = getRouteToolPlanner(request.routeMeta);
-      const plannedTools = normalizeToolNames(
-        Array.isArray(planner?.allowedToolNames) ? planner.allowedToolNames : []
-      );
-      const filteredPlannedTools = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED
-        ? plannedTools
-        : plannedTools.filter((toolName) => toolName !== 'memory_cli');
-      return filterAllowedToolsForMemoryCliTurn(filteredPlannedTools, memoryCliTurn);
-    }
-    return mergeAllowedToolsWithMemoryCli(request.allowedTools, {
-      ...request,
-      disableTools: !request.allowTools,
-      memoryCliTurn
-    });
+    if (request.allowTools === false) return [];
+    const routeAllowedTools = normalizeToolNames(request.allowedTools);
+    const enabledTools = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED
+      ? routeAllowedTools
+      : routeAllowedTools.filter((toolName) => toolName !== 'memory_cli');
+    return filterAllowedToolsForMemoryCliTurn(enabledTools, memoryCliTurn);
   }
 
   function resolveMainConversationModelName(request = {}) {
@@ -94,7 +82,7 @@ function createConversationContextHelpers(deps = {}) {
     if (!config.CONTINUITY_STATE_PROMPT_ENABLED) return null;
     const text = String(state.memory?.continuityState?.text || '').trim();
     if (!text) return null;
-    return { role: 'system', content: text };
+    return { role: 'assistant', content: wrapUntrustedPromptContent(text) };
   }
 
   function buildSilentContinuityProbeSystemMessage(state) {
@@ -131,13 +119,10 @@ function createConversationContextHelpers(deps = {}) {
     return kept.join('\n').trim();
   }
 
-  function mapBlocksToMessages(blocks = [], role = 'system') {
+  function mapBlocksToMessages(blocks = []) {
     return normalizeArray(blocks)
       .filter((item) => item && typeof item === 'object')
-      .map((item) => ({
-        role,
-        content: String(item.content || '').trim()
-      }))
+      .map(mapPromptBlockToMessage)
       .filter((item) => hasMessageContent(item));
   }
 
@@ -172,11 +157,8 @@ function createConversationContextHelpers(deps = {}) {
     return normalizeArray(blocks)
       .filter((item) => item && typeof item === 'object')
       .map((item) => {
-        const base = {
-          role: 'system',
-          content: String(item.content || '').trim()
-        };
-        return shouldCacheStableSystemBlock(item)
+        const base = mapPromptBlockToMessage(item);
+        return base.role === 'system' && shouldCacheStableSystemBlock(item)
           ? attachCacheControlToMessage(base, ANTHROPIC_COMPATIBLE_CACHE_CONTROL)
           : base;
       })
@@ -186,10 +168,7 @@ function createConversationContextHelpers(deps = {}) {
   function mapDynamicContextBlocksToMessages(blocks = []) {
     return normalizeArray(blocks)
       .filter((item) => item && typeof item === 'object')
-      .map((item) => ({
-        role: 'system',
-        content: String(item.content || '').trim()
-      }))
+      .map(mapPromptBlockToMessage)
       .filter((item) => hasMessageContent(item));
   }
 
@@ -279,14 +258,17 @@ function createConversationContextHelpers(deps = {}) {
       && dynamicContextBlocks.length === 0
       && (!stableBlockMessages.length || dynamicPromptHasContextMarker(dynamicPrompt))
     )
-      ? [{ role: 'system', content: dynamicPrompt }]
+      ? [{ role: 'assistant', content: wrapUntrustedPromptContent(dynamicPrompt) }]
       : [];
     return [
       ...stableBlockMessages,
       ...((continuityMessage && (forceIncludeContinuity || enabledDynamicIds.has('continuity_state'))) ? [continuityMessage] : []),
       ...(continuityProbePolicyMessage ? [continuityProbePolicyMessage] : []),
       ...((request.routePrompt && !isReviewRoute) ? [{ role: 'system', content: request.routePrompt }] : []),
-      ...(state.memory?.globalToolEvidence ? [{ role: 'system', content: state.memory.globalToolEvidence }] : []),
+      ...(state.memory?.globalToolEvidence ? [{
+        role: 'assistant',
+        content: wrapUntrustedPromptContent(state.memory.globalToolEvidence)
+      }] : []),
       ...dynamicBlockMessages,
       ...fallbackDynamicMessages
     ];
@@ -308,3 +290,7 @@ function createConversationContextHelpers(deps = {}) {
 module.exports = {
   createConversationContextHelpers
 };
+const {
+  mapPromptBlockToMessage,
+  wrapUntrustedPromptContent
+} = require('../../../utils/promptSecurity');

@@ -3,7 +3,7 @@ const {
   clampText,
   normalizeText
 } = require('./helpers');
-const { shouldUseRemoteEmbedding, requestEmbedding } = require('../vectorMemory');
+const { shouldUseRemoteEmbedding, requestEmbedding } = require('../memoryEmbedding');
 const { loadEmbeddingIndex } = require('./embeddingIndex');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
 const {

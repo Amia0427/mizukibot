@@ -144,6 +144,7 @@ module.exports = (async () => {
         if (!previous.has(listener)) process.removeListener(eventName, listener);
       }
     }
+    require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     restoreEnv(snapshot);
     clearProjectCache();
     fs.rmSync(tempRoot, { recursive: true, force: true });

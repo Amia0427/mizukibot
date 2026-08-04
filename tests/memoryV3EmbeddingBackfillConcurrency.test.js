@@ -42,10 +42,10 @@ module.exports = (async () => {
     embeddingIndex.__setEmbeddingBackfillDepsForTests({
       shouldUseRemoteEmbedding: () => true,
       collectEmbeddingBackfillNodes: () => [
-        { id: 'n1', text: 'a', userId: 'u' },
-        { id: 'n2', text: 'b', userId: 'u' },
-        { id: 'n3', text: 'c', userId: 'u' },
-        { id: 'n4', text: 'd', userId: 'u' }
+        { id: 'n1', text: 'a', userId: 'u', type: 'fact', status: 'active', confidence: 0.9, evidenceTier: 'strict' },
+        { id: 'n2', text: 'b', userId: 'u', type: 'fact', status: 'active', confidence: 0.9, evidenceTier: 'strict' },
+        { id: 'n3', text: 'c', userId: 'u', type: 'fact', status: 'active', confidence: 0.9, evidenceTier: 'strict' },
+        { id: 'n4', text: 'd', userId: 'u', type: 'fact', status: 'active', confidence: 0.9, evidenceTier: 'strict' }
       ],
       requestEmbedding: async () => {
         active += 1;

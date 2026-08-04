@@ -238,3 +238,11 @@ Prompt 从普通系统提示词演进到 manifest、persona worldbook、runtime 
 提交 `4216032` 修复分享链接读取完成后主回复请求返回 400：运行时生成的 `shared-link:<contentId>` 被拼入工具调用 ID，冒号不满足 Anthropic 的字符约束。请求整形层现仅对非法 ID 做稳定 SHA-256 摘要映射，同一原始 ID 在 assistant `tool_use` 与 user `tool_result` 两侧得到相同合规值，原有合法 ID 保持不变。
 
 验收结果：非法 ID 合规性、两侧关联一致性及合法 ID 保持测试通过，现有 provider 请求测试、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、暂存区秘密扫描和 diff check 通过。`npm test` 受工作树中其他代理尚未提交的 QQ 卡片/快速回复改动影响失败，本修复未覆盖这些文件；本小目标已完成，未推送远端。
+
+## QQ 卡片陪伴式上下文（2026-07-26 11:23 +08:00）
+
+提交 `2b143a7` 在既有三平台 URL 提取和 `read_shared_link` 能力旁补齐 QQ 卡片语义层，没有重写网易云、B站、小红书链接解析。新闻、音乐、小程序和邀请卡只保留固定白名单字段，并以 `cardContexts/cardOnly` 贯穿连续消息、入站上下文、路由和主回复；`qqCardUrls`、`[分享链接]`、群聊被动门禁保持兼容。
+
+规划规则收敛为：私聊纯单卡或带明确查看/总结/评价/比较请求的单卡使用现有 `web_fetch`，2–3 张按 `qqCardUrls` 对应顺序并行读取，超过 3 张要求收窄；普通分享不访问网络。normal fast 对有 URL 和无 URL 卡片都退出，无 URL 邀请卡只在主动回复门禁之后使用内部 `[分享卡片]`；主回复未拿到正文证据时不得声称已经看完或听完，passive 感知不注入卡片信息。
+
+验收结果：卡片专项与连续消息、planner、route execution、normal fast、perception、handler 相邻回归通过；`npm run check:prompts`、`npm run lint`、`npm run typecheck`、`npm test`、`npm run smoke:napcat-ingress` 全部通过。真实 QQ 客户端的网易云/B站/小红书单卡、卡片附言、双卡比较和群聊无 @ 场景未人工发送，外部验收保持未验证；自动化小目标完成，未推送远端。

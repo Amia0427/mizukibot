@@ -1,0 +1,314 @@
+'use strict';
+
+const { getAffinitySettings, estimateTokens, trimTextByTokenBudget } = require('../../../utils/contextBudget');
+const { buildDynamicFewShotPrompt } = require('../../../utils/fewShotPrompts');
+const { resolveMainReplyPromptMode, shouldBuildDynamicFewShot } = require('../../../utils/mainReplyPromptMode');
+const { resolveChatSurface } = require('../../../utils/chatLivenessContext');
+const continuity = require('./continuity');
+const memory = require('./memory');
+const { normalizeDynamicPromptPlan } = require('./plan');
+const {
+  buildGroupDirectChatStyleGuardPrompt,
+  createPromptAssemblyTimingCollector,
+  getRouteMetaGroupId,
+  isGroupDirectChatRoute,
+  recordMemoryContextTimingDetails
+} = require('./route-timing');
+const { resolveLiveStateContextFromOptions, resolveLiveStateMetaFromOptions } = require('./support');
+const { normalizeArray, normalizeText } = require('./normalization');
+
+function buildPersonaModuleCandidatesAsync(...args) {
+  return require('../../../utils/personaModules').buildPersonaModuleCandidatesAsync(...args);
+}
+
+function selectPersonaModules(...args) {
+  return require('../../../utils/personaModules').selectPersonaModules(...args);
+}
+
+async function collectPromptInputs(userInfo, userId, question, customPrompt = null, options = {}) {
+  const timing = createPromptAssemblyTimingCollector(options.__promptAssemblyTiming);
+  const collectStage = timing.start('collectPromptInputs', { category: 'collect', readOnly: true });
+  const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const mainReplyPromptMode = resolveMainReplyPromptMode(options);
+  const dynamicPromptPlan = normalizeDynamicPromptPlan(options);
+  const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
+  const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const surface = resolveChatSurface({
+    routeMeta,
+    topRouteType,
+    routePolicyKey,
+    chatType: options.chatType || options.chat_type
+  });
+  const rawMemosRecall = memory.resolveMemosRecallObject(options, routeMeta, null);
+  const affinity = options.affinity && typeof options.affinity === 'object'
+    ? options.affinity
+    : getAffinitySettings(userInfo, { userId });
+  const sharedShortTermContext = options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
+    ? options.sharedShortTermContext
+    : timing.measureSync('short_term_continuity', () => require('../../../utils/shortTermMemory').buildSharedShortTermContextMessages(userId, userInfo, {
+        chatHistory: options.chatHistory,
+        shortTermMemory: options.shortTermMemory,
+        routeMeta,
+        sessionKey: options.sessionKey,
+        routePolicyKey,
+        topRouteType,
+        question
+      }), {
+        category: 'collect',
+        source: 'utils/shortTermMemory.buildSharedShortTermContextMessages',
+        readOnly: true
+      });
+  const personaModuleContext = {
+    question,
+    routePrompt: options.routePrompt,
+    routeMeta,
+    directedContext: routeMeta.directedContext,
+    continuitySignals: options?.continuitySignals,
+    personaPhase: routeMeta.personaPhase || '',
+    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+    sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+    userId,
+    senderId: routeMeta.senderId || routeMeta.sender_id || userId,
+    groupId: routeMeta.groupId || routeMeta.group_id || '',
+    isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
+    maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
+    worldbookLimit: options.worldbookLimit,
+    worldbookLexicalLimit: options.worldbookLexicalLimit,
+    worldbookSemanticLimit: options.worldbookSemanticLimit,
+    worldbookEmbeddingHotPath: options.worldbookEmbeddingHotPath,
+    worldbookSessionReadOnly: options.worldbookSessionReadOnly === true || options.readOnly === true,
+    worldbookSessionConsume: options.worldbookSessionConsume,
+    mainReplyPromptMode
+  };
+  const providedPersonaModuleCandidates = Array.isArray(options.personaModuleCandidates)
+    ? options.personaModuleCandidates
+    : null;
+  const personaModuleCandidatesPromise = providedPersonaModuleCandidates
+    ? Promise.resolve(providedPersonaModuleCandidates)
+    : timing.measureAsync('persona_worldbook', () => buildPersonaModuleCandidatesAsync(personaModuleContext), {
+        category: 'collect',
+        source: 'utils/personaModules.buildPersonaModuleCandidatesAsync',
+        readOnly: true,
+        includes: ['persona_modules', 'worldbook']
+      }).catch((error) => ({ __personaModuleCandidatesError: error }));
+  if (providedPersonaModuleCandidates) {
+    timing.record('persona_worldbook', {
+      category: 'collect',
+      source: 'provided_options.personaModuleCandidates',
+      status: 'provided',
+      readOnly: true,
+      includes: ['persona_modules', 'worldbook'],
+      summary: { candidates: providedPersonaModuleCandidates.length }
+    });
+  }
+  const memoryContext = options.memoryContext && typeof options.memoryContext === 'object'
+    ? options.memoryContext
+    : await timing.measureAsync('memory_context', () => memory.buildMemoryContextAsync(userId, question || '', {
+        routePolicyKey,
+        topRouteType,
+        groupId: routeMeta.groupId || routeMeta.group_id || '',
+        sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+        sessionId: routeMeta.sessionId || routeMeta.session_id || '',
+        taskType: routeMeta.taskType || routeMeta.task_type || '',
+        agentName: routeMeta.agentName || routeMeta.agent_name || '',
+        toolName: routeMeta.toolName || routeMeta.tool_name || '',
+        journalToday: options.journalToday,
+        journalNow: options.journalNow,
+        dailyJournalTimestamp: options.dailyJournalTimestamp,
+        dailyJournalYearMonth: options.dailyJournalYearMonth,
+        dailyJournalMaxFourDayFiles: options.dailyJournalMaxFourDayFiles,
+        dailyJournalMaxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
+        dailyLookbackDays: options.dailyLookbackDays,
+        lookbackDays: options.lookbackDays,
+        sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
+        __memoryContextMemo: options.__memoryContextMemo,
+        __promptAssemblyTiming: options.__promptAssemblyTiming
+      }), {
+        category: 'collect',
+        source: 'utils/memoryContext.buildMemoryContextAsync',
+        readOnly: true,
+        includes: ['profile_journal_db', 'daily_journal']
+      });
+  if (options.memoryContext && typeof options.memoryContext === 'object') {
+    timing.record('memory_context', {
+      category: 'collect',
+      source: 'provided_options.memoryContext',
+      status: 'provided',
+      readOnly: true,
+      includes: ['profile_journal_db', 'daily_journal'],
+      summary: {
+        provided: true,
+        promptChars: normalizeText(memoryContext.memoryForPrompt || memoryContext.promptRetrievedMemoryText).length
+      }
+    });
+  }
+  recordMemoryContextTimingDetails(timing, memoryContext);
+  const memosRecall = memory.dedupeMemosRecallForPrompt(rawMemosRecall, memoryContext);
+  const dedupedMemosRecallText = normalizeText(memosRecall.promptText);
+  const memosRecallText = memory.resolveMemosRecallText({
+    memosRecall,
+    memosRecallText: dedupedMemosRecallText
+  }, {}, { memosRecall, memosRecallText: dedupedMemosRecallText });
+  let rawOpenVikingRecall = memory.resolveOpenVikingRecallObject(options, routeMeta, null);
+  if (Object.keys(rawOpenVikingRecall).length === 0) {
+    try {
+      rawOpenVikingRecall = await memory.getOpenVikingRecallRuntime().recallOpenVikingForPrompt(question || '', {
+        userId,
+        senderId: routeMeta.senderId || routeMeta.sender_id || userId,
+        groupId: routeMeta.groupId || routeMeta.group_id || '',
+        sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+        routePolicyKey,
+        topRouteType,
+        platform: routeMeta.platform || routeMeta.channel || 'qq',
+        channel: routeMeta.channel || '',
+        memoryContext
+      });
+    } catch (_) {
+      rawOpenVikingRecall = {};
+    }
+  }
+  const openVikingRecall = memory.dedupeOpenVikingRecallForPrompt(rawOpenVikingRecall, memoryContext);
+  const dedupedOpenVikingRecallText = normalizeText(openVikingRecall.promptText);
+  const openVikingRecallText = memory.normalizeOpenVikingRecallBlockText(memory.resolveOpenVikingRecallText({
+    openVikingRecall,
+    openVikingRecallText: dedupedOpenVikingRecallText
+  }, {}, { openVikingRecall, openVikingRecallText: dedupedOpenVikingRecallText }));
+  const personaMemoryState = options.personaMemoryState && typeof options.personaMemoryState === 'object'
+    ? options.personaMemoryState
+    : await timing.measureAsync('persona_memory_state', () => memory.composePersonaMemoryState({
+        userId,
+        question: question || '',
+        routeMeta,
+        routePolicyKey,
+        topRouteType
+      }, {
+        userInfo,
+        surface,
+        sessionKey: options.sessionKey,
+        shortTermMemory: options.shortTermMemory,
+        chatHistory: options.chatHistory,
+        personaModules: dynamicPromptPlan.personaModules,
+        sharedShortTermContext,
+        memoryContext
+      }), {
+        category: 'collect',
+        source: 'utils/personaMemoryState.composePersonaMemoryState',
+        readOnly: true
+      });
+  const personaMemoryPrompt = options.personaMemoryPrompt && typeof options.personaMemoryPrompt === 'object'
+    ? options.personaMemoryPrompt
+    : memory.renderPersonaMemoryPrompt(personaMemoryState, surface);
+  const personaModuleCandidates = await personaModuleCandidatesPromise;
+  if (personaModuleCandidates?.__personaModuleCandidatesError) throw personaModuleCandidates.__personaModuleCandidatesError;
+  const personaWorldbookSearch = personaModuleCandidates.personaWorldbookSearch || {};
+  const personaModuleDecision = timing.measureSync('persona_module_selection', () => selectPersonaModules(
+    {
+      ...(options?.personaModuleDecision || {}),
+      personaModules: dynamicPromptPlan.personaModules.length > 0
+        ? dynamicPromptPlan.personaModules
+        : normalizeArray(options?.personaModuleDecision?.personaModules)
+    },
+    {
+      question,
+      routePrompt: options.routePrompt,
+      routeMeta,
+      directedContext: routeMeta.directedContext,
+      continuitySignals: options?.continuitySignals,
+      personaPhase: routeMeta.personaPhase || '',
+      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+      sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+      userId,
+      senderId: routeMeta.senderId || routeMeta.sender_id || userId,
+      groupId: routeMeta.groupId || routeMeta.group_id || '',
+      isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
+      personaModuleCandidates,
+      mainReplyPromptMode
+    }
+  ), {
+    category: 'collect',
+    source: 'utils/personaModules.selectPersonaModules',
+    readOnly: true,
+    includes: ['persona_modules', 'worldbook']
+  });
+  const summaryText = memoryContext?.promptSummaryText
+    || trimTextByTokenBudget(memoryContext?.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
+    || 'none';
+  const dynamicFewShotContext = {
+    question,
+    routePolicyKey: options.routePolicyKey,
+    topRouteType: options.topRouteType,
+    routePrompt: options.routePrompt,
+    maxExamples: 3,
+    continuitySignals: options?.continuitySignals,
+    contextDensity: estimateTokens(memoryContext?.memoryForPrompt || '') + estimateTokens(summaryText || ''),
+    mainReplyPromptMode,
+    activeWorldbookIds: normalizeArray(personaModuleDecision.activeWorldbookIds),
+    preferredExampleIds: normalizeArray(personaModuleDecision.linkedExamples),
+    forceDynamicFewShot: options.forceDynamicFewShot === true || routeMeta.forceDynamicFewShot === true,
+    dynamicFewShotEnabled: options.dynamicFewShotEnabled === true || routeMeta.dynamicFewShotEnabled === true
+  };
+  let localFewShotRecall = { ok: false, examples: [] };
+  if (shouldBuildDynamicFewShot(dynamicFewShotContext)) {
+    try {
+      localFewShotRecall = await require('../../../utils/localPromptRecall').recallFewShotExamples(dynamicFewShotContext, {
+        limit: Math.max(1, Number(dynamicFewShotContext.maxExamples || 2) || 2)
+      });
+    } catch (error) {
+      localFewShotRecall = { ok: false, reason: 'local_prompt_recall_failed', error: String(error?.message || error), examples: [] };
+    }
+  }
+  const dynamicFewShotPrompt = shouldBuildDynamicFewShot(dynamicFewShotContext)
+    ? buildDynamicFewShotPrompt({
+      ...dynamicFewShotContext,
+      localPromptRecallExamples: localFewShotRecall.examples,
+      localPromptRecall: localFewShotRecall
+    })
+    : '';
+  const liveStateContext = resolveLiveStateContextFromOptions(options);
+  const liveStateMeta = resolveLiveStateMetaFromOptions(options);
+  collectStage.end({
+    status: 'ok',
+    summary: {
+      hasMemoryContext: Boolean(memoryContext && typeof memoryContext === 'object'),
+      personaModuleCandidates: normalizeArray(personaModuleCandidates?.modules || personaModuleCandidates?.candidates || personaModuleCandidates).length,
+      hasDailyJournal: Boolean(normalizeText(memoryContext?.promptDailyJournalText || memoryContext?.dailyJournalText)),
+      hasShortTermContinuity: Boolean(
+        normalizeArray(sharedShortTermContext?.recentHistory).length
+        || continuity.hasMeaningfulShortTermSummary(sharedShortTermContext?.shortTermSummary)
+        || normalizeText(sharedShortTermContext?.shortTermSummary)
+      )
+    }
+  });
+  return {
+    userInfo,
+    userId,
+    question,
+    customPrompt,
+    routeMeta,
+    routePolicyKey,
+    topRouteType,
+    mainReplyPromptMode,
+    surface,
+    affinity,
+    sharedShortTermContext,
+    memoryContext,
+    personaMemoryState,
+    personaMemoryPrompt,
+    personaModuleCandidates,
+    personaWorldbookSearch,
+    personaModuleDecision,
+    memosRecall,
+    memosRecallText,
+    openVikingRecall,
+    openVikingRecallText,
+    dynamicPromptPlan,
+    summaryText,
+    dynamicFewShotPrompt,
+    localFewShotRecall,
+    candidatePruning: personaModuleCandidates.candidatePruning || {},
+    liveStateContext,
+    liveStateMeta
+  };
+}
+
+module.exports = { collectPromptInputs };

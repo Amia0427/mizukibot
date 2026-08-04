@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "politicalContextRequired": false,
+  "replacementText": "图片内容未通过敏感词审查，未发送。",
+  "vendorFiles": [
+    "反动词库.txt",
+    "政治类型.txt",
+    "暴恐词库.txt",
+    "色情词库.txt",
+    "色情类型.txt",
+    "涉枪涉爆.txt"
+  ],
+  "extraWords": [],
+  "allowWords": [
+    "北京",
+    "疫情",
+    "按摩",
+    "白痴",
+    "罢工"
+  ]
+}

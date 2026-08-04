@@ -147,6 +147,7 @@ module.exports = (async () => {
     if (typeof originalConsoleError === 'function') {
       console.error = originalConsoleError;
     }
+    require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     if (fakeMainBot && !fakeMainBot.killed) {
       fakeMainBot.kill();
     }
