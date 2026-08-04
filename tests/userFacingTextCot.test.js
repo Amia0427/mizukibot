@@ -42,6 +42,41 @@ module.exports = (() => {
     '诶，先别急，我接着说。',
     'roleplay inner protocol leak blocks should be stripped'
   );
+  assert.strictEqual(
+    sanitizeUserFacingText('哈？！ （心想：先别让对方看见这段内部判断。）\n真正的回复。'),
+    '哈？！ \n真正的回复。',
+    'wrapped roleplay reasoning should be stripped from visible text'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('(内心OS：这里仍是内部思考)正文'),
+    '正文',
+    'ascii wrapped roleplay reasoning should be stripped'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('心里OS：这里仍是内部思考\n\n正文'),
+    '正文',
+    'unwrapped roleplay reasoning paragraphs should be stripped'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('前缀（心想：流式内容还没有结束'),
+    '前缀',
+    'unterminated roleplay reasoning should not be streamed'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('前缀（内心O'),
+    '前缀',
+    'partial roleplay reasoning markers should not be streamed'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('(心想：内部)', { preserveThink: true }),
+    '',
+    'preserveThink must not expose roleplay reasoning as user-facing text'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('大家常说“内心OS”，但这里没有输出思考块。'),
+    '大家常说“内心OS”，但这里没有输出思考块。',
+    'ordinary mentions of inner monologue should remain visible'
+  );
 
   console.log('userFacingTextCot.test.js passed');
 })();

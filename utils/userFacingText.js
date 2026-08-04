@@ -27,6 +27,76 @@ function stripTrailingThinkFragment(text = '', options = {}) {
   return source;
 }
 
+const ROLEPLAY_REASONING_LABEL_PATTERN = '(?:心想|内心\\s*os|心里\\s*os)';
+const WRAPPED_ROLEPLAY_REASONING_MARKER_RE = new RegExp(
+  `[（(]\\s*${ROLEPLAY_REASONING_LABEL_PATTERN}\\s*[:：]`,
+  'i'
+);
+const UNWRAPPED_ROLEPLAY_REASONING_MARKER_RE = new RegExp(
+  `(?:^|\\r?\\n)[\\t ]*${ROLEPLAY_REASONING_LABEL_PATTERN}[\\t ]*[:：]`,
+  'i'
+);
+const TRAILING_ROLEPLAY_REASONING_MARKER_FRAGMENT_RE = /[（(]\s*(?:心(?:想)?|内(?:心(?:\s*o(?:s)?)?)?|心里(?:\s*o(?:s)?)?)?\s*[:：]?$/i;
+
+function containsRoleplayReasoningLeak(text = '') {
+  const source = String(text || '');
+  return WRAPPED_ROLEPLAY_REASONING_MARKER_RE.test(source)
+    || UNWRAPPED_ROLEPLAY_REASONING_MARKER_RE.test(source);
+}
+
+function findRoleplayReasoningClose(source, openIndex) {
+  const open = source[openIndex];
+  const close = open === '（' ? '）' : ')';
+  let depth = 0;
+
+  for (let index = openIndex; index < source.length; index += 1) {
+    if (source[index] === open) depth += 1;
+    if (source[index] !== close) continue;
+    depth -= 1;
+    if (depth === 0) return index;
+  }
+
+  return -1;
+}
+
+function stripWrappedRoleplayReasoning(text = '') {
+  const source = String(text || '');
+  const markerRe = new RegExp(
+    `[（(]\\s*${ROLEPLAY_REASONING_LABEL_PATTERN}\\s*[:：]`,
+    'gi'
+  );
+  let cursor = 0;
+  let output = '';
+  let match = markerRe.exec(source);
+
+  while (match) {
+    output += source.slice(cursor, match.index);
+    const closeIndex = findRoleplayReasoningClose(source, match.index);
+    if (closeIndex < 0) return output;
+    cursor = closeIndex + 1;
+    markerRe.lastIndex = cursor;
+    match = markerRe.exec(source);
+  }
+
+  return output + source.slice(cursor);
+}
+
+function stripTrailingRoleplayReasoningMarkerFragment(text = '') {
+  const source = String(text || '');
+  const fragment = source.match(TRAILING_ROLEPLAY_REASONING_MARKER_FRAGMENT_RE);
+  return fragment ? source.slice(0, fragment.index) : source;
+}
+
+function stripRoleplayReasoningLeakText(text = '') {
+  let next = stripWrappedRoleplayReasoning(text);
+  const unwrappedMarkerRe = new RegExp(
+    `(^|\\r?\\n)[\\t ]*${ROLEPLAY_REASONING_LABEL_PATTERN}[\\t ]*[:：][\\s\\S]*?(?=\\r?\\n[\\t ]*\\r?\\n|$)`,
+    'gi'
+  );
+  next = next.replace(unwrappedMarkerRe, '$1');
+  return stripTrailingRoleplayReasoningMarkerFragment(next);
+}
+
 const NARRATIVE_LEAD_IN_CUES = [
   '笑着',
   '笑了下',
@@ -78,7 +148,7 @@ function stripNarrativeLeadIn(text = '') {
 }
 
 function stripInternalReasoningLeakText(text = '') {
-  let next = String(text || '');
+  let next = stripRoleplayReasoningLeakText(text);
 
   next = next.replace(/```(?:json|JSON)?\s*\{[\s\S]*?"reasoning_content"\s*:[\s\S]*?\}\s*```/g, '');
   next = next.replace(/^\s*["']?(?:reasoning_content|internal_check|内部检查)["']?\s*[:：=]\s*.*$/gmi, '');
@@ -99,6 +169,7 @@ function sanitizeUserFacingText(text = '', options = {}) {
   }
 
   if (preserveThink) {
+    next = stripRoleplayReasoningLeakText(next);
     return options && options.returnMeta ? { text: next, hasSafetyRestriction } : next;
   }
   let previous = null;
@@ -145,8 +216,10 @@ function hasVisibleUserFacingText(text = '') {
 }
 
 module.exports = {
+  containsRoleplayReasoningLeak,
   extractUserFacingDelta,
   hasVisibleUserFacingText,
   sanitizeUserFacingText,
-  stripInternalReasoningLeakText
+  stripInternalReasoningLeakText,
+  stripRoleplayReasoningLeakText
 };

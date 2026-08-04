@@ -27,6 +27,10 @@ module.exports = (async () => {
     isUnsafeUserFacingReply('刚才偷偷瞄了一眼，纳斯达克2026年的最高点大概是这样。好啦！查也查过了。'),
     true
   );
+  assert.strictEqual(isReasoningTraceLeak('（心想：这段不应进入正文。）正文'), true);
+  assert.strictEqual(isUnsafeUserFacingReply('(内心OS：这段也不应进入正文)正文'), true);
+  assert.strictEqual(isUnsafeUserFacingReply('心里OS：这段仍是内部思考\n\n正文'), true);
+  assert.strictEqual(isUnsafeUserFacingReply('大家常说“内心OS”，但这里只是在讨论这个词。'), false);
   assert.strictEqual(isUnsafeUserFacingReply('我看了一眼代码，问题在 planner gate。'), false);
   assert.strictEqual(isUnsafeUserFacingReply('……没监控你还特意强调，怎么，你打算对猪做什么不可告人的事啊'), false);
 
