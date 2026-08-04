@@ -1,3 +1,11 @@
+## 运行维护 2026-08-04 11:00 +08:00
+
+- 小目标：完成舞萌谱面 SQL/RAG、个性化成绩分析和现有主回复链路接入；功能提交为 `5a53eb3`。`src/features/maimai/` 统一负责增量同步、Simai 解析、硬条件映射、SQLite/LanceDB 版本切换、检索、凭据、成绩快照、弱项推断和 `/mai` 命令。
+- 数据与安全：公共查询在没有主密钥时仍可使用；Import-Token 仅私聊绑定，以 AES-256-GCM 和 QQ 用户 AAD 加密，并在 NapCat 入站最前阶段消费，禁止进入日志、Router、模型、记忆、被动感知和诊断。查询执行 SQL 候选与向量命中的双重求交，embedding 失败明确降级为 `sql_only`。
+- 真实验收：generation 2 激活，1362 首歌、5432 张谱面、解析率 100%、确认映射 3792、隔离 1141、覆盖率 76.87%、代表段 11376、文档/向量各 15168；真实混合查询 579 ms。`PANDORA PARADOXXX` 白谱命中 `df:834:SD:4`，定数 15.0、物量 1342、置信度 1.0。
+- 自动验收：13 项舞萌测试、lint、typecheck、Prompt、暂存密钥扫描和 diff check 退出 0。稳定 HEAD 的完整测试运行 158.9 秒后退出 1，单独确认为本机 `localAclScriptSource.test.js` 向 ACL 脚本传入空 `Path`；舞萌用例均通过。运行 Node `v24.14.1` 超出项目 `>=20 <21` 声明。
+- 边界：真实同步 generation 使用 3792 条确定性摘要缓存；模型润色适配器与非法输出回退已有自动测试，但没有真实摘要模型和用户 Import-Token，未宣称完成真实个人成绩接口验收。完整说明见 `docs/maimai-sql-rag.md`；小目标已完成，未推送远端。
+
 ## 运行维护 2026-08-04 +08:00
 
 - 小目标：以 LangGraph 原生 ReAct 循环取代 direct-chat Planner 和预生成执行计划链；实现提交为 `87cf7d4`。生产拓扑统一为 `route -> agent_decide -> execute_tools -> agent_decide -> humanize -> final_validate -> persist`，无工具路由保持流式，工具路由只输出最终回答。

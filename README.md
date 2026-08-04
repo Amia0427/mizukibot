@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 舞萌谱面 SQL/RAG 2026-08-04 11:00 +08:00
+
+- 功能提交 `5a53eb3` 新增独立舞萌同步 Worker、SQLite/LanceDB 版本化谱面库、三个只读查询工具、QQ 成绩绑定/快照/弱项推断与 `/mai` 命令；检索证据进入现有 ReAct 主回复链路，不建立平行回复系统。
+- 真实数据 generation 2 已激活：1362 首歌、5432 张谱面、解析率 100%、确认映射 3792、隔离 1141、映射覆盖率 76.87%、文档/向量各 15168；`PANDORA PARADOXXX` 白谱命中 `df:834:SD:4`，定数 15.0、物量 1342、映射置信度 1.0。
+- 13 项舞萌回归、lint、typecheck、Prompt、暂存密钥扫描和 diff check 通过；完整测试退出 1，独立复现为本机 ACL 测试的空 `Path` 参数，与舞萌用例无关。Node `v24.14.1` 超出项目声明的 `>=20 <21`，且未提供真实用户 Token，因此不宣称完成真实个人成绩接口验收。
+- 配置、数据边界、运维命令和完整验收见 [舞萌谱面 SQL/RAG 开发文档](docs/maimai-sql-rag.md)。当前分支未推送远端。
+
 ## 运行维护 2026-08-04 +08:00
 
 - 实现提交 `87cf7d4` 已移除 direct-chat Planner 与预生成计划链，消息处理统一进入 LangGraph 原生 `agent_decide -> execute_tools` 循环；Router `allowedTools` 成为不可扩权的授权上界，工具轮次、调用总数、重复调用和副作用 checkpoint 由同一 Agent 状态管理。
