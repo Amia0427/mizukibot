@@ -1,6 +1,6 @@
 const config = require('../../config');
 const { getAccessibleGroupIdsForUser } = require('../memoryScopeIndex');
-const { retrieveRelevantMemories, retrieveUnifiedMemories } = require('../vectorMemory');
+const { retrieveRelevantMemories, retrieveUnifiedMemories } = require('../memory-v3/projectionCompat');
 const { retrieveRelevantTaskMemories } = require('../taskMemory');
 const { retrieveRelevantGroupMemoriesSync } = require('../groupMemory');
 const { getDailyJournalRetrievalBundle } = require('../dailyJournal');

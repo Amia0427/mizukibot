@@ -1,6 +1,6 @@
 ﻿const config = require('../../config');
-const { getUserAffinityState } = require('../memory');
-const { shouldUseRemoteEmbedding, requestEmbedding } = require('../vectorMemory');
+const { getUserAffinityState } = require('../memoryAffinityState');
+const { shouldUseRemoteEmbedding, requestEmbedding } = require('../memoryEmbedding');
 const {
   normalizeText,
   stableSortByScore,

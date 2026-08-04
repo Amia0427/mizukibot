@@ -1,7 +1,5 @@
 const config = require('../../config');
-const {
-  rememberExplicitMemory
-} = require('../vectorMemory');
+const { writeMemoryBatch } = require('../memory-v3');
 const {
   getAccessibleGroupIdsForUser
 } = require('../memoryScopeIndex');
@@ -308,7 +306,14 @@ async function runMemoryCli(commandText = '', context = {}) {
     const userId = sanitizeText(context.userId);
     const groupId = sanitizeText(context.groupId);
     const scope = parsed.scope === 'group' && groupId ? 'group' : 'personal';
-    const id = rememberExplicitMemory(userId, parsed.text, {
+    const written = await writeMemoryBatch([{
+      userId,
+      text: parsed.text,
+      type: 'fact',
+      source: 'explicit',
+      sourceKind: 'explicit',
+      status: 'active',
+      confidence: 1,
       scopeType: scope,
       groupId: scope === 'group' ? groupId : '',
       sessionId: sanitizeText(context.sessionId),
@@ -318,7 +323,8 @@ async function runMemoryCli(commandText = '', context = {}) {
       toolName: sanitizeText(context.toolName),
       channelId: sanitizeText(context.channelId),
       participants: Array.isArray(context.participants) ? context.participants : []
-    });
+    }], { phase: 'memory_cli_remember' });
+    const id = written.ids[0] || null;
     payload = {
       ok: Boolean(id),
       command: 'remember',

@@ -1,6 +1,6 @@
 const config = require('../../config');
 const { getBackgroundPressureDelayMs, appendPerfEvent } = require('../perfRuntime');
-const { getUserAffinityState } = require('../memory');
+const { getUserAffinityState } = require('../memoryAffinityState');
 const {
   ensureDir,
   atomicWriteJson,

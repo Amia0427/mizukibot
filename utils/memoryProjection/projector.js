@@ -1,5 +1,5 @@
 const config = require('../../config');
-const { getMemoryItems } = require('../vectorMemory');
+const { getMemoryItems } = require('../memory-v3/projectionCompat');
 const {
   LEGACY_MEMORY_LIMITS,
   defaultFavorite,
@@ -93,8 +93,8 @@ function projectUserProfile(userId, items = [], favorite = null) {
   return memory;
 }
 
-function buildProjection() {
-  const items = getMemoryItems();
+function buildProjection(sourceItems) {
+  const items = Array.isArray(sourceItems) ? sourceItems : getMemoryItems();
   const favorites = safeReadJson(config.DATA_FILE, {});
   const users = new Set([
     ...Object.keys(favorites || {}),

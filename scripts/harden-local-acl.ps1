@@ -11,7 +11,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$systemModules = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\Modules'
+$windowsRoot = if ($env:WINDIR) { $env:WINDIR } else { $env:SystemRoot }
+$systemModules = Join-Path $windowsRoot 'System32\WindowsPowerShell\v1.0\Modules'
 $env:PSModulePath = "$PSHOME\Modules;$systemModules"
 Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 if ([string]::IsNullOrWhiteSpace($RootPath)) {

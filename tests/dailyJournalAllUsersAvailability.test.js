@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 
 function clearProjectCache() {
-  const projectRoot = 'D:\\waifu\\';
+  const projectRoot = path.resolve(__dirname, '..') + path.sep;
   for (const key of Object.keys(require.cache)) {
     if (key.startsWith(projectRoot)) delete require.cache[key];
   }

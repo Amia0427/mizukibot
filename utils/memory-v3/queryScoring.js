@@ -1,5 +1,5 @@
 const config = require('../../config');
-const { shouldUseRemoteEmbedding, requestEmbedding } = require('../vectorMemory');
+const { shouldUseRemoteEmbedding, requestEmbedding } = require('../memoryEmbedding');
 const {
   normalizeText,
   canonicalizeText,
@@ -289,6 +289,7 @@ function applyJournalTargetDayPriority(items = [], targetDays = []) {
   const hardBoost = Math.max(4, Number(config.MEMORY_JOURNAL_TARGET_DATE_HARD_BOOST || 8) || 8);
   return (Array.isArray(items) ? items : []).map((item) => {
     if (!isJournalTargetDayCandidate(item, targetDays)) return item;
+    if (item.journalTargetDayPriority === true) return item;
     const score = Number(item.score || 0) || 0;
     return {
       ...item,
@@ -304,7 +305,8 @@ function applyJournalTargetDayPriority(items = [], targetDays = []) {
 
 function ensureTargetJournalCandidates(items = [], allCandidates = [], targetDays = []) {
   if (!Array.isArray(targetDays) || targetDays.length === 0) return Array.isArray(items) ? items : [];
-  const existing = new Set((Array.isArray(items) ? items : []).map((item) => candidateKey(item)).filter(Boolean));
+  const prioritizedItems = applyJournalTargetDayPriority(items, targetDays);
+  const existing = new Set(prioritizedItems.map((item) => candidateKey(item)).filter(Boolean));
   const additions = [];
   for (const candidate of Array.isArray(allCandidates) ? allCandidates : []) {
     if (!isJournalTargetDayCandidate(candidate, targetDays)) continue;
@@ -325,7 +327,7 @@ function ensureTargetJournalCandidates(items = [], allCandidates = [], targetDay
       }
     });
   }
-  return stableSortByScore((Array.isArray(items) ? items : []).concat(additions));
+  return stableSortByScore(prioritizedItems.concat(additions));
 }
 
 function appendRerankTail(rerankedHead = [], rerankTail = []) {

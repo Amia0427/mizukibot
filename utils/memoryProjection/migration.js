@@ -20,6 +20,7 @@ const {
   makeConflictKey
 } = require('./conflicts');
 const { saveProjection } = require('./persistence');
+const { buildProjection } = require('./projector');
 
 function createMigrationSnapshot() {
   ensureDir(MIGRATION_DIR);
@@ -152,7 +153,7 @@ function runMemoryMigration() {
   const snapshotFile = createMigrationSnapshot();
   const importResult = importLegacyMemoriesToItemStore();
   rebuildMemoryIndex();
-  const projection = saveProjection();
+  const projection = saveProjection(buildProjection(getMemoryItems()));
   const report = buildMigrationReport();
   return {
     ok: true,

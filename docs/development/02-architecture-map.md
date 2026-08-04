@@ -1,6 +1,6 @@
 # 架构地图与代码落点
 
-> 源码核验时间：2026-08-04 +08:00。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
+> 源码核验时间：2026-08-04 12:05 +08:00（Asia/Shanghai）。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
 
 本文用于回答三个问题：进程如何协作、代码当前由谁实现、一个新改动应该放在哪里。
 
@@ -122,6 +122,7 @@ acceptNapCatIncomingMessage()
 5. `config` 可以提供已解析值，但领域模块不要重新解析 `.env`；同一配置只有一个解释位置。
 6. 共享可变状态只允许一个 owner。其他模块持有引用或调用 API，不能复制 `Map`、缓存或 store singleton。
 7. 数据路径从 `config.DATA_DIR` 或其明确子配置派生；不要在领域模块另造一个默认 `./data` 口径。
+8. 独立工作树执行真实数据诊断时，相对 `MEMORY_LANCEDB_DIR` 会按当前工作目录解析；必须显式传入真实 `DATA_DIR` 和绝对 LanceDB 路径，并在 apply 前核对输出路径。
 
 ## 5. `src/` 与历史目录的迁移事实
 
@@ -136,7 +137,8 @@ core/memeManager.js              -> src/features/meme
 core/passiveGroupAwareness.js    -> src/features/passive-awareness
 core/dailyShareEngine.js         -> src/features/daily-share
 api/httpClient.js                -> src/model/http
-utils/vectorMemory.js            -> src/memory/vector
+业务记忆读写                    -> utils/memory-v3/repository.js
+utils/vectorMemory.js            -> src/memory/vector（仅兼容/迁移）
 api/runtimeV2/context/service.js -> src/runtime-v2/context
 api/graphPrompting.js            -> api/runtimeV2/context/service -> src/runtime-v2/context
 ```
@@ -223,7 +225,7 @@ agent_decide -> humanize -> final_validate -> persist -> END
 | LangGraph checkpoint/event | 新写入：`DATA_DIR/langgraph_v2.sqlite`；只读兼容：`DATA_DIR/langgraph_v2_checkpoints`、`DATA_DIR/langgraph_v2_events` | `saveTransition()` 原子提交 checkpoint/event；legacy 只按 thread 惰性读取，禁止扫描、回写和批量迁移；`clear()` 通过 tombstone 防止旧数据复活 |
 | post-reply 队列与 trace | `DATA_DIR/post_reply_jobs`、`DATA_DIR/post_reply_traces` | 主回复链生产任务，worker 消费；inline 与独立 worker 只能选一种消费模式 |
 | worker readiness | `DATA_DIR/runtime/post-reply-worker/worker-state.json` | 独立 worker owner；不要由 Web 或主进程伪造 ready |
-| Memory V3 | `DATA_DIR/memory-v3` | 通过 `utils/memory-v3` API、materializer 和 worker 管理，禁止手改 projection 当作源数据 |
+| Memory V3 | `DATA_DIR/memory-v3` | 事件日志是长期记忆业务真值；通过 `utils/memory-v3/repository.js`、materializer 和 worker 管理，禁止手改 projection 当作源数据 |
 | SQLite/profile/worldbook | `DATA_DIR/*.sqlite` 或对应配置路径 | 通过 store 模块访问；进程停机时统一关闭已加载连接 |
 | 短期会话 | `DATA_DIR/short_term_sessions` 等 | session key 和 scope 必须使用既有 resolver，不能另造命名规则 |
 | prompt | `prompts/` + `prompt-manifest.json` | 是版本化源码资产，不属于 `DATA_DIR`；私有 prompt 仍不得提交 |
@@ -256,8 +258,8 @@ rg -n "module\.exports|require\(" <候选入口和相邻模块>
 | Runtime V2 动态上下文 | `src/runtime-v2/context` | 保持显式依赖和重依赖惰性加载 |
 | 模型 HTTP 协议/重试/transport | `src/model/http/` | `api/httpClient.js` 是兼容 facade |
 | 模型请求编排、fallback、输出解析 | `api/runtimeV2/model/` | 不要把 provider 编排塞回通用 HTTP transport |
-| 向量记忆实现 | `src/memory/vector/` | `utils/vectorMemory.js` 是兼容 facade |
-| Memory V3、context、journal、CLI | 先修改当前 `utils/` owner，再保持 `src/memory/*` facade | 除非任务本身就是经边界测试保护的迁移 |
+| 长期记忆业务读写 | `utils/memory-v3/repository.js` | `queryMemory` 是业务召回入口；旧 vector store 只允许兼容模式和迁移工具访问 |
+| Memory V3、context、journal、CLI | 先修改当前 `utils/` owner，再保持 `src/memory/*` facade | `MEMORY_STORAGE_MODE=v3_only` 时不得加载或写入旧 JSON/shard |
 | 跨域纯函数/策略 | 最窄的 `utils/<domain>/` | 不要建立新的 `utils/<misc>.js` |
 | 环境配置 | `config/` + `.env.example` | 默认值、校验、文档和测试一起改 |
 | prompt 资产 | `prompts/` + manifest/runtime 引用 | 必须通过 `npm run check:prompts` |

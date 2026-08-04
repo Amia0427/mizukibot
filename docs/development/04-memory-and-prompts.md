@@ -1,8 +1,8 @@
 # 记忆与提示词
 
-本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-07-31。
+本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-08-04 12:05 +08:00。
 
-最重要的原则是：记忆不是一个 JSON 文件，prompt 也不是一段字符串。当前系统同时维护短期会话、兼容 Profile、每日事件、Memory V3 投影、向量索引和多个 prompt lane；任意一层成功都不能替代端到端召回与注入验收。
+最重要的原则是：Memory V3 事件日志是长期记忆业务真值，Profile Journal 是可重建结构化读模型，LanceDB 是在线向量索引。短期会话、Daily Journal、图片索引和 LangGraph 状态仍有独立职责；任意一层成功都不能替代端到端召回与注入验收。
 
 ## 模块地图
 
@@ -12,15 +12,15 @@
 | 兼容用户记忆 | [`../../utils/memory/index.js`](../../utils/memory/index.js) | `utils/memory/` | favorites、profile、facts、summary、impression、chat history 与 short-term store |
 | 短期连续性 | [`../../utils/shortTermMemory/index.js`](../../utils/shortTermMemory/index.js) | `utils/shortTermMemory/` | session key、最近轮次、压缩、重启恢复、连续性 delta |
 | 每日日记 | [`../../utils/dailyJournal/index.js`](../../utils/dailyJournal/index.js) | `utils/dailyJournal/` | 原始轮次、segment、4-day/monthly rollup 与按日期召回 |
-| Memory V3 | [`../../utils/memory-v3/index.js`](../../utils/memory-v3/index.js) | `utils/memory-v3/` | 事件、物化投影、查询、packet、版本更新与治理 |
-| 向量兼容入口 | [`../../utils/vectorMemory.js`](../../utils/vectorMemory.js) | [`../../src/memory/vector/index.js`](../../src/memory/vector/index.js) | JSON shard store、写入质量门、检索和统计 |
-| LanceDB | [`../../utils/lancedbMemoryStore/index.js`](../../utils/lancedbMemoryStore/index.js) | `utils/lancedbMemoryStore/` | 向量行构造、分区、同步和搜索 |
+| Memory V3 | [`../../utils/memory-v3/repository.js`](../../utils/memory-v3/repository.js) | `utils/memory-v3/` | 统一业务读写、事件、物化投影、packet、版本更新与治理 |
+| 旧向量兼容入口 | [`../../utils/vectorMemory.js`](../../utils/vectorMemory.js) | [`../../src/memory/vector/index.js`](../../src/memory/vector/index.js) | `legacy_compat` 镜像/主读、`v3_shadow` 对照和迁移读取；不是新业务入口 |
+| LanceDB | [`../../utils/lancedbMemoryStore/index.js`](../../utils/lancedbMemoryStore/index.js) | `utils/lancedbMemoryStore/` | Memory V3 可见节点的在线向量索引、分区、同步和搜索 |
 | Prompt manifest | [`../../prompts/prompt-manifest.json`](../../prompts/prompt-manifest.json) | [`../../config/promptRuntime.js`](../../config/promptRuntime.js) | 稳定系统 prompt 资产、阶段、优先级、预算和冲突 |
 | 运行时 prompt | [`../../utils/runtimePrompts.js`](../../utils/runtimePrompts.js) | `prompts/runtime/` 与内置默认值 | 带变量的任务/路由/格式模板 |
 | 主回复上下文 | [`../../src/runtime-v2/context/index.js`](../../src/runtime-v2/context/index.js) | `src/runtime-v2/context/` | 聚合记忆、人格、动态块、缓存 lane 与视觉上下文 |
 | Prompt block 规范 | [`../../utils/mainReplyPromptBlocks/catalog.js`](../../utils/mainReplyPromptBlocks/catalog.js) | 同目录 | block 的 lane、criticality、启用条件与硬预算 |
 
-`src/memory/v3/index.js`、`src/memory/context/index.js`、`src/memory/journal/index.js` 和 `src/memory/cli/index.js` 目前主要转发到 `utils`。`utils/vectorMemory.js` 则反向转发到 `src/memory/vector`。这是迁移中的真实边界，不要再复制第三份实现。
+`src/memory/v3/index.js`、`src/memory/context/index.js`、`src/memory/journal/index.js` 和 `src/memory/cli/index.js` 目前主要转发到 `utils`。业务代码通过 `utils/memory-v3/repository.js` 读写；`utils/vectorMemory.js` 反向转发到旧实现，只允许兼容层、shadow 和迁移工具使用。共享 embedding 与余弦能力由 `utils/memoryEmbedding.js` 持有。
 
 ## 推荐阅读顺序
 
@@ -39,21 +39,20 @@
 1. [`../../api/runtimeV2/nodes/persist.js`](../../api/runtimeV2/nodes/persist.js)：前台最小持久化和 post-reply job 构造。
 2. [`../../utils/postReplyWorker/taskRegistry.js`](../../utils/postReplyWorker/taskRegistry.js)：后台任务依赖图。
 3. [`../../utils/postReplyWorker/processJob.js`](../../utils/postReplyWorker/processJob.js)：真实任务执行顺序。
-4. [`../../utils/memory-v3/versionedUpdate.js`](../../utils/memory-v3/versionedUpdate.js)：相似记忆、归档旧版本与确认新事件。
-5. [`../../utils/memory-v3/events.js`](../../utils/memory-v3/events.js)：事件标准化、按日 NDJSON append 和同步旁路。
-6. [`../../utils/postReplyWorker/materialize.js`](../../utils/postReplyWorker/materialize.js)：debounce、dirty scopes 与增量物化调度。
-7. [`../../utils/memory-v3/materializer.js`](../../utils/memory-v3/materializer.js)：投影、冲突、生命周期、embedding backfill 和 LanceDB 同步计划。
-8. [`../../utils/memory-v3/embeddingIndex.js`](../../utils/memory-v3/embeddingIndex.js) 与 [`../../utils/postReplyWorker/vectorMaintenance.js`](../../utils/postReplyWorker/vectorMaintenance.js)：向量补齐与维护。
+4. [`../../utils/memory-v3/repository.js`](../../utils/memory-v3/repository.js)：统一质量门、`strict-v1` 判定、版本事件和存储模式行为。
+5. [`../../utils/memory-v3/versionedUpdate.js`](../../utils/memory-v3/versionedUpdate.js)：相似记忆、归档旧版本与确认新事件。
+6. [`../../utils/memory-v3/events.js`](../../utils/memory-v3/events.js)：事件标准化、按日 NDJSON append 和同步旁路。
+7. [`../../utils/postReplyWorker/materialize.js`](../../utils/postReplyWorker/materialize.js)：debounce、dirty scopes 与增量物化调度。
+8. [`../../utils/memory-v3/materializer.js`](../../utils/memory-v3/materializer.js)：投影、冲突、生命周期、embedding backfill 和 LanceDB 同步计划。
+9. [`../../utils/memory-v3/embeddingIndex.js`](../../utils/memory-v3/embeddingIndex.js) 与 [`../../utils/postReplyWorker/vectorMaintenance.js`](../../utils/postReplyWorker/vectorMaintenance.js)：向量补齐与维护。
 
 ### 想修改向量写入或召回算法
 
-1. [`../../src/memory/vector/index.js`](../../src/memory/vector/index.js)：公开导出边界。
-2. [`../../src/memory/vector/normalization.js`](../../src/memory/vector/normalization.js)：类型、scope、状态和文本规范。
-3. [`../../src/memory/vector/store-runtime.js`](../../src/memory/vector/store-runtime.js)：shard、manifest、热存储和持久化。
-4. [`../../src/memory/vector/write-runtime.js`](../../src/memory/vector/write-runtime.js)：质量门、去重、冲突、recall verification 与 backfill。
-5. [`../../src/memory/vector/retrieval-runtime.js`](../../src/memory/vector/retrieval-runtime.js)：查询入口。
-6. [`../../src/memory/vector/scoring-core.js`](../../src/memory/vector/scoring-core.js) 和 [`../../src/memory/vector/scoring-selection.js`](../../src/memory/vector/scoring-selection.js)：分数与结果选择。
-7. [`../../utils/memoryReranker.js`](../../utils/memoryReranker.js)、[`../../utils/memoryEmbeddingClient.js`](../../utils/memoryEmbeddingClient.js) 和 LanceDB 模块：远程/本地增强边界。
+1. [`../../utils/memory-v3/repository.js`](../../utils/memory-v3/repository.js)：长期记忆业务写入与查询边界。
+2. [`../../utils/memory-v3/query.js`](../../utils/memory-v3/query.js)、`queryScoring.js` 和 `queryRanking.js`：混合召回、评分与排序。
+3. [`../../utils/memoryEmbedding.js`](../../utils/memoryEmbedding.js)：Memory V3 与 persona worldbook 共用的 embedding/余弦能力。
+4. [`../../utils/lancedbMemoryStore/index.js`](../../utils/lancedbMemoryStore/index.js)：在线向量索引、同步、reconcile 和搜索。
+5. [`../../src/memory/vector/index.js`](../../src/memory/vector/index.js)：旧 JSON/shard 兼容与迁移边界；不得从新业务代码直接调用。
 
 ## 记忆类型不是互相替代的
 
@@ -86,6 +85,8 @@
 
 Memory V3 采用事件日志 + 可重建投影：
 
+- `writeMemoryBatch()` 是业务写入入口，先执行既有质量门，再应用 `strict-v1`，最后追加版本事件并返回 accepted/archived/rejected。
+- `queryMemory()` 是业务召回入口；`v3_shadow` 只把旧结果写入差异诊断，不让旧结果进入 Prompt。
 - 事件是追加真值，类型包括 turn、checkpoint、candidate、confirmed、archived、episode rollup 和 migration bootstrap。
 - materializer 从事件重建 session/profile/scope/episode projection 与 memory node 列表。
 - query 从投影、node、journal、task/group/style 等来源收集候选并排序。
@@ -95,14 +96,15 @@ Memory V3 采用事件日志 + 可重建投影：
 
 ### Vector 与 LanceDB
 
-本地 vector store 和 Memory V3/LanceDB 有重叠但不等价：
+Memory V3 node 是事件物化结果，符合策略的 active node 进入 embedding cache 与 LanceDB。LanceDB 只保存可重建的在线向量索引，不拥有业务真值；向量不可用时，`queryMemory()` 仍通过 lexical/BM25/日期路径降级。
 
-- `src/memory/vector` 提供兼容统一召回、写质量门、JSON shard 与统计。
-- Memory V3 node 是事件物化结果，可进入 embedding cache。
-- LanceDB 是可选向量读取/同步后端；模式支持 local JSONL、LanceDB 和 shadow 组合。
-- 向量不可用时，query 仍应通过 lexical/BM25/日期等本地路径降级。
+`MEMORY_STORAGE_MODE` 控制迁移期行为：
 
-任何向量改动都必须验证“远程 embedding 不可用”和“LanceDB 没有可见候选”两条回退链。
+- `legacy_compat`：默认值。业务写入先落 V3，再镜像 accepted 项到旧 store；兼容读路径仍可主读旧投影。
+- `v3_shadow`：业务读写以 V3 为准，旧 store 只读并只生成差异统计，不进入 Prompt，也不接受写入。
+- `v3_only`：正式收敛模式，不加载或写入 `memory_items.json`、`memory_index.json`、`memory_library.json`、`memory_projection.json` 与 `memory-shards/`。
+
+旧 vector 模块保留为迁移工具，不物理删除。任何向量改动都必须验证远程 embedding 不可用、LanceDB 无候选和 `v3_only` 缺失旧文件三条路径。
 
 ## 一条主回复的读取链路
 
@@ -124,11 +126,11 @@ flowchart TD
     M --> N["上下文预算压缩后进入模型"]
 ```
 
-### 1. `buildMemoryContextAsync` 选择 V3 或兼容路径
+### 1. `buildMemoryContextAsync` 按存储模式选择路径
 
-Runtime V2 的 prompt input 把 user、question、group/session/route/tool metadata 交给 `buildMemoryContextAsync()`。当 Memory V3 开启时进入 `buildMemoryContextV3Payload()`；否则走统一 vector recall 的兼容路径。
+Runtime V2 的 prompt input 把 user、question、group/session/route/tool metadata 交给 `buildMemoryContextAsync()`。`legacy_compat` 保持旧主读行为；`v3_shadow` 和 `v3_only` 进入 `buildMemoryContextV3Payload()`，并通过仓储 `queryMemory()` 查询。
 
-V3 payload 会并行概念上聚合本地知识和 `queryMemory()` 结果。若 V3 没有结果，才调用 `retrieveUnifiedMemoriesAsync()` 作为 fallback，并在 diagnostics 记录 retrieval path 与 dropped reasons。不要在上层看到空数组就静默塞入所有 legacy facts，这会破坏“无证据不注入”的语义。
+`v3_shadow` 的旧召回只写入 `diagnostics.storageShadow`，不会合并进 V3 results 或 Prompt。`v3_only` 不允许回退到旧 JSON/shard；不要在上层看到空数组就静默塞入 legacy facts，这会破坏“无证据不注入”的语义。
 
 ### 2. `queryMemory` 先建立 recall plan
 
@@ -149,7 +151,7 @@ scope 至少要带 user；群记忆还受 readable group ids 约束。改变过�
 2. LanceDB read 开启且 embedding 可用时执行向量搜索，再把向量行解析回当前可见候选。
 3. 本地构造 lexical/BM25 pool，同时保留日期和 recent fallback 候选。
 4. 多组候选存在时通过 RRF 融合。
-5. 做冲突消解，确保目标日期日记不会被普通相关性吞掉。
+5. 做冲突消解，并对已在 head/tail 中或后补的目标日期日记幂等施加硬优先级，确保它不会被普通相关性吞掉。
 6. 对有限 head 执行 rerank，tail 保留原顺序。
 7. 对 journal/long-term 重复项做语义折叠，并按来源和 facet diversify。
 
@@ -174,13 +176,14 @@ flowchart TD
     A["Runtime V2 persist"] --> B["写短期历史 / checkpoint"]
     A --> C["enqueue post-reply job"]
     C --> D["memoryLearning / dailyJournal"]
-    C --> E["appendVersionedMemoryUpdate"]
-    E --> F["appendMemoryEvent 到按日 NDJSON"]
-    F --> G["schedulePostReplyMaterialize debounce"]
-    G --> H["worker thread materialize"]
-    H --> I["node + session/profile/scope/episode projections"]
-    H --> J["embedding backfill queue"]
-    J --> K["vector maintenance / LanceDB sync"]
+    C --> E["writeMemoryBatch"]
+    E --> F["quality gate + strict-v1 + version event"]
+    F --> G["appendMemoryEvent 到按日 NDJSON"]
+    G --> H["schedulePostReplyMaterialize debounce"]
+    H --> I["worker thread materialize"]
+    I --> J["node + session/profile/scope/episode projections"]
+    I --> K["embedding backfill queue"]
+    K --> L["vector maintenance / LanceDB sync"]
 ```
 
 ### 1. 前台只提交最小状态
@@ -193,18 +196,18 @@ persist 节点把最终问答、route metadata、continuity snapshot 和任务�
 
 `processPostReplyJob()` 的 core phase 可以同时做：
 
-- `learnSomethingNew()`：抽取 profile/fact 等兼容记忆；
+- `learnSomethingNew()`：抽取 profile/fact 候选并交给 `writeMemoryBatch()`；
 - `appendDailyJournalEntry()`：写 episode/time evidence；
-- `appendVersionedMemoryUpdate()`：把本轮问答作为 `memory_confirmed`/`turn_summary` 进入 V3；
+- `writeMemoryBatch()`：让候选经过质量门与 `strict-v1` 后以版本事件进入 V3；
 - materialize、向量维护、质量审计和 profile maintenance。
 
 这些输出不能混为一个“memory write 成功”布尔值。某个非 fatal 维护任务失败时，已确认事件仍可能存在；诊断必须看 task state。
 
 ### 3. 版本更新先处理相似与 supersession
 
-`appendVersionedMemoryUpdate()` 会查找相似现有 node。若是同一语义槽的新版本，可先追加 archive/supersede 事件，再追加 confirmed 事件，并可更新运行时摘要。纠正、冲突和弱证据由 profile lifecycle 与治理模块进一步处理。
+`writeMemoryBatch()` 先分类 accepted/archived/rejected；accepted 项再由 `appendVersionedMemoryUpdate()` 查找相似现有 node。若是同一语义槽的新版本，可先追加 archive/supersede 事件，再追加 confirmed 事件，并可更新运行时摘要。纠正、冲突和弱证据由 profile lifecycle 与治理模块进一步处理。
 
-手工新增长期事实时，优先复用这个入口或 `appendMemoryEvent()` 的规范事件；不要直接 append 不完整对象到 NDJSON。
+手工新增长期事实时使用 `writeMemoryBatch()`；迁移/恢复等基础设施才直接追加规范事件。不要直接 append 不完整对象到 NDJSON。
 
 ### 4. 事件追加是写入真值
 
@@ -237,16 +240,16 @@ post-reply materialize 默认 debounce，多次 job 会合并 dirty user/session
 
 ## 向量写入质量门
 
-`src/memory/vector/write-runtime.js` 的批量写入不是简单 push：
+`utils/memory-v3/repository.js` 的批量写入不是简单 append：
 
-1. 标准化 item、scope、status、tier、source 和 metadata。
-2. 运行 `utils/memoryWritePipeline` 的 validate、batch guards、review 和 commit。
-3. 用 lexical/semantic 邻居与可选 reranker 判断重复、冲突候选或接受。
-4. conflict key 高置信更新可归档旧记录；证据不足的新冲突降为 candidate。
-5. 对接受项附加 recall verification；无法从其证据构造可召回查询时标记 not recallable。
-6. 持久化 shard/manifest，安排 V3 materialize、embedding 和 LanceDB 同步。
+1. 标准化 candidate、scope、status、source 和 metadata。
+2. 运行 `utils/memoryWritePipeline` 的 propose、batch guards 和 validate。
+3. 对现有 active node 与本批候选应用 `strict-v1`，确定性命中直接追加 archived 事件。
+4. accepted 项通过版本化 update 追加 confirmed/archived 事件；rejected 项不进入 active。
+5. 整批只物化一次，并安排 embedding 与 LanceDB 同步。
+6. 仅 `legacy_compat` 将 accepted 项镜像到旧 store；`v3_shadow` 与 `v3_only` 零旧写入。
 
-新增字段时至少同步 normalization、store merge、scoring、LanceDB row 和测试 fixture。只在 write 接受字段但 retrieval 丢失它，会形成“盘上有、永远搜不到”的隐性坏数据。
+新增字段时至少同步 candidate normalization、事件 schema、materializer、query scoring、LanceDB row 和测试 fixture。只在 write 接受字段但 retrieval 丢失它，会形成“事件存在、永远搜不到”的隐性坏数据。
 
 ## Prompt 的四个层次
 
@@ -309,7 +312,7 @@ MemOS、OpenViking 和本地 Memory V3 可能命中同一事实。Runtime contex
 | --- | --- | --- |
 | 改短期连续性 | `utils/shortTermMemory/` | session key、压缩、重启恢复、fast/formal 两条主回复 |
 | 新增长期 profile 字段 | V3 category/profile projection 与 materializer | event payload、conflict key、evidence、packet、legacy surface |
-| 改记忆写质量 | `utils/memoryWritePipeline/` 或 vector write runtime | reject reason、candidate promotion、recall verification、批量原子性 |
+| 改记忆写质量 | `utils/memory-v3/repository.js` 与 `utils/memoryWritePipeline/` | reject/archive reason、strict-v1、版本事件、整批物化 |
 | 改 V3 排名 | `queryPolicy`、`queryScoring`、`queryRanking` | scope、journal 日期、RRF、rerank tail、diagnostics |
 | 增加记忆来源 | `queryCandidates` 与 source plan | allowed sources、category manifest、prompt formatter、trace |
 | 改 LanceDB | `utils/lancedbMemoryStore/` | row schema、分区、shadow/fallback、全量同步脚本 |
@@ -321,6 +324,7 @@ MemOS、OpenViking 和本地 Memory V3 可能命中同一事实。Runtime contex
 ## 高风险误区
 
 - 直接改 projection 或 embedding cache，把可重建派生数据当真值。
+- 从生产业务代码直接调用旧 vector store，绕过 V3 仓储与存储模式。
 - 事件 append 成功后立刻断言 query 可见，忽略 materialize debounce 和 high watermark。
 - 只测 embedding 正常路径，忽略远程不可用、本地 lexical 和 LanceDB fallback。
 - 把 group item 只按 userId 过滤，造成跨群泄漏。
@@ -333,7 +337,9 @@ MemOS、OpenViking 和本地 Memory V3 可能命中同一事实。Runtime contex
 
 ## 数据检查与诊断
 
-Memory V3 默认根目录、事件目录、四类 projection、node JSONL 和 embedding cache 都由 `config/index.js` 的 `MEMORY_V3_*` 配置解析；不要在脚本或测试中硬编码默认 data 路径。Daily Journal 同样以配置的目录和时区为准。
+Memory V3 默认根目录、事件目录、治理 run、四类 projection、node JSONL 和 embedding cache 都由 `config/index.js` 的 `MEMORY_V3_*` 配置解析；存储行为由 `MEMORY_STORAGE_MODE` 解析。不要在脚本或测试中硬编码默认 data 路径。Daily Journal 同样以配置的目录和时区为准。
+
+独立工作树读取部署数据时，`.env` 中相对 `MEMORY_LANCEDB_DIR` 会相对工作树解析。真实 convergence 预检必须同时显式设置部署 `DATA_DIR` 和绝对 `MEMORY_LANCEDB_DIR`，并核对计划中的 `legacyArchive.dataDir`、诊断中的 `lancedbDir` 后才可接受结果。
 
 优先使用现有只读诊断：
 
@@ -382,5 +388,14 @@ node scripts/run-tests.js tests/memoryV3MaterializeWorker.test.js tests/memoryV3
 ```
 
 验收点：worker fallback 可用；backfill 和 job lease 不重复处理；materialize 依赖发生在 memory event 之后。
+
+### 存储收敛与可逆治理
+
+```bash
+node scripts/run-tests.js tests/memoryV3Repository.test.js tests/memoryV3StrictArchive.test.js tests/memoryV3Convergence.test.js tests/memoryV3LegacyArchive.test.js tests/memoryV3ConsumerBoundary.test.js
+node scripts/migrate-memory-v3.js --converge --dry-run
+```
+
+第一条命令验证仓储、归档幂等/恢复、计划应用/回滚、旧文件无损归档和生产消费者边界。第二条命令只生成真实数据预检计划；不得在未检查计划和运行态门禁时继续 `--apply-plan`。若 run 状态停在 `applying`，必须执行 `--rollback-run <runId|plan.json>`。
 
 若改动跨越消息发送与 persist 边界，再运行 [消息与 Agent 运行时](03-message-and-agent-runtime.md) 中的 Runtime V2、回复新鲜度和 post-reply 回归集。

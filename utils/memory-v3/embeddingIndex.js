@@ -6,7 +6,7 @@ const {
   canonicalizeText
 } = require('./helpers');
 const { isMemoryNotRecallable } = require('./recallFilter');
-const { shouldUseRemoteEmbedding, requestEmbedding, cosineArray } = require('../vectorMemory');
+const { shouldUseRemoteEmbedding, requestEmbedding, cosineArray } = require('../memoryEmbedding');
 const {
   CACHE_VERSION,
   buildEmbeddingIdentity,

@@ -1,19 +1,15 @@
 const { appendMemoryEvent, normalizeMemoryEvent, loadMemoryEvents } = require('./events');
-const { materializeMemoryViews, materializeMemoryViewsAsync } = require('./materializer');
-const { queryMemory } = require('./query');
+const {
+  queryMemory,
+  writeMemoryBatch
+} = require('./repository');
 const { assembleMemoryPacket } = require('./packet');
 const { restoreSessionState } = require('./session');
-const { migrateLegacyMemoryToV3 } = require('./migration');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
-const { runProfileMemoryMaintenance } = require('./profileMaintenance');
 const {
   appendVersionedMemoryUpdate,
   findSimilarMemoryForUpdate
 } = require('./versionedUpdate');
-const {
-  importMemoryFile,
-  splitMemoryImportChunks
-} = require('./fileImport');
 const {
   getMemoryRecallPolicyResource
 } = require('./recallPolicyResource');
@@ -47,6 +43,62 @@ const {
   uriForDoc
 } = require('./uriResolver');
 
+function migrateLegacyMemoryToV3(...args) {
+  return require('./migration').migrateLegacyMemoryToV3(...args);
+}
+
+function materializeMemoryViews(...args) {
+  return require('./materializer').materializeMemoryViews(...args);
+}
+
+function materializeMemoryViewsAsync(...args) {
+  return require('./materializer').materializeMemoryViewsAsync(...args);
+}
+
+function applyStrictArchiveRun(...args) {
+  return require('./archiveRuns').applyStrictArchiveRun(...args);
+}
+
+function restoreArchiveRun(...args) {
+  return require('./archiveRuns').restoreArchiveRun(...args);
+}
+
+function runProfileMemoryMaintenance(...args) {
+  return require('./profileMaintenance').runProfileMemoryMaintenance(...args);
+}
+
+function importMemoryFile(...args) {
+  return require('./fileImport').importMemoryFile(...args);
+}
+
+function splitMemoryImportChunks(...args) {
+  return require('./fileImport').splitMemoryImportChunks(...args);
+}
+
+function buildConvergencePlan(...args) {
+  return require('./convergence').buildConvergencePlan(...args);
+}
+
+function saveConvergencePlan(...args) {
+  return require('./convergence').saveConvergencePlan(...args);
+}
+
+function applyConvergencePlan(...args) {
+  return require('./convergence').applyConvergencePlan(...args);
+}
+
+function rollbackConvergenceRun(...args) {
+  return require('./convergence').rollbackConvergenceRun(...args);
+}
+
+function archiveLegacyFiles(...args) {
+  return require('./legacyArchive').archiveLegacyFiles(...args);
+}
+
+function restoreLegacyArchive(...args) {
+  return require('./legacyArchive').restoreLegacyArchive(...args);
+}
+
 module.exports = {
   appendMemoryEvent,
   normalizeMemoryEvent,
@@ -54,9 +106,18 @@ module.exports = {
   materializeMemoryViews,
   materializeMemoryViewsAsync,
   queryMemory,
+  writeMemoryBatch,
+  applyStrictArchiveRun,
+  restoreArchiveRun,
   assembleMemoryPacket,
   restoreSessionState,
   migrateLegacyMemoryToV3,
+  buildConvergencePlan,
+  saveConvergencePlan,
+  applyConvergencePlan,
+  rollbackConvergenceRun,
+  archiveLegacyFiles,
+  restoreLegacyArchive,
   diagnoseProjectionFreshness,
   runProfileMemoryMaintenance,
   appendVersionedMemoryUpdate,

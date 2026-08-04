@@ -907,7 +907,7 @@ function createPrepareNode(deps = {}) {
       });
       bridgeRestored = Boolean(bridgeRestore.restored);
       if (!bridgeRestore.restored) {
-        rehydrateShortTermMemoryAfterRestartIfNeeded(request.userId, persistUserText, request.userInfo, {
+        await rehydrateShortTermMemoryAfterRestartIfNeeded(request.userId, persistUserText, request.userInfo, {
           chatHistory,
           shortTermMemory,
           routeMeta,

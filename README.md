@@ -6,6 +6,16 @@
 - [舞萌功能更新公告](docs/maimai-update-announcement-2026-08-04.md)：包含可直接发布的 QQ 群公告短版和更新日志长版。
 - 文档提交 `f3220cf` 已完成，当前分支未推送远端。
 
+## Memory V3 与 LanceDB 存储收敛实现 2026-08-04 12:05 +08:00
+
+- 提交 `68a5903` 建立 `writeMemoryBatch/queryMemory/applyStrictArchiveRun/restoreArchiveRun` 仓储边界与共享 embedding；提交 `62fac86` 将记忆提取、enrich、群/任务记忆、短期重启召回、Memory CLI、Prompt 上下文和 style/jargon 消费者迁到该边界。
+- 提交 `b2ffed0` 增加 `legacy_compat`、`v3_shadow`、`v3_only` 三种存储模式，以及可校验源文件哈希、稳定迁移身份、`strict-v1` 可逆归档、LanceDB reconcile、旧文件 manifest 归档和显式回滚的收敛工具；`applying` 中断后必须执行 `--rollback-run`。
+- 提交 `1a59274` 修正 auto-gold 群作用域负例；提交 `49ac6dd` 让已位于 rerank tail 的目标日期日记仍获得一次且仅一次硬优先级，消除 LanceDB 日期召回退化。
+- 真实 dry-run `converge-20260804T040343` 已通过：plan hash `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591`，源文件 hash `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`，迁移候选 24,411、`strict-v1` 候选 2,535、预计 LanceDB 行 26,676、预计重建 28.75 秒。
+- 真实门禁：baseline/candidate Recall@8 与 MRR@8 均为 0.925，scope/lifecycle/forbidden 均为 0；LanceDB missing/orphan/stale 均为 0，projection freshness 正常，`storage-overlap recommendedAction=none`。失败计划 `converge-20260804T034114`、`converge-20260804T034857` 已被召回门禁阻断，不得 apply。
+- 自动验收：`1a59274` 后完整测试 138.4 秒通过，覆盖率门禁为行 72.28%、函数 80.04%、分支 61.83%；`49ac6dd` 后五项 Memory/日期回归、lint、typecheck 通过。最新全量复跑中的 Memory 测试通过，但被既有外网用例的 Web Search/YouTube DNS 与超时阻断，未记为全量通过。
+- 部署代码已合并，默认模式仍为 `legacy_compat`；未切换 `.env`、未导入历史、未归档旧文件、未停启主进程/worker、未修改 LanceDB，也未推送远端。实际归档 manifest hash 与维护窗口耗时仍为 `N/A`。
+
 ## 舞萌谱面 SQL/RAG 2026-08-04 11:00 +08:00
 
 - 功能提交 `5a53eb3` 新增独立舞萌同步 Worker、SQLite/LanceDB 版本化谱面库、三个只读查询工具、QQ 成绩绑定/快照/弱项推断与 `/mai` 命令；检索证据进入现有 ReAct 主回复链路，不建立平行回复系统。

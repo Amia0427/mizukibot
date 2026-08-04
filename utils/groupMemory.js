@@ -1,31 +1,15 @@
-const {
-  addMemoryItem,
-  addMemoryItemsBatchWithVectorBackfill,
-  retrieveRelevantMemories,
-  retrieveRelevantMemoriesAsync
-} = require('./vectorMemory');
+const { queryMemory, writeMemoryBatch } = require('./memory-v3');
+const { retrieveRelevantMemories } = require('./memory-v3/projectionCompat');
 
 function sanitizeText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
-function addGroupMemory(groupId, text, type = 'fact', meta = {}, weight = 1.0) {
-  const gid = sanitizeText(groupId);
-  const content = sanitizeText(text);
-  if (!gid || !content) return null;
-
-  return addMemoryItem(
-    `group:${gid}`,
-    content,
-    type,
-    {
-      ...meta,
-      scopeType: 'group',
-      groupId: gid,
-      source: meta?.source || 'group_extractor'
-    },
-    weight
-  );
+async function addGroupMemory(groupId, text, type = 'fact', meta = {}, weight = 1.0) {
+  const candidate = buildGroupMemoryCandidate(groupId, text, type, meta, weight);
+  if (!candidate) return null;
+  const result = await writeMemoryBatch([candidate], { phase: 'group_memory_write' });
+  return result.ids[0] || null;
 }
 
 function buildGroupMemoryCandidate(groupId, text, type = 'fact', meta = {}, weight = 1.0) {
@@ -67,7 +51,7 @@ function buildGroupMemoryCandidate(groupId, text, type = 'fact', meta = {}, weig
 async function addGroupMemoryWithVectorBackfill(groupId, text, type = 'fact', meta = {}, weight = 1.0, options = {}) {
   const candidate = buildGroupMemoryCandidate(groupId, text, type, meta, weight);
   if (!candidate) return { ids: [], accepted: [], rejected: [] };
-  return addMemoryItemsBatchWithVectorBackfill([candidate], {
+  return writeMemoryBatch([candidate], {
     ...options,
     phase: 'group_memory_write'
   });
@@ -88,11 +72,15 @@ async function retrieveRelevantGroupMemories(groupId, query, topK = 4, options =
   const gid = sanitizeText(groupId);
   if (!gid) return [];
 
-  return retrieveRelevantMemoriesAsync(`group:${gid}`, query, topK, {
+  const result = await queryMemory({
     ...options,
-    scopeType: 'group',
-    groupId: gid
+    userId: options.userId || `group:${gid}`,
+    query,
+    topK,
+    groupId: gid,
+    groupIds: [gid]
   });
+  return result.results.filter((item) => String(item.scopeType || '') === 'group' && String(item.groupId || '') === gid);
 }
 
 function formatGroupMemories(hits = [], options = {}) {

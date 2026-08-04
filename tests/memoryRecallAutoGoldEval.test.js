@@ -45,7 +45,7 @@ for (const fileName of [
 
 const { writeJsonLines, atomicWriteText } = require('../utils/memory-v3/helpers');
 
-writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [{
+const goldMemoryNode = {
   id: 'node_like_tea',
   userId: 'u_gold',
   scopeType: 'personal',
@@ -62,7 +62,9 @@ writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [{
   evidenceTier: 'strict',
   stabilityScore: 0.9,
   updatedAt: Date.now()
-}]);
+};
+
+writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [goldMemoryNode]);
 
 atomicWriteText(path.join(process.env.PROMPTS_DIR, 'persona_modules', 'module-catalog.json'), JSON.stringify({
   version: 1,
@@ -86,6 +88,7 @@ const {
   assertExplicitCaseSource,
   assertNonEmptyCases,
   buildAutoGoldCases,
+  buildNegativeGoldCases,
   buildCaseQueryOptions,
   countCategoryMismatches,
   countLifecycleLeaks,
@@ -101,6 +104,27 @@ assert.ok(cases.some((item) => item.expectedIds.includes('node_like_tea')), 'aut
 assert.ok(cases.some((item) => item.expectedIds.includes('wb_test_jasmine')), 'auto gold should include worldbook expected id');
 assert.ok(cases.every((item) => item.expectedIds.length > 0), 'all auto gold cases should be judged');
 assert.ok(new Set(cases.map((item) => item.facet)).size >= 2, 'auto gold should not collapse to one facet');
+writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [
+  goldMemoryNode,
+  {
+    id: 'node_other_user',
+    userId: 'u_other',
+    scopeType: 'personal',
+    status: 'active',
+    text: 'User prefers oolong tea.'
+  },
+  {
+    id: 'node_shared_group',
+    userId: 'u_group_sender',
+    groupId: 'g_shared',
+    scopeType: 'group',
+    status: 'active',
+    text: 'The group shared an anime character image.'
+  }
+]);
+const negativeCases = buildNegativeGoldCases(10);
+assert.ok(negativeCases.some((item) => item.id === 'negative-cross-user:node_like_tea'));
+assert.ok(!negativeCases.some((item) => item.id === 'negative-cross-user:node_shared_group'));
 assert.strictEqual(parseArgs(['--mode', 'lancedb', '--limit', '5']).mode, 'lancedb');
 const explicitCasesPath = path.join(tempRoot, 'explicit-cases.jsonl');
 fs.writeFileSync(explicitCasesPath, `${JSON.stringify({

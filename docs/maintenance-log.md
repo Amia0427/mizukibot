@@ -5,6 +5,14 @@
 - 验收（2026-08-04 12:22 +08:00）：6 条公开问法全部命中预期工具；开发文档、命令、Planner 路由和工具契约 4 项定向测试通过；5 份文档本地链接检查、Prompt 清单、工作区/全仓密钥扫描、暂存区文件名单及 diff check 均通过。
 - README 与舞萌开发文档已增加入口；文档提交 `f3220cf` 已完成。本轮只修改文档，不改业务代码，不纳入 `.belt/`、`AGENT.md` 和并行的 `tests/maimaiAgentIntegration.test.js`，未推送远端。
 
+## 运行维护 2026-08-04 12:05 +08:00
+
+- 真实预检：在独立工作树中显式使用 `DATA_DIR=D:\waifu\data` 和 `MEMORY_LANCEDB_DIR=D:\waifu\data\lancedb_user_bucket`。`converge-20260804T040343` 的 plan hash 为 `b4a1841e7a72564b2d968b50ec58c16d466201a874cf509834a40bcefdf04591`，源文件 hash 为 `156a37f8de1236f4ef18d8262d3d3ef82a4f5bbb59059007cb14f5a63296c504`；迁移候选 24,411，`strict-v1` 候选 2,535，预计 LanceDB 行 26,676，预计重建 28.75 秒。
+- 门禁修复：提交 `1a59274` 排除不能作为跨用户负例的群记忆；提交 `49ac6dd` 修复目标日期日记已存在于 rerank tail 时未获硬优先级的问题。失败计划 `converge-20260804T034114` 和 `converge-20260804T034857` 的 candidate Recall@8/MRR@8 为 `0.900/0.8875`，均按门禁停止；修复后 baseline/candidate 均为 `0.925/0.925`，scope/lifecycle/forbidden 为 0。
+- 存储验收：真实 LanceDB memory/worldbook `readyButNotSynced=0`、`staleTableRows=0`，storage-overlap missing/orphan/unexpected 均为 0，projection stale=false，`recommendedAction=none`。
+- 自动验收：完整测试在 `1a59274` 后 138.4 秒通过，覆盖率门禁为行 72.28%、函数 80.04%、分支 61.83%；`49ac6dd` 后五项 Memory/日期回归、lint、typecheck 通过。随后完整复跑中的 Memory 测试继续通过，但既有 `environmentDataRouting` 与 `nativeWatchlistYoutube` 受外部 Web Search/YouTube DNS 和超时阻断，因此未记为全量通过。
+- 部署代码已合并，默认仍为 `legacy_compat`；未暂停或重启主进程/worker，未导入事件、归档旧文件、修改 `.env` 或重建 LanceDB。实际归档 manifest hash、维护窗口耗时仍为 `N/A`。
+
 ## 运行维护 2026-08-04 11:00 +08:00
 
 - 小目标：完成舞萌谱面 SQL/RAG、个性化成绩分析和现有主回复链路接入；功能提交为 `5a53eb3`。`src/features/maimai/` 统一负责增量同步、Simai 解析、硬条件映射、SQLite/LanceDB 版本切换、检索、凭据、成绩快照、弱项推断和 `/mai` 命令。
@@ -12,6 +20,15 @@
 - 真实验收：generation 2 激活，1362 首歌、5432 张谱面、解析率 100%、确认映射 3792、隔离 1141、覆盖率 76.87%、代表段 11376、文档/向量各 15168；真实混合查询 579 ms。`PANDORA PARADOXXX` 白谱命中 `df:834:SD:4`，定数 15.0、物量 1342、置信度 1.0。
 - 自动验收：13 项舞萌测试、lint、typecheck、Prompt、暂存密钥扫描和 diff check 退出 0。稳定 HEAD 的完整测试运行 158.9 秒后退出 1，单独确认为本机 `localAclScriptSource.test.js` 向 ACL 脚本传入空 `Path`；舞萌用例均通过。运行 Node `v24.14.1` 超出项目 `>=20 <21` 声明。
 - 边界：真实同步 generation 使用 3792 条确定性摘要缓存；模型润色适配器与非法输出回退已有自动测试，但没有真实摘要模型和用户 Import-Token，未宣称完成真实个人成绩接口验收。完整说明见 `docs/maimai-sql-rag.md`；小目标已完成，未推送远端。
+
+## 运行维护 2026-08-04 10:56 +08:00
+
+- 根因：长期记忆业务读写同时依赖 Memory V3 与旧 JSON/shard vector store，embedding 能力也被旧 store 持有；直接删除旧文件会破坏默认兼容路径，且历史治理缺少稳定身份、可审计清单和完整恢复协议。
+- 实现：提交 `68a5903` 建立 Memory V3 仓储、共享 embedding 和 `strict-v1` 可逆归档；提交 `62fac86` 迁移记忆提取、post-reply enrich、群/任务记忆、短期重启召回、Memory CLI、Prompt 上下文与 style/jargon 消费者；提交 `b2ffed0` 增加稳定增量迁移、预检计划、8 分钟截止回滚、LanceDB full reconcile、旧文件 manifest 归档/恢复和 `legacy_compat|v3_shadow|v3_only` 模式。提交 `d682fe3` 修复独立工作树测试路径与 Windows ACL 模块路径兼容。
+- 治理边界：`strict-v1` 只归档确定性重复败者、有效 `supersededBy`、Prompt/系统/工具指令污染、误存的助手自述/拒绝/失败回复，以及空值/占位/无效 scope；低置信、年龄、玩笑、短期性、图片描述或主观评分不会单独触发归档。事件保留 `runId/policyVersion/reason/previousStatus/sourceId/evidenceHash`，恢复只追加 `memory_confirmed`，不删除事件。
+- 自动验收：使用 `MIZUKIBOT_ENV_FILE=D:\waifu\.env` 与工作树 `PROMPTS_DIR`，`npm test`、`npm run coverage`、`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`npm run check:secrets:all`、`git diff --check` 全部退出 0；覆盖率为行 72.27%、函数 80.04%、分支 61.83%。V3-only 缺失旧文件启动、旧文件零写、shadow 只统计、迁移幂等、治理恢复和消费者静态边界均有回归测试。
+- 未执行真实维护窗口：本地 `.env` 仍未切换，未暂停或重启主进程/worker，未导入真实历史、归档旧文件或修改 LanceDB。迁移 `runId=N/A`、归档 manifest hash `N/A`、维护耗时 `N/A`；若计划停在 `applying`，必须显式运行 `node scripts/migrate-memory-v3.js --rollback-run <runId|plan.json>`，不得直接重试 apply。
+- 边界：未删除任何文件，未触碰主工作树的 `.belt/`、`AGENT.md` 或其他代理改动，未推送远端。Memory V3/LanceDB 代码收敛小目标已完成，真实数据切换仍等待独立维护窗口。
 
 ## 运行维护 2026-08-04 +08:00
 

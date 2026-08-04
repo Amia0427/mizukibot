@@ -137,24 +137,21 @@ const startTaskStep = (...args) => getAgentRuntime().startTaskStep(...args);
 const finishTaskStep = (...args) => getAgentRuntime().finishTaskStep(...args);
 const addTaskArtifact = (...args) => getAgentRuntime().addTaskArtifact(...args);
 const setTaskStage = (...args) => getAgentRuntime().setTaskStage(...args);
-let cachedVectorMemoryModule = undefined;
-
-function getVectorMemoryModule() {
-  if (cachedVectorMemoryModule !== undefined) return cachedVectorMemoryModule;
-  try {
-    cachedVectorMemoryModule = require('../../utils/vectorMemory');
-  } catch (error) {
-    cachedVectorMemoryModule = null;
-    if (error?.code !== 'MODULE_NOT_FOUND') throw error;
-    console.warn('[legacy/aiHost] vectorMemory unavailable:', error.message);
-  }
-  return cachedVectorMemoryModule;
-}
-
-function addMemoryItemSafe(...args) {
-  const vectorMemory = getVectorMemoryModule();
-  if (typeof vectorMemory?.addMemoryItem !== 'function') return null;
-  return vectorMemory.addMemoryItem(...args);
+async function addMemoryItemSafe(userId, text, type = 'fact', meta = {}, weight = 1) {
+  const { writeMemoryBatch } = require('../../utils/memory-v3');
+  const result = await writeMemoryBatch([{
+    userId,
+    text,
+    type,
+    weight,
+    source: meta.source,
+    sourceKind: meta.sourceKind,
+    status: meta.status,
+    confidence: meta.confidence,
+    importance: meta.importance,
+    meta
+  }], { phase: 'legacy_ai_host_write' });
+  return result.ids[0] || null;
 }
 const setTaskSuccessCriteria = (...args) => getAgentRuntime().setTaskSuccessCriteria(...args);
 const completeTask = (...args) => getAgentRuntime().completeTask(...args);
@@ -1374,7 +1371,7 @@ async function askAI(question, userInfo, userId, customPrompt = null, imageUrl =
       sessionKey
     });
     if (!bridgeRestore.restored && shouldRehydrateShortTermMemory(question, userId, customPrompt, options)) {
-      rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question, userInfo, {
+      await rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question, userInfo, {
         chatHistory,
         shortTermMemory,
         routeMeta,
@@ -1697,7 +1694,7 @@ function inferExtractorTier(type, confidence = 0.8) {
   return 'B';
 }
 
-function persistLearnedMemories(userId, type, values, confidence = 0.8) {
+async function persistLearnedMemories(userId, type, values, confidence = 0.8) {
   for (const raw of values) {
     const value = String(raw || '').trim();
     if (!shouldPersistMemoryCandidate(type, value, confidence)) continue;
@@ -1705,37 +1702,37 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8) {
     const meta = { source: 'extractor', confidence, importanceTier };
 
     if (type === 'fact') {
-      addMemoryItemSafe(userId, value, 'fact', meta, 1.15);
+      await addMemoryItemSafe(userId, value, 'fact', meta, 1.15);
       addUserFact(userId, value, 30);
       continue;
     }
 
     if (type === 'like') {
-      addMemoryItemSafe(userId, `likes: ${value}`, 'like', meta, 1.05);
+      await addMemoryItemSafe(userId, `likes: ${value}`, 'like', meta, 1.05);
       addProfileItem(userId, 'likes', value, 20);
       continue;
     }
 
     if (type === 'dislike') {
-      addMemoryItemSafe(userId, `dislikes: ${value}`, 'dislike', meta, 1.05);
+      await addMemoryItemSafe(userId, `dislikes: ${value}`, 'dislike', meta, 1.05);
       addProfileItem(userId, 'dislikes', value, 20);
       continue;
     }
 
     if (type === 'goal') {
-      addMemoryItemSafe(userId, `goal: ${value}`, 'goal', meta, 1.2);
+      await addMemoryItemSafe(userId, `goal: ${value}`, 'goal', meta, 1.2);
       addProfileItem(userId, 'goals', value, 20);
       continue;
     }
 
     if (type === 'impression') {
-      addMemoryItemSafe(userId, `impression: ${value}`, 'impression', meta, 1.35);
+      await addMemoryItemSafe(userId, `impression: ${value}`, 'impression', meta, 1.35);
       setUserImpression(userId, value);
       continue;
     }
 
     if (type === 'topic') {
-      addMemoryItemSafe(userId, `recent topic: ${value}`, 'topic', meta, 0.95);
+      await addMemoryItemSafe(userId, `recent topic: ${value}`, 'topic', meta, 0.95);
       addProfileItem(userId, 'recent_topics', value, 12);
     }
   }
@@ -1794,12 +1791,12 @@ Rules:
     const topics = Array.isArray(obj.topics) ? obj.topics : [];
     const confidence = Number(obj.confidence || 0.8) || 0.8;
 
-    persistLearnedMemories(userId, 'fact', facts, confidence);
-    persistLearnedMemories(userId, 'like', likes, confidence);
-    persistLearnedMemories(userId, 'dislike', dislikes, confidence);
-    persistLearnedMemories(userId, 'goal', goals, confidence);
-    persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82));
-    persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9));
+    await persistLearnedMemories(userId, 'fact', facts, confidence);
+    await persistLearnedMemories(userId, 'like', likes, confidence);
+    await persistLearnedMemories(userId, 'dislike', dislikes, confidence);
+    await persistLearnedMemories(userId, 'goal', goals, confidence);
+    await persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82));
+    await persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9));
   } catch (e) {
     console.error('memory extraction failed:', e.message);
   }

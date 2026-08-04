@@ -1,7 +1,7 @@
 const config = require('../../config');
 const { postWithRetry } = require('../httpClient');
 const { extractMessageContent, extractJsonSafely } = require('../parser');
-const { addMemoryItemsBatchWithVectorBackfill } = require('../../utils/vectorMemory');
+const { writeMemoryBatch } = require('../../utils/memory-v3');
 const {
   addUserFact,
   addProfileItem,
@@ -9,9 +9,6 @@ const {
 } = require('../../utils/memory');
 const { addTaskMemoryWithVectorBackfill } = require('../../utils/taskMemory');
 const { addGroupMemoryWithVectorBackfill } = require('../../utils/groupMemory');
-const {
-  appendVersionedMemoryUpdate
-} = require('../../utils/memory-v3/versionedUpdate');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('../../utils/promptSecurity');
 const {
   ensureChatCompletionsUrl,
@@ -48,93 +45,14 @@ const {
   attachPendingMemoryV3Event
 } = require('./profilePolicy');
 
-function appendV3LearnedMemoryEvent(userId, type, value, meta = {}, options = {}) {
-  if (config.MEMORY_V3_ENABLED === false) return;
-  const text = String(value || '').trim();
-  if (!text) return;
-  const fieldKey = resolveV3ProfileFieldKey(type, meta.fieldKey);
-  const status = String(meta.status || '').trim().toLowerCase() || getDefaultStatusForType(type, options.memoryKind);
-  const sourceKind = String(meta.sourceKind || 'extractor').trim().toLowerCase() || 'extractor';
-  const extractionClass = meta.extractionClass || classifyProfileExtraction(type, text, { ...options, fieldKey, status, sourceKind });
-  const conflictKey = meta.conflictKey || buildProfileConflictKeyForExtraction(userId, type, text, { ...options, fieldKey });
-  const eventType = status === 'active' || sourceKind === 'explicit'
-    ? 'memory_confirmed'
-    : 'memory_candidate_extracted';
-  void appendVersionedMemoryUpdate({
-    type: eventType,
-    userId,
-    sessionKey: options.sessionKey,
-    groupId: options.groupId,
-    channelId: options.channelId,
-    sessionId: options.sessionId,
-    routePolicyKey: options.routePolicyKey,
-    topRouteType: options.topRouteType,
-    scopeType: 'personal',
-    source: meta.source || 'extractor',
-    sourceKind,
-    status,
-    confidence: meta.confidence,
-    importance: meta.importance,
-    memoryKind: type === 'summary' || type === 'impression' ? fieldKey : type,
-    semanticSlot: fieldKey,
-    conflictKey,
-    text,
-    payload: {
-      type: type === 'summary' || type === 'impression' ? 'fact' : type,
-      fieldKey,
-      memoryKind: type,
-      extractionClass,
-      conflictKey
-    },
-    participants: meta.participants,
-    entities: meta.entities,
-    relations: meta.relations
-  }).catch((error) => {
-    console.error('memory v3 event append failed:', error?.message || error);
-  });
-}
-
-async function flushPendingMemoryV3Events(accepted = []) {
-  if (config.MEMORY_V3_ENABLED === false) return;
-  for (const item of Array.isArray(accepted) ? accepted : []) {
-    const event = item?.meta?.pendingMemoryV3Event;
-    if (!event || typeof event !== 'object') continue;
-    try {
-      const nextStatus = String(item.status || event.status || '').trim().toLowerCase();
-      const nextSourceKind = String(item.sourceKind || event.sourceKind || '').trim().toLowerCase();
-      await appendVersionedMemoryUpdate({
-        ...event,
-        type: nextStatus === 'active' || nextSourceKind === 'explicit'
-          ? 'memory_confirmed'
-          : 'memory_candidate_extracted',
-        status: nextStatus || event.status,
-        confidence: item.confidence ?? event.confidence,
-        payload: {
-          ...(event.payload && typeof event.payload === 'object' ? event.payload : {}),
-          acceptedMemoryId: item.id,
-          writeReview: item.meta?.writeReview || null,
-          writeRerank: item.meta?.writeRerank || null,
-          recallVerification: item.meta?.recallVerification || null,
-          learningDecision: item.meta?.learningDecision || event.payload?.learningDecision || null
-        }
-      });
-      delete item.meta.pendingMemoryV3Event;
-    } catch (error) {
-      console.error('memory v3 event append failed:', error?.message || error);
-    }
-  }
-}
-
-async function flushVectorMemoryWrites(vectorItems = [], options = {}) {
+async function flushMemoryWrites(vectorItems = [], options = {}) {
   if (!Array.isArray(vectorItems) || vectorItems.length === 0) {
     return { ids: [], accepted: [], rejected: [] };
   }
-  const result = await addMemoryItemsBatchWithVectorBackfill(vectorItems, {
+  return writeMemoryBatch(vectorItems, {
     ...options,
     phase: 'memory_extraction_write'
   });
-  await flushPendingMemoryV3Events(result.accepted);
-  return result;
 }
 
 function persistLearnedMemories(userId, type, values, confidence = 0.8, options = {}) {
@@ -212,7 +130,7 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
   }
 
   if (!Array.isArray(options.vectorItems) && vectorItems.length > 0) {
-    flushVectorMemoryWrites(vectorItems, options).catch((error) => {
+    flushMemoryWrites(vectorItems, options).catch((error) => {
       console.error('memory vector write backfill failed:', error?.message || error);
     });
   }
@@ -386,7 +304,7 @@ Rules:
     const vectorItems = [];
     if (patterns[0]) vectorItems.push(buildStyleMemoryItem(uid, patterns[0], 'pattern', confidence, options));
     if (!patterns[0] && avoids[0]) vectorItems.push(buildStyleMemoryItem(uid, avoids[0], 'avoid', confidence, options));
-    if (vectorItems.length > 0) await flushVectorMemoryWrites(vectorItems, options);
+    if (vectorItems.length > 0) await flushMemoryWrites(vectorItems, options);
   } catch (e) {
     console.error('style memory extraction failed:', e.message);
   }
@@ -450,7 +368,7 @@ Rules:
     const vectorItems = [];
     if (terms[0]) vectorItems.push(buildJargonMemoryItem(groupId, terms[0], 'term', confidence, options));
     if (!terms[0] && patterns[0]) vectorItems.push(buildJargonMemoryItem(groupId, patterns[0], 'pattern', confidence, options));
-    if (vectorItems.length > 0) await flushVectorMemoryWrites(vectorItems, options);
+    if (vectorItems.length > 0) await flushMemoryWrites(vectorItems, options);
   } catch (e) {
     console.error('group jargon extraction failed:', e.message);
   }
@@ -766,7 +684,7 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
         entities,
         relations
       };
-      await flushVectorMemoryWrites([attachPendingMemoryV3Event({
+      await flushMemoryWrites([attachPendingMemoryV3Event({
         userId: options.groupId ? `group:${options.groupId}` : userId,
         text: explicitText,
         type: 'fact',
@@ -902,7 +820,7 @@ Rules:
       persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82), { vectorItems, ...sharedMeta });
     }
     persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9), { vectorItems, ...sharedMeta });
-    if (vectorItems.length > 0) await flushVectorMemoryWrites(vectorItems, sharedMeta);
+    if (vectorItems.length > 0) await flushMemoryWrites(vectorItems, sharedMeta);
     if (postReplyMemoryMode === 'core') return;
     const affinityProposal = await extractAffinityProposal(userId, userText, botReply, options);
     if (affinityProposal) {
