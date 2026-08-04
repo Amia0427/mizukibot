@@ -1908,3 +1908,11 @@
 - 验收：14 项安全/相邻专项全部通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0。`npm test` 退出 1：五项为本分支既有 `adminStableSystemPrompt`、`configPersonaPrompt`、`mainReplyUnifiedDiagnostics`、`memoryV3EmbeddingBackfillConcurrency`、`memoryV3RagExplainDiagnostic`，另一项为暂存区外并行小剧场实现尚未同步 `messageHandlerModuleBoundary`；排除该并行用例后的 552 项中 547 项通过，失败仍为上述五项。本次安全文件未涉及这些失败范围。
 - 受保护的 `prompts/admin.txt` 与未跟踪 `AGENT.md` 未修改、未暂存；并行开发文档和小剧场改动保持原样，未纳入本次提交，不推送远端。
 - 提交后记录（2026-07-31 02:18 +08:00）：实现提交 `2b7c1a2` 已完成；以 `mizuki\administrator` 对 `.env` 与 `data` 共 38,830 项应用仓库 ACL 脚本，恢复快照为 `artifacts/security/acl-snapshots/acl-20260731-021604-28732.json`。`npm run diag:security` 为 7 OK、1 WARN、0 ERROR，敏感路径 ACL 通过；仅保留既有 `NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER` 兼容告警，本目标已完成。
+
+## 运行维护 2026-08-04 14:43 +08:00
+
+- 根因：PR #5 没有内容冲突，`dependency-vulnerabilities` 因 7 个过期依赖节点失败；同一提交分别由 `push` 和 `pull_request` 触发，形成两条相同红色检查。
+- 修复：根锁文件将 `body-parser`、两条 `brace-expansion`、`sharp`、`undici` 升到安全版本，Brave Search 锁文件将 `ws` 升到 8.21.2，Free Ride 约束 `idna>=3.15,<4`；没有新增 npm 直接依赖。
+- 兼容性：Sharp 0.35 拒绝旧测试夹具中的无效 JPEG 扫描参数，测试改为动态生成有效 JPEG，生产图片容错逻辑未放宽。
+- 验收：根项目与嵌套技能 `npm audit` 均为 0；两个锁文件共 476 个版本的实时 OSV 查询为 0 漏洞；CI/Supply Chain policy、812 文件 lint、typecheck、prompt、全仓密钥、许可证、SBOM、Node 20.20.2 Sharp 编码与关键测试全部通过；第二轮完整 `npm test` 177 秒退出 0。
+- 提交后记录：实现提交 `de13971` 已完成，本小目标已完成；文档单独提交，当前分支未推送远端。
