@@ -1,6 +1,6 @@
 # 测试与质量门禁
 
-更新：2026-08-02 14:29 +08:00
+更新：2026-08-02 17:21 +08:00
 
 本项目没有统一测试框架包装所有用例。`tests/*.test.js` 大多是直接使用 Node `assert` 的可执行 CommonJS 脚本，仓库用 `scripts/run-tests.js` 负责发现、隔离、并发、超时和结果汇总。
 
@@ -73,6 +73,7 @@ module.exports = (async () => {
 
 - JSON/JSONL 测试写入临时目录，并验证 flush 后的磁盘状态。
 - SQLite 测试使用独立数据库，结束前关闭连接；并发用例应通过真实子进程验证 WAL 和锁行为。
+- LangGraph V2 测试若覆盖自定义 legacy 目录，必须同时显式设置临时 `DATA_DIR` 和 `LANGGRAPH_V2_STORE_FILE`/`storeFile`；删除临时目录前调用 `closeLoadedSqliteConnections()`，不得读取默认 legacy 数据或生产 SQLite。
 - LanceDB、向量索引和物化结果属于派生状态，测试同时验证权威事件或结构化记录。
 - 测试不得读取或删除默认 `DATA_DIR`。
 
@@ -306,3 +307,10 @@ npm audit --omit=dev
 - 仓库门禁：最终 `npm test` 169.4 秒、`npm run coverage` 192.0 秒，lint、typecheck、Agent 静态检查、Prompt、全仓/暂存区 secrets 与 diff check 均退出 0。
 - 覆盖率：overall `71.49/80.23/62.01`、web `79.84/87.50/80.59`、Runtime V2 `77.61/74.77/63.62`、stable boundaries `85.89/82.24/72.04`（行/函数/分支），四个 scope 无失败。
 - 数据与保护项：验收后 `data/tool_authorizations.sqlite` 为 0 张票据、0 条审计记录；`prompts/admin.txt` 与 `AGENT.md` SHA-256 分别保持 `2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`、`B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`。
+
+### 2026-08-02 LangGraph V2 SQLite 原子存储
+
+- 实现提交：`0a45d71`、`e2664a1`、`21e3080`、`3cfd85b`、`cc5468d`、`654170a`；测试生命周期提交：`662914a`。
+- 双运行时：Node 20.20.2 使用 ABI 115 `better-sqlite3` hook，Node 24.14.1 使用当前依赖；原 7 项聚焦测试及新增 7 项清理/诊断回归均通过。
+- 仓库门禁：完整测试 574/574；804 文件 lint、typecheck、Agent 静态检查、Prompt、全仓 secrets、diff check 和 coverage 均退出 0。覆盖率 Statements/Lines `72.19%`、Branches `62.18%`、Functions `80.00%`，全部 scope 通过。
+- 数据与诊断：SQLite `healthy`、`quick_check=ok`、0 checkpoint/event/quarantine；legacy 120/6209 文件、137,990,244/80,529,200 bytes、0 坏 JSON，聚合 SHA-256 与实现前基线一致。

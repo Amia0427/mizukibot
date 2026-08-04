@@ -1,3 +1,11 @@
+## 运行维护 2026-08-02 17:21 +08:00
+
+- 根因：LangGraph V2 的 checkpoint 与 event 仍分散写入 JSON，节点与副作用边界可能只落一半；全量启动扫描 legacy 会放大 I/O，单个坏 payload 或 SQLite 物理损坏也缺少明确隔离等级。
+- 实现：提交 `0a45d71`、`e2664a1`、`21e3080`、`3cfd85b`、`cc5468d`、`654170a` 将新写入端切到 `DATA_DIR/langgraph_v2.sqlite`，以 `saveTransition()` 单事务提交 checkpoint/event；legacy 只按 thread 惰性读取且永久只读，`clear()` 原子删除 SQLite 数据并保留 tombstone。逻辑坏行进入 quarantine，物理损坏 fail closed；热重载、全局 shutdown 和诊断均纳入连接生命周期。提交 `662914a` 补齐 7 个临时 `DATA_DIR` 测试的显式 SQLite 关闭和诊断测试的独立 store 路径。
+- 验收：Node 20.20.2（ABI 115 hook）与 Node 24.14.1 的 LangGraph 聚焦回归通过；Node 24 完整测试为 574/574。804 文件 lint、typecheck、Agent 静态检查、Prompt、全仓 secrets、diff check 和 coverage 均退出 0；覆盖率为 Statements/Lines `72.19%`、Branches `62.18%`、Functions `80.00%`，四个 scope 全部通过。
+- 数据与诊断：`diag:runtime -- --json` 报告 SQLite `healthy`、`quick_check=ok`、0 checkpoint、0 event、0 quarantine；legacy 保持 120/6209 文件、137,990,244/80,529,200 bytes、0 坏 JSON，聚合 SHA-256 分别为 `03a2b843ee304ddcf7644f7e112d8af1eeb8e9a60e2a8f2de78cde9c311a3b19`、`b32db4452e9c3a4eb75f1884165c77ac06b8c7f6311601fba996667455869686`。
+- 边界：未修改或暂存 `AGENT.md` 与 `prompts/admin.txt`，SHA-256 分别保持 `B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`、`2D42628CF64AB3235F1AB7AE6306081CA0FBCE8114AB344B193F686A7DB7C607`；LangGraph V2 SQLite 原子存储小目标已完成，未推送远端。
+
 ## 运行维护 2026-08-02 15:24 +08:00
 
 - 根因：`harness_eval_manifest_v1` 只固定 fixture，三个本地评估仍分别解析控制台与硬编码阈值，也没有统一 profile/report 契约；真实模型与脱敏回放只有名称，没有可验证的输入元数据、时效和最小覆盖边界。

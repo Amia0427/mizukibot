@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 运行维护 2026-08-02 17:21 +08:00
+
+- LangGraph V2 新写入端已切换到 `DATA_DIR/langgraph_v2.sqlite`；checkpoint 与关联 event 通过同一 SQLite 事务提交，副作用前后边界也使用原子 transition。旧 `langgraph_v2_checkpoints/` 与 `langgraph_v2_events/` 永久只读，按 thread 惰性兼容读取，`clear()` 通过永久 tombstone 防止旧 JSON 复活。
+- SQLite 逻辑坏行会原子移入 quarantine，物理损坏 fail closed；`npm run diag:runtime -- --json` 已报告 `healthy`、`quick_check=ok`、0 checkpoint、0 event、0 quarantine，并保留 legacy 文件规模与 stale 字段。
+- 实现提交：`0a45d71`、`e2664a1`、`21e3080`、`3cfd85b`、`cc5468d`、`654170a`；测试生命周期收口提交：`662914a`。Node 20.20.2 与 Node 24.14.1 聚焦回归通过，完整测试 574/574，覆盖率 Statements/Lines `72.19%`、Branches `62.18%`、Functions `80.00%`，全部基线通过。
+- Legacy 验收保持 120/6209 文件、137,990,244/80,529,200 bytes、0 坏 JSON，聚合 SHA-256 分别为 `03a2b843ee304ddcf7644f7e112d8af1eeb8e9a60e2a8f2de78cde9c311a3b19`、`b32db4452e9c3a4eb75f1884165c77ac06b8c7f6311601fba996667455869686`；`AGENT.md` 与 `prompts/admin.txt` 保护 hash 未变化，未推送远端。
+
 ## Harness 评估 2026-08-02 15:24 +08:00
 
 - 实现提交 `34ec277` 将评估契约升级为 `harness_eval_manifest_v2`，统一声明 5 个 suite、`ci` / `nightly:verify` profile、runner、case schema、data policy、指标与阈值；顶层 runner 使用隔离子进程并生成严格 JSON 报告。

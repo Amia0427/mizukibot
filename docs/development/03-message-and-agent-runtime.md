@@ -1,6 +1,6 @@
 # 消息与 Agent 运行时
 
-本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-01。
+本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-02 17:21 +08:00。
 
 读完后应能回答：一条 OneBot 消息在哪里被接收、在哪些位置可能提前返回、何时进入 Runtime V2、工具如何受策略约束、回复如何防重复与过期，以及回复后的持久化为何不应阻塞用户可见结果。
 
@@ -215,7 +215,11 @@ policy 至少声明 `risk/capability/effect/confirmation/scope/idempotency/repla
 
 ### Checkpoint 与恢复
 
-Runtime V2 使用 [`../../utils/langgraphV2Store.js`](../../utils/langgraphV2Store.js) 持久化节点快照和事件。thread id 必须稳定关联当前会话/请求；节点通过 `saveAndEmit()` 记录状态。`runPersistInBackgroundFromCheckpoint(threadId)` 会重新加载 checkpoint，并仅把 `deferPersist` 改为 false 后执行 persist 节点。
+Runtime V2 使用 [`../../utils/langgraphV2Store.js`](../../utils/langgraphV2Store.js) 持久化节点快照和事件。新写入端是 `DATA_DIR/langgraph_v2.sqlite`：普通节点通过 `saveTransition()` 在一个事务中提交 checkpoint 与关联 event，副作用前后边界也必须各自使用原子 transition，不能重新拆成两个独立写入。
+
+旧 `langgraph_v2_checkpoints/` 和 `langgraph_v2_events/` 只做按 thread 惰性兼容读取，不启动扫描、不批量迁移、不回写。checkpoint 以 SQLite 优先，仅在无 SQLite 记录时回退 legacy；event 在无 tombstone 时合并 legacy 与 SQLite。`clear(threadId)` 在同一事务删除 SQLite checkpoint/event 并永久保留 tombstone，后续写入不能移除 tombstone。
+
+thread id 必须稳定关联当前会话/请求；`runPersistInBackgroundFromCheckpoint(threadId)` 会重新加载 checkpoint，并仅把 `deferPersist` 改为 false 后执行 persist 节点。SQLite 逻辑坏行会原子移入 quarantine 后删除源行，物理损坏直接 fail closed；Runtime reset 和全局 shutdown 会关闭连接。`npm run diag:runtime -- --json` 的 `components.langGraphV2Store.sqlite` 提供 health、`quickCheckMessages`、checkpoint/event/quarantine、active/stale 和字节数，legacy 规模继续单独报告。
 
 因此，节点应尽量返回可序列化状态，不要把 socket、client、闭包或巨大原始响应放进 graph state。运行时依赖由 host 组合根注入，不由 state 携带。
 
@@ -327,10 +331,10 @@ node scripts/run-tests.js tests/messageHandlerModuleBoundary.test.js tests/messa
 ### Runtime V2 与持久化
 
 ```bash
-node scripts/run-tests.js tests/langgraphV2.test.js tests/persistNodeConfig.test.js tests/postReplyJobQueue.test.js
+node scripts/run-tests.js tests/langgraphV2SqliteStore.test.js tests/runtimeV2Persistence.test.js tests/toolPolicyRuntimeEffects.test.js tests/runtimeStatusDiagnostics.test.js tests/sqliteRuntimeShutdown.test.js
 ```
 
-验收点：图分支可达；persist 配置契约正确；post-reply job 可入队、恢复和完成。
+验收点：checkpoint/event 原子提交及回滚；legacy 惰性兼容、tombstone、quarantine 和物理损坏边界；副作用 transition、诊断和连接关闭。
 
 ### 诊断现有运行实例
 

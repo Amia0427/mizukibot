@@ -1,6 +1,6 @@
 # 架构地图与代码落点
 
-> 源码核验时间：2026-07-31（Asia/Shanghai）。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
+> 源码核验时间：2026-08-02 17:21 +08:00。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
 
 本文用于回答三个问题：进程如何协作、代码当前由谁实现、一个新改动应该放在哪里。
 
@@ -222,7 +222,7 @@ humanize -> final_validate -> persist -> END
 | 数据类型 | 默认位置/owner | 规则 |
 | --- | --- | --- |
 | 主进程状态、NapCat 健康、request trace、模型调用日志 | `DATA_DIR` 下对应 JSON/JSONL/NDJSON | 主进程和诊断只通过既有 writer/API 访问，不直接拼接第二份格式 |
-| LangGraph checkpoint/event | `DATA_DIR/langgraph_v2_checkpoints`、`DATA_DIR/langgraph_v2_events` | 由 V2 checkpoint store 管理；迁移脚本不得与在线进程并发改写 |
+| LangGraph checkpoint/event | 新写入：`DATA_DIR/langgraph_v2.sqlite`；只读兼容：`DATA_DIR/langgraph_v2_checkpoints`、`DATA_DIR/langgraph_v2_events` | `saveTransition()` 原子提交 checkpoint/event；legacy 只按 thread 惰性读取，禁止扫描、回写和批量迁移；`clear()` 通过 tombstone 防止旧数据复活 |
 | post-reply 队列与 trace | `DATA_DIR/post_reply_jobs`、`DATA_DIR/post_reply_traces` | 主回复链生产任务，worker 消费；inline 与独立 worker 只能选一种消费模式 |
 | worker readiness | `DATA_DIR/runtime/post-reply-worker/worker-state.json` | 独立 worker owner；不要由 Web 或主进程伪造 ready |
 | Memory V3 | `DATA_DIR/memory-v3` | 通过 `utils/memory-v3` API、materializer 和 worker 管理，禁止手改 projection 当作源数据 |
@@ -231,7 +231,7 @@ humanize -> final_validate -> persist -> END
 | prompt | `prompts/` + `prompt-manifest.json` | 是版本化源码资产，不属于 `DATA_DIR`；私有 prompt 仍不得提交 |
 | 生成图片、skill cache、上传临时文件 | `DATA_DIR/create-agent`、`skill_cache`、`qzone_uploads` 等 | 运行产物，不进入源码目录，也不默认提交 |
 
-`DATA_DIR` 是多进程共享边界，不代表任何文件都能被所有进程随意写。判断 owner 时查看配置项、store 模块和进程角色；不确定时先增加只读诊断，不要增加第二个 writer。
+`DATA_DIR` 是多进程共享边界，不代表任何文件都能被所有进程随意写。判断 owner 时查看配置项、store 模块和进程角色；不确定时先增加只读诊断，不要增加第二个 writer。LangGraph SQLite 逻辑坏行由 store 原子隔离到 quarantine，物理完整性失败必须 fail closed；连接由 Runtime reset 和 `utils/sqliteRuntime.js` 统一关闭。
 
 ## 8. 新代码落点决策
 
