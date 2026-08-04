@@ -1,5 +1,11 @@
 # MizukiBot
 
+## NapCat 测试隔离 2026-08-05 00:10 +08:00
+
+- `消息不存在` 堆栈已定位到 NapCat `GetMsg`：测试子进程继承本地 `.env` 后，把测试消息 ID 发给了真实 `127.0.0.1:3000`，不是线上消息发送失败。
+- 实现提交 `6acffdc` 将未显式配置的测试 NapCat 地址隔离到 `127.0.0.1:1`，显式 mock 地址仍会保留；正式启动流程和 NapCat 配置未修改。
+- 验收：4 项定向测试、目标 ESLint、typecheck 和 `git diff --check` 均退出 0；小目标已完成，未推送远端。
+
 ## 角色内心 reasoning 正文隔离 2026-08-04 23:56 +08:00
 
 - 所有上游模型均通过第三方 OpenAI-compatible 网关接入；网关若将 reasoning 混入 `choices[].message.content` 或流式 `delta.content`，用户可见文本边界会剥离“（心想：……）”“(内心OS：……)”等内部思考块。
