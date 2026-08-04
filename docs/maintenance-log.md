@@ -1916,3 +1916,10 @@
 - 兼容性：Sharp 0.35 拒绝旧测试夹具中的无效 JPEG 扫描参数，测试改为动态生成有效 JPEG，生产图片容错逻辑未放宽。
 - 验收：根项目与嵌套技能 `npm audit` 均为 0；两个锁文件共 476 个版本的实时 OSV 查询为 0 漏洞；CI/Supply Chain policy、812 文件 lint、typecheck、prompt、全仓密钥、许可证、SBOM、Node 20.20.2 Sharp 编码与关键测试全部通过；第二轮完整 `npm test` 177 秒退出 0。
 - 提交后记录：实现提交 `de13971` 已完成，本小目标已完成；文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-08-04 23:41 +08:00
+
+- 根因：Anthropic 请求整形只会修正尾部的内部 assistant 上下文；普通 assistant 文本位于消息末尾时仍按 prefill 发出，不支持该能力的模型返回 HTTP 400。
+- 修复：实现提交 `f18ae99` 在协议边界保留原 assistant 消息，并追加最小 user 续写指令，保证发送给 Anthropic Messages 的正常生成请求以 user 结束；模型、endpoint、提示词和其他 provider 均未调整。
+- 验收：Anthropic 消息顺序、provider 请求规范化及 prompt cache 三项定向测试通过；`npm run lint` 检查 812 个文件、`npm run typecheck`、`git diff --check` 均通过；完整 `npm test` 213.3 秒退出 0。
+- 提交后记录：实现提交 `f18ae99` 已完成，本小目标已完成；文档单独提交，当前分支未推送远端。
