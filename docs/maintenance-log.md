@@ -1,3 +1,10 @@
+## 运行维护 2026-08-04 12:42 +08:00
+
+- 合并：提交 `7c23451` 将 `codex/memory-v3-lancedb-convergence` 合入部署分支 `amia/dev`，父提交依次为部署 `0b6d779` 与收敛 `eef03db`；原部署分支领先的 8 个提交和收敛分支的 8 个提交均保持为祖先。
+- 冲突与保护：仅 README、架构地图、维护日志发生内容冲突，均保留两边事实；`AGENT.md` SHA-256 保持 `B9289694CCC4820507B75DBF26746C778E4ED574004EB5DBF9FBDD10D49788FF`，`.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js` 仍未跟踪且未纳入提交。
+- 验收：21 项 Memory V3、日期召回、post-reply、ReAct 与舞萌交叉回归通过；`npm test` 172.1 秒退出 0；lint、typecheck、Prompt、全仓密钥、`git diff --cached --check` 均退出 0。coverage 报告基线为 overall 行 72.55%、函数 80.49%、分支 61.68%，web、runtime-v2、stable-boundaries 与 overall 四个 scope 全部通过；coverage 测试阶段一次外部 DNS 失败后，环境数据和 YouTube 用例单独复跑通过。
+- 运行边界：仅完成源码合并，未重启主进程或 worker，未执行 convergence apply、修改 `.env`、归档旧文件或重建 LanceDB；默认仍为 `legacy_compat`，未推送远端。
+
 ## 运行维护 2026-08-04 12:24 +08:00
 
 - 新增 `docs/maimai-user-guide.md`，按普通查询、单谱分析、个人绑定、成绩刷新、弱项推断、数据边界和常见问题说明舞萌功能；示例文案已通过当前 Planner 路由探针，明确多谱筛选与单谱手法分析需要分步提问。

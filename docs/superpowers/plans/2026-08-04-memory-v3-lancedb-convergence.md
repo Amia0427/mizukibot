@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 20、CommonJS、NDJSON 事件日志、JSON 投影、SQLite Profile Journal、LanceDB、项目自带测试运行器。
 
-**状态（2026-08-04 12:05 +08:00）：** 仓储、消费者、收敛工具、自动门禁和真实 dry-run 已完成；真实本地 apply（Task 9 后五步）尚未执行。当前默认仍为 `legacy_compat`，未移动旧文件或修改 `.env`。
+**状态（2026-08-04 12:42 +08:00）：** 仓储、消费者、收敛工具、自动门禁、真实 dry-run 和部署源码合并已完成；合并提交为 `7c23451`。真实本地 apply（Task 9 后五步）尚未执行，当前默认仍为 `legacy_compat`，未移动旧文件或修改 `.env`。
 
 ---
 
@@ -152,7 +152,7 @@
 
 ### Task 9: 本地维护迁移
 
-**状态：dry-run 已完成，apply 未执行。** 后续步骤会修改本地运行数据并停启进程，只能在部署目录集成本分支后的单独维护窗口中执行。
+**状态：部署源码已合并，dry-run 已完成，apply 未执行。** 后续步骤会修改本地运行数据并停启进程，只能在单独维护窗口中执行。
 
 **Files:**
 - Modify: `.env`（仅本地，不提交敏感内容）
@@ -197,5 +197,12 @@
 - 计划规模：迁移候选 24,411、待追加 24,411、当前/未来 node 4,800/29,211、归档候选 2,535、预计 active LanceDB 行 26,676、预计重建 28.75 秒。
 - 召回门禁：baseline/candidate Recall@8 与 MRR@8 均为 0.925；leakage、lifecycle leakage、forbidden hit 均为 0。失败计划 `converge-20260804T034114`、`converge-20260804T034857` 均保持 `planned` 且不可 apply。
 - 存储门禁：memory/worldbook `readyButNotSynced=0`、`staleTableRows=0`，missing/orphan/unexpected 为 0，projection stale=false，`recommendedAction=none`。
-- 运行边界：部署目录仍运行旧代码，未执行 import/archive/reconcile、未修改 `.env`、未停止进程。实际归档 manifest hash 与维护耗时仍为 `N/A`。
+- 运行边界：当时部署目录仍运行旧代码，未执行 import/archive/reconcile、未修改 `.env`、未停止进程。实际归档 manifest hash 与维护耗时仍为 `N/A`。
 - 自动验收：五项 Memory/日期回归、lint、typecheck 通过；最新全量测试中的 Memory 用例通过，但两个既有外网用例受 DNS/超时阻断，因此不把本轮全量测试记为通过。
+
+## 部署合并验收 2026-08-04 12:42 +08:00
+
+- 合并提交 `7c23451` 的父提交为部署 `0b6d779` 与收敛 `eef03db`，两边领先历史均被保留；三处文档冲突保留双方内容，未跟踪的 `.belt/`、`AGENT.md` 和舞萌 Agent 集成测试未纳入提交。
+- 21 项 Memory/ReAct/舞萌交叉回归与 172.1 秒全量测试通过；lint、typecheck、Prompt、全仓密钥和 diff 门禁通过。
+- coverage 基线通过：overall 行 72.55%、函数 80.49%、分支 61.68%，四个 scope 全部达标。coverage 测试阶段的一次外部 DNS 失败没有影响报告生成，相关环境数据与 YouTube 用例随后单独复跑通过。
+- 当前仅完成部署源码合并；主进程和 worker 未重启，真实 apply、`.env` 切换、旧文件归档和 LanceDB 重建仍未执行。

@@ -1,5 +1,11 @@
 # MizukiBot
 
+## Memory V3 部署代码合并 2026-08-04 12:42 +08:00
+
+- 合并提交 `7c23451` 以部署提交 `0b6d779` 和收敛提交 `eef03db` 为双父，完整保留部署分支领先的 ReAct、舞萌及文档提交；`.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js` 未纳入提交。
+- 合并后 21 项 Memory/ReAct/舞萌交叉回归、172.1 秒全量测试、lint、typecheck、Prompt、全仓密钥与 diff 门禁通过；coverage 基线为行 72.55%、函数 80.49%、分支 61.68%，四个 scope 全部通过。coverage 测试阶段的一次外部 DNS 失败单独复跑后恢复通过。
+- 部署源码已更新，但未重启主进程或 worker，也未执行真实 apply、修改 `.env`、归档旧文件或重建 LanceDB；默认仍为 `legacy_compat`，未推送远端。
+
 ## 舞萌用户文档 2026-08-04 12:24 +08:00
 
 - [舞萌谱面查询与成绩分析使用说明](docs/maimai-user-guide.md)：面向普通用户，包含自然语言查询、单谱分析、成绩绑定、个人弱项、隐私边界和常见问题。
