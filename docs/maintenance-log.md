@@ -1,3 +1,11 @@
+## 运行维护 2026-08-04 +08:00
+
+- 小目标：以 LangGraph 原生 ReAct 循环取代 direct-chat Planner 和预生成执行计划链；实现提交为 `87cf7d4`。生产拓扑统一为 `route -> agent_decide -> execute_tools -> agent_decide -> humanize -> final_validate -> persist`，无工具路由保持流式，工具路由只输出最终回答。
+- 授权与恢复：Router `allowedTools` 是工具暴露上界，运行时只能收窄；每轮最多 3 个工具轮次、累计 4 次调用，越权、参数错误、重复和超额调用均回灌明确 tool result。副作用顺序执行并在前后写 checkpoint，恢复时依据已完成调用状态避免重放；只读工具可安全并行。
+- 清理范围：删除 Planner 配置、prompt、planning package、旧图节点及不可达专属测试；后台研究队列与研究语义代码保留但不再入队，历史 research brief 仍可读取。新增 `agent_decision`、`agent_tool_round`、`agent_tool_result`、`agent_limit_reached`、`agent_forced_final` 观测事件。
+- 验收：定向执行 `node scripts/run-tests.js tests/langgraphCheckpointSnapshot.test.js tests/runTestsRunner.test.js tests/checkSecretsAllMode.test.js` 及 prompt 治理回归，均退出 0；`npm run lint`、`npm run typecheck`、`npm run check:agent:static` 均退出 0；完整 `npm test` 用时 158.5 秒并退出 0；隔离索引 `git diff --cached --check` 退出 0。
+- 并行保护：提交前后主索引中的舞萌等暂存路径保持原清单，四个重叠文件经三方合并保留两边内容；未纳入 `package-lock.json`、`simai.js`、`.learnings/**` 和舞萌业务文件，未推送远端。小目标已完成。
+
 ## 运行维护 2026-08-02 17:21 +08:00
 
 - 根因：LangGraph V2 的 checkpoint 与 event 仍分散写入 JSON，节点与副作用边界可能只落一半；全量启动扫描 legacy 会放大 I/O，单个坏 payload 或 SQLite 物理损坏也缺少明确隔离等级。

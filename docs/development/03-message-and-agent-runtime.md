@@ -340,4 +340,10 @@ node scripts/inspect-post-reply-jobs.js
 
 排查时用同一个 message/request/thread 标识串起 ingress、router、Runtime V2、reply send 和 post-reply 证据。重启只能恢复进程状态，不能证明竞态、发送失败或持久化错误已经修复。
 
+## 迁移验收 2026-08-04 +08:00
+
+- 实现提交 `87cf7d4`：direct-chat Planner、planning package 和旧 `direct_reply -> planner -> dispatch -> validate -> repair -> draft_reply` 链已移除，前台、后台与任务续写统一使用原生 ReAct 循环；研究队列代码保留但生产入口已断开。
+- 行为回归：零工具直答、多轮连续调用、同轮多工具、三轮/四次调用上限、部分超限、重复/越权/参数错误、失败后改用其他工具、副作用 checkpoint 与恢复防重放、只读并行、Router allowlist、共享链接/卡片/记忆/Web 搜索及 OpenAI/Anthropic/Gemini tool-call 归一化均通过。
+- 命令验收：相关定向测试、`npm run lint`、`npm run typecheck`、`npm run check:agent:static` 与 `git diff --cached --check` 均退出 0；完整 `npm test` 用时 158.5 秒并退出 0。
+
 继续阅读记忆、prompt 和 persist 内部结构时，转到 [记忆与提示词](04-memory-and-prompts.md)。

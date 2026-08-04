@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 运行维护 2026-08-04 +08:00
+
+- 实现提交 `87cf7d4` 已移除 direct-chat Planner 与预生成计划链，消息处理统一进入 LangGraph 原生 `agent_decide -> execute_tools` 循环；Router `allowedTools` 成为不可扩权的授权上界，工具轮次、调用总数、重复调用和副作用 checkpoint 由同一 Agent 状态管理。
+- `researchTaskQueue/researchSubagent` 代码保留但已断开生产入口；普通聊天、前台工具请求、后台消息和任务续写共用同一工具决策与限制语义。
+- 验收：ReAct、checkpoint、Router、共享链接、卡片、记忆、Web 搜索及 OpenAI/Anthropic/Gemini 协议定向测试退出 0；`npm run lint`、`npm run typecheck`、`npm run check:agent:static` 均退出 0；完整 `npm test` 用时 158.5 秒并退出 0。当前分支未推送远端。
+
 ## 运行维护 2026-08-02 17:21 +08:00
 
 - LangGraph V2 新写入端已切换到 `DATA_DIR/langgraph_v2.sqlite`；checkpoint 与关联 event 通过同一 SQLite 事务提交，副作用前后边界也使用原子 transition。旧 `langgraph_v2_checkpoints/` 与 `langgraph_v2_events/` 永久只读，按 thread 惰性兼容读取，`clear()` 通过永久 tombstone 防止旧 JSON 复活。
