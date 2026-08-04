@@ -42,6 +42,18 @@ httpClient.postWithRetry = async (_url, body) => ({
 });
 
 const { queryMemory } = require('../utils/memory-v3/query');
+const { ensureTargetJournalCandidates } = require('../utils/memory-v3/queryScoring');
+
+const prioritizedCandidates = ensureTargetJournalCandidates([
+  { id: 'target-day', source: 'journal', episodeDay: '2026-04-26', score: 0.2 },
+  { id: 'other-day', source: 'journal', episodeDay: '2026-04-25', score: 4 }
+], [], ['2026-04-26']);
+assert.strictEqual(prioritizedCandidates[0].id, 'target-day');
+assert.strictEqual(prioritizedCandidates[0].journalTargetDayPriority, true);
+assert.strictEqual(
+  ensureTargetJournalCandidates(prioritizedCandidates, [], ['2026-04-26'])[0].score,
+  prioritizedCandidates[0].score
+);
 
 module.exports = queryMemory({
   userId: 'u_journal_rerank',
