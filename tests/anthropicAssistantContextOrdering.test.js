@@ -32,6 +32,22 @@ module.exports = (async () => {
   assert.ok(assistantContextIndex >= 0);
   assert.ok(assistantContextIndex < lastUserIndex);
 
+  const assistantPrefillMapped = await mapMessagesToAnthropic([
+    { role: 'user', content: 'write a greeting' },
+    { role: 'assistant', content: 'Hello' }
+  ]);
+  assert.deepStrictEqual(assistantPrefillMapped.messages, [
+    { role: 'user', content: [{ type: 'text', text: 'write a greeting' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Hello' }] },
+    {
+      role: 'user',
+      content: [{
+        type: 'text',
+        text: 'Continue the preceding response without repeating already generated content.'
+      }]
+    }
+  ]);
+
   const emptyMapped = await mapMessagesToAnthropic([
     { role: 'assistant', content: [{ type: 'text', text: '' }] },
     { role: 'user', content: '' },
