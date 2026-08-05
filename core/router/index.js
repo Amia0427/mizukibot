@@ -56,6 +56,11 @@ const {
 } = require('../../utils/environmentDataQuery');
 const { applyDeterministicToolRouting } = require('./toolRouting');
 const { applyMaimaiToolRouting } = require('../../src/features/maimai/planner-routing');
+const { applyPjskToolRouting } = require('../../src/features/pjsk/planner-routing');
+
+function applyRhythmGameToolRouting(route, context = {}) {
+  return applyPjskToolRouting(applyMaimaiToolRouting(route), context);
+}
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -1379,8 +1384,9 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
   };
   route = markLocalRuleRoute(route, userId);
   if (sanitizeTopRouteType(route?.topRouteType) !== 'direct_chat') return route;
-  if (!detectSafetyBoundaryCaution(intentText)) return applyMaimaiToolRouting(applyDeterministicToolRouting(route));
-  return applyMaimaiToolRouting(applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
+  const rhythmGameContext = { userId, chatType };
+  if (!detectSafetyBoundaryCaution(intentText)) return applyRhythmGameToolRouting(applyDeterministicToolRouting(route), rhythmGameContext);
+  return applyRhythmGameToolRouting(applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
     ...route,
     meta: {
       ...(route.meta || {}),
@@ -1388,7 +1394,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
       effectiveIntentText: intentText || cleanText,
       quotePriority
     }
-  }), userId)));
+  }), userId)), rhythmGameContext);
 }
 
 async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, continuitySignals = {}, effectiveIntentText = '', chatType = '' }, options = {}) {
@@ -1418,7 +1424,10 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
         requestTrace: options.requestTrace
       });
       if (subagentRoute && typeof subagentRoute === 'object') {
-        return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl })));
+        return applyRhythmGameToolRouting(
+          applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl })),
+          { userId, chatType }
+        );
       }
     }
 
@@ -1442,7 +1451,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
       effectiveIntentText: intentText || cleanText,
       quotePriority
     };
-    return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizedRoute));
+    return applyRhythmGameToolRouting(applyDeterministicToolRouting(sanitizedRoute), { userId, chatType });
   } catch (_) {
     return fallbackRoute;
   }

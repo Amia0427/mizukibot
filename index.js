@@ -42,6 +42,7 @@ const { createMainProcessLifecycle } = require('./utils/mainProcessLifecycle');
 const { closeLoadedSqliteConnections } = require('./utils/sqliteRuntime');
 const { createMaimaiCommandHandler } = require('./src/features/maimai/commands');
 const { closeMaimaiRuntime, getMaimaiRuntime, peekMaimaiRuntime } = require('./src/features/maimai/runtime');
+const { closePjskRuntime, getPjskRuntime, peekPjskRuntime } = require('./src/features/pjsk/runtime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -543,6 +544,7 @@ function prepareNapCatEventPacket(msg) {
 
 function startConnectedRuntimes() {
   getMaimaiRuntime()?.syncScheduler?.start();
+  getPjskRuntime()?.syncScheduler?.start();
   privateProactiveEngine.start();
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {
     tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
@@ -734,6 +736,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
   },
   stopRuntimes: [
     { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
+    { name: 'pjsk_sync_scheduler', run: () => peekPjskRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'private_proactive', run: () => privateProactiveEngine.stop() },
     { name: 'scheduler', run: () => schedulerRuntime.stop() },
     { name: 'tick', run: () => tickRuntime?.stop?.() },
@@ -766,6 +769,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
   finalize: [
     { name: 'hot_stores', run: () => flushAllHotStoresSync() },
     { name: 'maimai_runtime', run: () => closeMaimaiRuntime() },
+    { name: 'pjsk_runtime', run: () => closePjskRuntime() },
     { name: 'sqlite', run: () => closeLoadedSqliteConnections() },
     { name: 'single_instance_lock', run: () => cleanupSingleInstanceLock?.() }
   ],

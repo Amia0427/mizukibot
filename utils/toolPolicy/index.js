@@ -235,6 +235,37 @@ function normalizeMaimaiArgs(toolName, args = {}) {
   return next;
 }
 
+function normalizePjskArgs(toolName, args = {}) {
+  const query = String(args.query || '').trim();
+  if (!query) throw new Error(`${toolName} requires query`);
+  if (query.length > 300) throw new Error(`${toolName} query too long`);
+  const next = { query };
+  if (args.difficulty !== undefined) {
+    const difficulty = String(args.difficulty).trim().toLowerCase();
+    if (!new Set(['easy', 'normal', 'hard', 'expert', 'master', 'append']).has(difficulty)) {
+      throw new Error('invalid PJSK difficulty');
+    }
+    next.difficulty = difficulty;
+  }
+  if (toolName === 'pjsk_song_search') {
+    for (const key of ['level_min', 'level_max']) {
+      if (args[key] === undefined) continue;
+      const value = Number(args[key]);
+      if (!Number.isFinite(value) || value < 1 || value > 40) throw new Error(`${key} must be between 1 and 40`);
+      next[key] = value;
+    }
+    if (args.limit !== undefined) {
+      const limit = Number(args.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new Error('limit must be between 1 and 10');
+      next.limit = limit;
+    }
+  }
+  if (toolName === 'pjsk_chart_analyze' && args.title !== undefined) {
+    next.title = String(args.title).trim().slice(0, 160);
+  }
+  return next;
+}
+
 function normalizeSelfImprovementArgs(toolName, args = {}) {
   if (toolName === 'self_improvement_recent') {
     const next = {};
@@ -416,6 +447,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
     || toolName === 'maimai_player_analysis'
   ) {
     return normalizeMaimaiArgs(toolName, args);
+  }
+
+  if (toolName === 'pjsk_song_search' || toolName === 'pjsk_chart_analyze') {
+    return normalizePjskArgs(toolName, args);
   }
 
   if (

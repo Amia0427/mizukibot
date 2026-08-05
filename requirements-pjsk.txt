@@ -1,0 +1,3 @@
+pjsekai-scores-rs-skia-image==0.5.0 \
+    --hash=sha256:0567b3cb9b601445e45457189e6d3ecbaade803c4aabcd766263a396d2a50128 \
+    --hash=sha256:7ab69b9fcd37344671672ca4293be0504e282729135a4c2b52cb931f175ca5e9

@@ -98,8 +98,17 @@ assignPolicy(TOOL_POLICIES, [
 assignPolicy(TOOL_POLICIES, [
   'maimai_chart_search',
   'maimai_chart_analyze',
-  'maimai_player_analysis'
+  'maimai_player_analysis',
+  'pjsk_song_search'
 ], createPolicy({ risk: 'low', capability: 'local_read' }));
+
+TOOL_POLICIES.pjsk_chart_analyze = createPolicy({
+  risk: 'medium',
+  capability: 'local_read',
+  effect: 'external_send',
+  confirmation: 'none',
+  scope: 'group'
+});
 
 TOOL_POLICIES.skill_weather_cloud = createPolicy({
   risk: 'medium',
