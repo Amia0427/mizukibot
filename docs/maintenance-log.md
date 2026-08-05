@@ -1,3 +1,12 @@
+## 运行维护 2026-08-05 10:57 +08:00
+
+- 小目标：完成 PJSK 曲库、谱面结构分析、候选集约束 RAG 和 QQ 谱面图链路；功能提交为 `77e1b1c`。实现位于 `src/features/pjsk/`，未向 `maimai` 增加字段，也未抽象通用音游框架。
+- 数据与检索：日服 Sekai-World master DB 是唯一事实库，简中/英文标题只作为同 `musicId` 别名；SUS 和封面运行时读取 sekai.best。SQLite generation 可独立激活，LanceDB generation 必须与当前 SQL generation 一致，向量失败返回 `sql_only`，最终结果与最多 100 个 SQL 候选按内容哈希求交。
+- 路由与图片：只在当前消息同时确认 PJSK 领域和曲库/谱面数据意图时授权唯一工具；执行器复核当前问题、曲名、难度和一次性引用。引用仅同会话下一条消息、5 分钟有效；私聊自动发图，群聊只有明确图片意图才发图，渲染或发送失败保留文本分析。
+- 自动验收：7 项 PJSK 回归、`localRouterFallback` 相邻回归、828 文件 lint、typecheck、Prompt、全仓及暂存区密钥扫描、diff check 均通过；完整 `npm test` 用时 158.1 秒并退出 0。首次全量测试发现 PJSK 后处理误清普通 `force_tools`，增加 `hadPjskTool` 约束后隔离测试和全量测试通过。
+- 真实验收：`npm run smoke:pjsk` 命中 `jp:1:master`（Tell Your World，MASTER 26），master/解析物量均为 1147；SUS 哈希 `70396177270843c438568888ce072cfad2c3526901b6174427165cb0b337da0e`，PNG 5248×2688、14,106,624 像素、1,143,348 字节、非空，封面缓存成功。QQ 私聊/群聊策略使用伪发送测试验证，未向真实 QQ 会话发送图片。
+- 未完成项：`docker build -t mizukibot:pjsk-test .` 运行 220.7 秒后因本机 `docker_engine` 不存在退出 1；本机未安装 Docker Desktop 服务、可执行文件、WSL 或替代容器运行时，因此未宣称 Docker 构建通过。未修改 `prompts/admin.txt`，未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未推送远端；除容器环境验收外，本地功能小目标已完成。
+
 ## 运行维护 2026-08-04 13:05 +08:00
 
 - 小目标：收敛舞萌谱面 SQL/RAG 的普通聊天误召回；功能提交为 `c82ad3d`。`classifyMaimaiIntent()` 以“明确舞萌名或至少两个专属谱面信号”确认领域，再要求谱面检索、单谱分析或当前用户成绩意图，仅授权唯一目标工具并保留其他领域工具。
