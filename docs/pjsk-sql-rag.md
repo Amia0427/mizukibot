@@ -4,7 +4,7 @@
 
 功能提交：`77e1b1c`
 
-用户入口：[使用指南](pjsk-user-guide.md)；[更新公告](pjsk-update-announcement-2026-08-05.md)。用户文档更新于 2026-08-05 11:04 +08:00。
+用户入口：[使用指南](pjsk-user-guide.md)；[RAG 原理与机制](pjsk-rag-explained.md)；[更新公告](pjsk-update-announcement-2026-08-05.md)。用户文档更新于 2026-08-05 11:10 +08:00。
 
 ## 能力范围
 

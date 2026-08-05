@@ -1,12 +1,13 @@
 # MizukiBot
 
-## PJSK 曲库与谱面 RAG 2026-08-05 11:04 +08:00
+## PJSK 曲库与谱面 RAG 2026-08-05 11:10 +08:00
 
 - 功能提交 `77e1b1c` 新增独立 `src/features/pjsk/`，以日服 master DB 为事实库、简中和英文标题为别名；SQLite 负责精确筛选，LanceDB 只在 SQL 候选内重排，向量不可用时明确降级为 `sql_only`。
 - 新增 `pjsk_song_search` 与 `pjsk_chart_analyze`。单谱分析使用固定版本 `susToUSC` 计算结构特征和代表段；私聊自动发送完整谱面图，群聊仅在当前消息明确要求“谱面图、看谱、发图”时发送。
 - 真实 `Tell Your World` MASTER 26 验收通过：master DB 与 SUS 解析物量均为 1147，PNG 为 5248×2688、1,143,348 字节、非空，封面缓存成功。7 项 PJSK 回归、828 文件 lint、typecheck、Prompt、密钥扫描和 158.1 秒完整测试均通过。
-- Docker 构建未通过：本机只有 Docker CLI，没有 daemon、Docker Desktop、WSL 或其他容器运行时，未擅自安装系统软件；源码、锁定 wheel 和字体配置已由静态测试覆盖，但不能宣称镜像构建成功。面向用户的说明见 [PJSK 使用指南](docs/pjsk-user-guide.md) 与 [PJSK 更新公告](docs/pjsk-update-announcement-2026-08-05.md)，实现与维护见 [PJSK 曲库、谱面分析与 RAG](docs/pjsk-sql-rag.md)。
+- Docker 构建未通过：本机只有 Docker CLI，没有 daemon、Docker Desktop、WSL 或其他容器运行时，未擅自安装系统软件；源码、锁定 wheel 和字体配置已由静态测试覆盖，但不能宣称镜像构建成功。面向用户的说明见 [PJSK 使用指南](docs/pjsk-user-guide.md)、[曲库 RAG 原理与机制](docs/pjsk-rag-explained.md) 与 [PJSK 更新公告](docs/pjsk-update-announcement-2026-08-05.md)，实现与维护见 [PJSK 曲库、谱面分析与 RAG](docs/pjsk-sql-rag.md)。
 - 用户文档中的 4 条公开示例已通过当前 Router 探针：曲库筛选和信息查询命中 `pjsk_song_search`，单谱分析和谱面图请求命中 `pjsk_chart_analyze`。
+- [PJSK 曲库 RAG 原理与机制](docs/pjsk-rag-explained.md) 面向普通用户解释 SQL 精确筛选、候选集内向量重排、generation 隔离、单谱确定性分析、降级状态和事实可信度边界。
 
 ## 混合 content reasoning 前缀隔离 2026-08-05 09:48 +08:00
 
