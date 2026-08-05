@@ -33,6 +33,12 @@ module.exports = (async () => {
   assert.strictEqual(isUnsafeUserFacingReply('大家常说“内心OS”，但这里只是在讨论这个词。'), false);
   assert.strictEqual(isUnsafeUserFacingReply('我看了一眼代码，问题在 planner gate。'), false);
   assert.strictEqual(isUnsafeUserFacingReply('……没监控你还特意强调，怎么，你打算对猪做什么不可告人的事啊'), false);
+  const mixedContent = '■ Two pigs, one shoving the other. Reply as Mizuki, 1:45am, casual, no brackets, no emoji, short chunks. --- 哈哈哈这个接得太准了吧';
+  assert.strictEqual(isReasoningTraceLeak(mixedContent), true);
+  assert.strictEqual(isReasoningTraceLeak('普通讨论 Reply as Mizuki，没有分隔符。'), false);
+  assert.strictEqual(isReasoningTraceLeak('普通讨论 Reply as Mizuki --- 没有角色指令。'), false);
+  assert.strictEqual(isReasoningTraceLeak('普通讨论 Reply as   , casual --- 角色为空。'), false);
+  assert.strictEqual(isReasoningTraceLeak('普通讨论 Reply as Mizuki,   --- 指令为空。'), false);
 
   console.log('userFacingReplyGuards.test.js passed');
 })().catch((error) => {

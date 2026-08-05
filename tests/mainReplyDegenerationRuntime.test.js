@@ -97,6 +97,19 @@ module.exports = (async () => {
   assert.strictEqual(reasoningFiltered.output.displayReply, '真正的回复。');
   assert.strictEqual(reasoningFiltered.output.persistedReplyText, '真正的回复。');
 
+  const preambleFiltered = await finalValidateNode({
+    request: { topRouteType: 'direct_chat', routeMeta: { chatType: 'private' } },
+    output: {
+      finalReply: '■ Two pigs, one shoving the other. Reply as Mizuki, 1:45am, casual, no brackets, no emoji, short chunks. --- 哈哈哈这个接得太准了吧',
+      displayReply: '■ Two pigs, one shoving the other. Reply as Mizuki, 1:45am, casual, no brackets, no emoji, short chunks. --- 哈哈哈这个接得太准了吧'
+    },
+    memory: {},
+    execution: {}
+  });
+  assert.strictEqual(preambleFiltered.output.finalReply, '哈哈哈这个接得太准了吧');
+  assert.strictEqual(preambleFiltered.output.displayReply, '哈哈哈这个接得太准了吧');
+  assert.strictEqual(preambleFiltered.output.persistedReplyText, '哈哈哈这个接得太准了吧');
+
   console.log('mainReplyDegenerationRuntime.test.js passed');
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));

@@ -15,7 +15,8 @@ const { isToolSchemaValidationError } = require('../../../utils/modelCompat');
 const {
   extractUserFacingDelta,
   hasVisibleUserFacingText,
-  sanitizeUserFacingText
+  sanitizeUserFacingText,
+  splitReasoningPreamble
 } = require('../../../utils/userFacingText');
 const {
   buildReactiveRetryPayload,
@@ -283,6 +284,20 @@ function normalizeReasoningText(value = '') {
   return String(value || '').trim();
 }
 
+function isolateReasoningPreamble(message = null) {
+  const split = splitReasoningPreamble(message?.content);
+  if (!split) return message;
+  const reasoningText = [
+    normalizeReasoningText(message?.reasoningText),
+    split.reasoningText
+  ].filter(Boolean).join('\n\n');
+  return {
+    ...message,
+    content: split.visibleText,
+    reasoningText
+  };
+}
+
 function buildModelCallTrace(context = {}, source = 'v2_model') {
   const requestTrace = normalizeRequestTrace(context?.requestTrace)
     || normalizeRequestTrace(context?.routeMeta?.requestTrace);
@@ -497,7 +512,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
     requestTrace: context?.requestTrace || context?.routeMeta?.requestTrace
   });
 
-  const message = extractMessageContent(response);
+  const message = isolateReasoningPreamble(extractMessageContent(response));
   if (hasAssistantUsableContent(message)) return message;
 
   const parseDiagnostic = summarizeMalformedResponse(response);

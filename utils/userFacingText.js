@@ -27,6 +27,20 @@ function stripTrailingThinkFragment(text = '', options = {}) {
   return source;
 }
 
+const REPLY_AS_REASONING_PREAMBLE_RE = /(?:^|\r?\n|[\t ])Reply as[\t ]+([^\r\n,]{1,80}),([^\r\n]{1,240}?)[\t ]+---[\t ]*/i;
+
+function splitReasoningPreamble(text = '') {
+  const source = String(text || '');
+  const marker = REPLY_AS_REASONING_PREAMBLE_RE.exec(source);
+  if (!marker) return null;
+  if (!marker[1].trim() || !marker[2].trim()) return null;
+
+  const reasoningText = source.slice(0, marker.index).trim();
+  const visibleText = source.slice(marker.index + marker[0].length).trim();
+  if (!reasoningText || !visibleText) return null;
+  return { reasoningText, visibleText };
+}
+
 const ROLEPLAY_REASONING_LABEL_PATTERN = '(?:心想|内心\\s*os|心里\\s*os)';
 const WRAPPED_ROLEPLAY_REASONING_MARKER_RE = new RegExp(
   `[（(]\\s*${ROLEPLAY_REASONING_LABEL_PATTERN}\\s*[:：]`,
@@ -161,6 +175,8 @@ function stripInternalReasoningLeakText(text = '') {
 function sanitizeUserFacingText(text = '', options = {}) {
   const preserveThink = options && typeof options === 'object' && options.preserveThink === true;
   let next = String(text || '').replace(/\u200b/g, '');
+  const reasoningPreamble = splitReasoningPreamble(next);
+  if (reasoningPreamble) next = reasoningPreamble.visibleText;
 
   // \u68c0\u6d4b\u5b89\u5168\u9650\u5236\u6807\u8bb0
   const hasSafetyRestriction = /\/%\s*$/.test(next);
@@ -220,6 +236,7 @@ module.exports = {
   extractUserFacingDelta,
   hasVisibleUserFacingText,
   sanitizeUserFacingText,
+  splitReasoningPreamble,
   stripInternalReasoningLeakText,
   stripRoleplayReasoningLeakText
 };

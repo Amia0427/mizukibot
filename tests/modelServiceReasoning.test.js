@@ -11,6 +11,7 @@ module.exports = (async () => {
   clearProjectCache();
   const httpClient = require('../api/httpClient');
   let nonStreamingContent = '非流式正文';
+  let nonStreamingReasoning = '非流式显式 reasoning';
   let streamingChunks = [
     'data: {"choices":[{"delta":{"reasoning_content":"流式 reasoning 1"}}]}\n\n',
     'data: {"choices":[{"delta":{"reasoning":" + 2"}}]}\n\n',
@@ -24,7 +25,7 @@ module.exports = (async () => {
           message: {
             role: 'assistant',
             content: nonStreamingContent,
-            reasoning_content: '非流式显式 reasoning'
+            reasoning_content: nonStreamingReasoning
           }
         }
       ]
@@ -65,7 +66,25 @@ module.exports = (async () => {
   assert.strictEqual(streaming.persistedText, '流式正文');
   assert.strictEqual(streaming.reasoningText, '流式 reasoning 1 + 2');
 
+  nonStreamingContent = '■ Two pigs, one shoving the other. Reply as Mizuki, 1:45am, casual, no brackets, no emoji, short chunks. --- 哈哈哈这个接得太准了吧';
+  nonStreamingReasoning = '上游独立 reasoning';
+  const isolatedPreamble = await service.requestNonStreamingReply([{ role: 'user', content: 'mixed content' }], {
+    modelConfig: {
+      apiBaseUrl: 'https://example.com/v1/chat/completions',
+      apiKey: 'test',
+      model: 'claude-test',
+      provider: 'openai_compatible'
+    }
+  });
+  assert.strictEqual(isolatedPreamble.visibleText, '哈哈哈这个接得太准了吧');
+  assert.strictEqual(isolatedPreamble.persistedText, '哈哈哈这个接得太准了吧');
+  assert.strictEqual(
+    isolatedPreamble.reasoningText,
+    '上游独立 reasoning\n\n■ Two pigs, one shoving the other.'
+  );
+
   nonStreamingContent = '（心想：不进入非流式正文。）非流式安全正文';
+  nonStreamingReasoning = '';
   const sanitizedNonStreaming = await service.requestNonStreamingReply([{ role: 'user', content: 'hi again' }], {
     modelConfig: {
       apiBaseUrl: 'https://example.com/v1/chat/completions',

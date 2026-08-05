@@ -77,6 +77,26 @@ module.exports = (() => {
     '大家常说“内心OS”，但这里没有输出思考块。',
     'ordinary mentions of inner monologue should remain visible'
   );
+  assert.strictEqual(
+    sanitizeUserFacingText('■ Two pigs, one shoving the other. Reply as Mizuki, 1:45am, casual, no brackets, no emoji, short chunks. --- 哈哈哈这个接得太准了吧'),
+    '哈哈哈这个接得太准了吧',
+    'reply-as reasoning preambles should be stripped from visible text'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('普通讨论 Reply as Mizuki --- 不是模型输出格式。'),
+    '普通讨论 Reply as Mizuki --- 不是模型输出格式。',
+    'reply-as mentions without role instructions should remain visible'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('普通讨论 Reply as   , casual --- 角色为空。'),
+    '普通讨论 Reply as   , casual --- 角色为空。',
+    'reply-as envelopes with an empty role should remain visible'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('普通讨论 Reply as Mizuki,   --- 指令为空。'),
+    '普通讨论 Reply as Mizuki,   --- 指令为空。',
+    'reply-as envelopes with empty instructions should remain visible'
+  );
 
   console.log('userFacingTextCot.test.js passed');
 })();
