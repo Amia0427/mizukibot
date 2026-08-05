@@ -22,6 +22,7 @@ const { buildMemosRuntimeConfig } = require('./memosRuntime');
 const { buildOpenVikingRuntimeConfig } = require('./openVikingRuntime');
 const { buildPostReplyWatchdogRuntimeConfig } = require('./postReplyRuntime');
 const { resolveMemoryStorageMode } = require('./memoryStorageRuntime');
+const { buildPlatformRuntimeConfig } = require('./platformRuntime');
 const {
   buildMainReplyContextRuntimeConfig,
   buildSessionContextRuntimeConfig
@@ -1311,13 +1312,8 @@ module.exports = {
   MEME_MANAGER_DATA_FILE: pick('MEME_MANAGER_DATA_FILE', path.join(DATA_DIR, 'meme_manager.json')),
   MEME_MANAGER_ASSET_DIR: pick('MEME_MANAGER_ASSET_DIR', path.join(DATA_DIR, 'memes')),
   MEME_MANAGER_RUNTIME_FILE: pick('MEME_MANAGER_RUNTIME_FILE', path.join(DATA_DIR, 'meme_runtime.json')),
-  // ===== Telegram =====
-  TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '',
-  TG_ENABLE: String(process.env.TG_ENABLE || 'false').toLowerCase() === 'true',
-  TG_ALLOWED_CHAT_IDS: (process.env.TG_ALLOWED_CHAT_IDS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
+  // ===== Platform adapters =====
+  ...buildPlatformRuntimeConfig({ DATA_DIR, dataDir: DATA_DIR, pick, pickBool, pickList, pickNum }),
 
   // ===== Persona Prompt =====
   PROMPTS_DIR,

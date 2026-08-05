@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { validatePlatformRuntimeEnv } = require('./platformRuntime');
 
 const REQUIRED_ENV_KEYS = ['API_KEY'];
 
@@ -118,6 +119,8 @@ function validateRequiredConfig() {
       'Please set them in your environment or .env before startup.'
     );
   }
+
+  validatePlatformRuntimeEnv(process.env);
 
   const inboundGlobal = pickNum('INBOUND_GLOBAL_MAX_CONCURRENCY', 3);
   const inboundGeneral = pickNum('INBOUND_GENERAL_MAX_CONCURRENCY', 2);
