@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 混合 content reasoning 前缀隔离 2026-08-05 09:48 +08:00
+
+- 01:45 的泄漏请求实际走管理员 `claude-opus-5` 非流式路由；第三方网关把英文分析和最终中文答复一起写入普通 `content`，不是 `gemini-3-flash-preview-search` 的这次回复，也不是独立 reasoning 字段解析失败。
+- 实现提交 `55cf28e` 严格识别“非空分析 + `Reply as <role>, <instructions> ---` + 非空正文”，把前缀并入 `reasoningText` 供现有合并转发折叠发送，只让后缀进入可见正文与持久化；`prompts/runtime/roleplay-inner-protocol.txt` 和流式发送逻辑未修改。
+- Gemini 对照探针确认请求携带 `reasoning_effort=high`，但第三方 OpenAI-compatible 网关响应的 `message` 只有 `role/content`，未返回 `reasoning`、`reasoning_content` 或 `thinking`；只能确认网关未回传思维链，不能证明模型内部没有推理。
+- 验收：8 项 reasoning/转发回归、812 文件 lint、typecheck、Prompt、diff check 和 165.8 秒完整测试均退出 0；完整测试使用 Node 24.14.1，当前环境未提供项目声明的 Node 20，未重启服务，未推送远端。
+
 ## NapCat 测试隔离 2026-08-05 00:10 +08:00
 
 - `消息不存在` 堆栈已定位到 NapCat `GetMsg`：测试子进程继承本地 `.env` 后，把测试消息 ID 发给了真实 `127.0.0.1:3000`，不是线上消息发送失败。

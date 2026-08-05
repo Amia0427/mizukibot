@@ -147,7 +147,7 @@ Run: `git diff --check`
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Commit the implementation**
+- [x] **Step 4: Commit the implementation**
 
 Stage only the plan and these seven source/test files: `utils/userFacingText.js`, `utils/userFacingReplyGuards.js`, `api/runtimeV2/model/service.js`, `tests/userFacingTextCot.test.js`, `tests/userFacingReplyGuards.test.js`, `tests/modelServiceReasoning.test.js`, and `tests/mainReplyDegenerationRuntime.test.js`. Commit with a scoped fix message; do not stage `.belt/`, `AGENT.md`, or `tests/maimaiAgentIntegration.test.js`.
 
@@ -159,16 +159,16 @@ Stage only the plan and these seven source/test files: `utils/userFacingText.js`
 - Modify: `README.md`
 - Modify: `docs/maintenance-log.md`
 
-- [ ] **Step 1: Add timestamped maintenance records**
+- [x] **Step 1: Add timestamped maintenance records**
 
 Record the 2026-08-05 mixed-content root cause, the strict envelope split, the preserved foldable reasoning path, and exact verification results. State explicitly that the observed request used the administrator `claude-opus-5` non-streaming path rather than `gemini-3-flash-preview-search`.
 
-- [ ] **Step 2: Verify documentation changes**
+- [x] **Step 2: Verify documentation changes**
 
 Run: `git diff --check`
 
 Expected: exit 0.
 
-- [ ] **Step 3: Commit documentation**
+- [x] **Step 3: Commit documentation**
 
 Stage only `README.md` and `docs/maintenance-log.md`, commit with a documentation message, and do not push.

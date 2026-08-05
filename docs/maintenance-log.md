@@ -1931,3 +1931,11 @@
 - 边界：`prompts/runtime/roleplay-inner-protocol.txt` 与 `utils/runtimePrompts.js` 未修改，内部 reasoning 的角色化约束保留；普通正文对“内心OS”一词的讨论不被误删，未修改网关配置、模型或 endpoint。
 - 验收：流式、非流式、泄漏检查和最终持久化回归通过；`npm run lint` 检查 812 个文件、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0；完整 `npm test` 172.6 秒退出 0。
 - 提交后记录：实现提交 `69fc96c` 已完成，本小目标已完成；未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未重启服务，未推送远端。
+
+## 运行维护 2026-08-05 09:48 +08:00
+
+- 根因：01:45 的真实泄漏请求走管理员 `transform/vision-summary`、`agent_decide`、非流式 `claude-opus-5` 路由。第三方网关未提供独立 reasoning 字段，而是把英文场景分析、`Reply as Mizuki, ... ---` 元指令和最终中文答复合并写入普通 `content`；既有清洗只识别 think 标签及“心想/内心OS”，所以 715 字符整体进入发送和持久化。
+- 修复：实现提交 `55cf28e` 在非流式响应归一化边界严格拆分完整 `Reply as` 信封，把英文前缀与上游已有 reasoning 用空行合并到 `reasoningText`，后缀作为唯一正文；用户可见文本清洗和泄漏守卫复用同一解析器，`final_validate` 在持久化前再次兜底。缺少角色、指令、分隔符、分析前缀或最终正文时均不拆分。
+- 折叠链路：现有 `maybeSendReasoningForward -> sendReasoningForwardMessage` 继续只消费 `reasoningText`，因此拆出的前缀会作为 QQ 合并转发记录发送，正文只发送分隔符后的中文答复。`prompts/runtime/roleplay-inner-protocol.txt` 未修改，流式链路也未扩展；流式内容在分隔符出现前一旦外发无法撤回，本次真实路径不属于该场景。
+- Gemini 核验：真实 OpenAI-compatible 非流式探针向 `gemini-3-flash-preview-search` 发送 `reasoning_effort=high`，HTTP 200、`finish_reason=stop`；响应 `message` 仅含 `role/content`，`reasoning`、`reasoning_content`、`thinking` 均不存在。结论只能是第三方网关未回传独立思维链，不能据此证明 Gemini 内部没有推理；本次泄漏也不是该 Gemini 请求。
+- 验收：4 项核心回归先红后绿，8 项 reasoning/合并转发相邻回归通过；`npm run lint` 检查 812 个文件，`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0，完整 `npm test` 165.8 秒退出 0。当前验收运行时为 Node 24.14.1，未找到项目声明的 Node 20，因此未宣称 Node 20 通过；`.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js` 未纳入，未重启服务，未推送远端。本小目标已完成。
