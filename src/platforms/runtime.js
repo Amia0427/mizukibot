@@ -80,20 +80,39 @@ function createPlatformRuntime(config, options = {}) {
   }));
 
   const actionClient = createPlatformActionClient(registry, qqActionClient);
+  let storesClosed = false;
+
+  function closeStores() {
+    if (storesClosed) return;
+    storesClosed = true;
+    groupContextStore.close();
+    identityStore.close();
+  }
 
   async function close() {
     await registry.stopAll();
-    groupContextStore.close();
-    identityStore.close();
+    closeStores();
+  }
+
+  function getReadinessSnapshot() {
+    const platforms = registry.getHealth();
+    const enabled = platforms.filter((item) => item.enabled !== false);
+    return {
+      messageIngressReady: enabled.length === 0 || enabled.some((item) => item.status === 'online'),
+      platforms
+    };
   }
 
   return {
     actionClient,
     close,
+    closeStores,
+    getReadinessSnapshot,
     groupContextStore,
     identityStore,
     registry,
-    start: (onMessage) => registry.startEnabled(onMessage)
+    start: (onMessage) => registry.startEnabled(onMessage),
+    stop: () => registry.stopAll()
   };
 }
 

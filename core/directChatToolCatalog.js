@@ -3,6 +3,7 @@ const { GLOBAL_TOOL_NAME_SET } = require('../api/globalToolRuntime');
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { getPolicy } = require('../utils/toolPolicy');
 const { isAdminUser } = require('../api/qqActionService');
+const { filterToolsForPlatform } = require('../src/platforms/accessPolicy');
 const EXCLUDED_DIRECT_CHAT_TOOL_NAMES = new Set([
   'assistant_task_breakdown'
 ]);
@@ -285,10 +286,10 @@ function isToolVisibleInContext(toolName = '', context = {}) {
 function buildDirectChatToolCatalog(context = {}) {
   const schemaDescriptions = buildSchemaDescriptionMap();
   const dynamicDescriptors = buildDynamicDescriptorMap();
-  const toolNames = normalizeToolNames([
+  const toolNames = filterToolsForPlatform(normalizeToolNames([
     ...getToolNames(),
     ...Array.from(dynamicDescriptors.keys())
-  ]).filter((toolName) => !isExcludedDirectChatTool(toolName) && isToolVisibleInContext(toolName, context));
+  ]), context.platform).filter((toolName) => !isExcludedDirectChatTool(toolName) && isToolVisibleInContext(toolName, context));
 
   return toolNames.map((toolName) => {
     const policy = getPolicy(toolName);

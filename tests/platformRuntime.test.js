@@ -41,6 +41,19 @@ module.exports = (async () => {
     assert.deepStrictEqual(client.getConnectionState(), { connected: true, readyStateName: 'open' });
   });
 
+  const healthRuntime = require('../src/platforms/runtime').createPlatformRuntime({
+    PLATFORM_IDENTITY_DB_FILE: ':memory:',
+    PLATFORM_GROUP_CONTEXT_DB_FILE: ':memory:',
+    PLATFORM_BIND_TTL_MS: 600000,
+    PLATFORM_GROUP_CONTEXT_RETENTION_MS: 86400000,
+    PLATFORM_GROUP_CONTEXT_MAX_MESSAGES: 500,
+    ADMIN_USER_IDS: [],
+    DISCORD_ENABLE: false,
+    TG_ENABLE: false
+  }, { qqActionClient });
+  assert.strictEqual(healthRuntime.getReadinessSnapshot().messageIngressReady, false);
+  await healthRuntime.close();
+
   console.log('platformRuntime.test.js passed');
 })().catch((error) => {
   console.error(error?.stack || error);

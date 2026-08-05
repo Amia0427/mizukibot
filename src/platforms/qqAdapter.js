@@ -86,6 +86,16 @@ function normalizeQqMessage(rawMessage = {}, options = {}) {
   });
 }
 
+function mergeQqLegacyMessage(rawMessage = {}, legacyMessage = {}) {
+  return {
+    ...rawMessage,
+    ...legacyMessage,
+    message_id: rawMessage.message_id ?? legacyMessage.message_id,
+    raw_message: rawMessage.raw_message ?? legacyMessage.raw_message,
+    message: rawMessage.message ?? legacyMessage.message
+  };
+}
+
 function createQqAdapter(options = {}) {
   return {
     platform: 'qq',
@@ -102,5 +112,6 @@ function createQqAdapter(options = {}) {
 module.exports = {
   CAPABILITIES,
   createQqAdapter,
+  mergeQqLegacyMessage,
   normalizeQqMessage
 };

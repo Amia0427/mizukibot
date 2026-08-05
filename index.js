@@ -43,6 +43,11 @@ const { closeLoadedSqliteConnections } = require('./utils/sqliteRuntime');
 const { createMaimaiCommandHandler } = require('./src/features/maimai/commands');
 const { closeMaimaiRuntime, getMaimaiRuntime, peekMaimaiRuntime } = require('./src/features/maimai/runtime');
 const { closePjskRuntime, getPjskRuntime, peekPjskRuntime } = require('./src/features/pjsk/runtime');
+const { createIdentityCommandHandler } = require('./src/platforms/identityCommands');
+const { setPlatformAdminResolver } = require('./src/platforms/admin');
+const { createPlatformMessageProcessor } = require('./src/platforms/messageProcessor');
+const { mergeQqLegacyMessage } = require('./src/platforms/qqAdapter');
+const { createPlatformRuntime } = require('./src/platforms/runtime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -424,9 +429,13 @@ let dailyJournalSummaryStarted = false;
 let dailyJournalSummaryRuntime = null;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
+const platformRuntime = createPlatformRuntime(config, { qqActionClient: napcatActionClient });
+const platformActionClient = platformRuntime.actionClient;
+setPlatformAdminResolver((userId) => platformRuntime.identityStore.isAdminPrincipal(userId));
+runtimeReadiness.setDetailsProvider(() => platformRuntime.getReadinessSnapshot());
 const privateProactiveEngine = createPrivateProactiveEngine({
   config,
-  actionClient: napcatActionClient
+  actionClient: platformActionClient
 });
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
@@ -436,7 +445,7 @@ function askAIByGraph(...args) {
 
 async function sendWithRetry(payload, retries = 1, waitMs = 500) {
   return sendNapCatActionWithRetry({
-    actionClient: napcatActionClient,
+    actionClient: platformActionClient,
     payload,
     retries,
     waitMs
@@ -445,7 +454,7 @@ async function sendWithRetry(payload, retries = 1, waitMs = 500) {
 
 const maimaiCommandHandler = createMaimaiCommandHandler({
   getRuntime: getMaimaiRuntime,
-  isAdmin: isAdminUser,
+  isAdmin: (userId) => platformRuntime.identityStore.isAdminPrincipal(userId),
   sendReply: async (msg, replyText) => {
     const isPrivate = String(msg?.message_type || '').trim().toLowerCase() === 'private';
     await sendWithRetry({
@@ -460,12 +469,17 @@ const maimaiCommandHandler = createMaimaiCommandHandler({
 const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry,
-  actionClient: napcatActionClient,
+  actionClient: platformActionClient,
   privateProactiveEngine
+});
+const platformMessageProcessor = createPlatformMessageProcessor({
+  identityCommandHandler: createIdentityCommandHandler({ store: platformRuntime.identityStore }),
+  commandHandlers: [maimaiCommandHandler],
+  sendWithRetry
 });
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
   ? createMessageIngressDispatcher({
-    handleMessage: handleIncomingMessage,
+    handleMessage: (msg) => platformMessageProcessor.run(msg, handleIncomingMessage),
     maxActive: config.MESSAGE_INGRESS_ASYNC_MAX_ACTIVE,
     maxQueueLength: config.MESSAGE_INGRESS_ASYNC_MAX_QUEUE_LENGTH
   })
@@ -476,13 +490,18 @@ async function acceptIncomingMessage(msg, source = '') {
     messageIngressDispatcher.enqueue(msg, { source });
     return true;
   }
-  await handleIncomingMessage(msg);
+  await platformMessageProcessor.run(msg, handleIncomingMessage);
   return true;
 }
 
 async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = prepareNapCatEventPacket) {
   if (preparePacket(msg)) return false;
-  await acceptIncomingMessage(msg, source);
+  const qqAdapter = platformRuntime.registry.get('qq');
+  const normalized = qqAdapter.normalize(msg);
+  const prepared = normalized
+    ? mergeQqLegacyMessage(msg, platformRuntime.registry.prepareInbound(normalized))
+    : msg;
+  await acceptIncomingMessage(prepared, source);
   return true;
 }
 const napcatLogFollower = createNapcatLogFollower({
@@ -527,12 +546,6 @@ function startResourceSnapshots() {
 let httpReverseServer = null;
 
 function prepareNapCatEventPacket(msg) {
-  if (maimaiCommandHandler.shouldHandle(msg?.raw_message)) {
-    void maimaiCommandHandler.handle(msg).catch((error) => {
-      console.error('[maimai command] failed:', error?.message || error);
-    });
-    return true;
-  }
   appendNapcatPacketToLog(msg);
   if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
     void napcatLogFollower.handleLivePacket(msg).catch((error) => {
@@ -735,6 +748,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     if (disconnectError) throw disconnectError;
   },
   stopRuntimes: [
+    { name: 'platform_adapters', run: () => platformRuntime.stop() },
     { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'pjsk_sync_scheduler', run: () => peekPjskRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'private_proactive', run: () => privateProactiveEngine.stop() },
@@ -770,6 +784,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     { name: 'hot_stores', run: () => flushAllHotStoresSync() },
     { name: 'maimai_runtime', run: () => closeMaimaiRuntime() },
     { name: 'pjsk_runtime', run: () => closePjskRuntime() },
+    { name: 'platform_stores', run: () => platformRuntime.closeStores() },
     { name: 'sqlite', run: () => closeLoadedSqliteConnections() },
     { name: 'single_instance_lock', run: () => cleanupSingleInstanceLock?.() }
   ],
@@ -848,6 +863,7 @@ async function startMainProcess() {
   scheduleMainProcessEmbeddingBackfill();
   startResourceSnapshots();
   startNapCatTransport();
+  await platformRuntime.start(acceptIncomingMessage);
   await Promise.all([
     waitForServerListening(webServer),
     waitForServerListening(httpReverseServer)
@@ -907,6 +923,7 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       recordMainRuntimeState,
       runtimeStateFile: RUNTIME_STATE_FILE,
       runtimeReadiness,
+      platformRuntime,
       privateProactiveEngine,
       scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {

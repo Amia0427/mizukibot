@@ -26,6 +26,7 @@ const {
 } = require('../utils/toolReplyFormatting');
 const { isAtBot, detectIntentHybrid } = require('./router');
 const { applyDeterministicToolRouting } = require('./router/toolRouting');
+const { shouldRunPassiveAwareness } = require('../src/platforms/accessPolicy');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
@@ -2644,6 +2645,10 @@ function createMessageHandler({
     }
     inboundContext.quotePriority = directedContext?.quotePriority || null;
     if (!isPrivateChatType(chatType) && !directBotAnchor) {
+      if (!shouldRunPassiveAwareness({
+        platform: effectiveMsg?.platform || msg?.platform,
+        allowPassiveContext: effectiveMsg?.allow_passive_context === true
+      })) return;
       const passiveFlowResult = await runPassiveFlow({
         inboundContext,
         handlePassiveGroupAwareness,
@@ -2970,7 +2975,7 @@ function createMessageHandler({
           if (!sent) {
             console.warn('[normal-fast-reply] send failed, fallback to formal route');
           } else {
-            if (!isPrivateChatType(chatType)) {
+            if (!isPrivateChatType(chatType) && effectiveMsg?.allow_long_term_group_memory !== false) {
               sideEffects.recordInboundHumanMessage({
                 groupId,
                 senderId,
@@ -3048,7 +3053,7 @@ function createMessageHandler({
             if (isPrivateChatType(chatType)) {
               registerPrivateProactiveUserAfterReply(senderId);
             }
-            if (!isPrivateChatType(chatType)) {
+            if (!isPrivateChatType(chatType) && effectiveMsg?.allow_long_term_group_memory !== false) {
               await sideEffects.runDirectReplyFollowup({
                 groupId,
                 senderId,
@@ -3282,7 +3287,7 @@ function createMessageHandler({
       lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
     });
 
-    if (!isPrivateChatType(chatType)) {
+    if (!isPrivateChatType(chatType) && effectiveMsg?.allow_long_term_group_memory !== false) {
       const groupSideEffectsStartedAt = Date.now();
       try {
         sideEffects.recordInboundHumanMessage({
@@ -3491,6 +3496,8 @@ function createMessageHandler({
       });
       const sent = await sendGroupReply({
         chatType,
+        platform: String(effectiveMsg?.platform || msg?.platform || 'qq').trim().toLowerCase() || 'qq',
+        allowLongTermGroupMemory: effectiveMsg?.allow_long_term_group_memory !== false,
         groupId,
         userId: senderId,
         senderId,

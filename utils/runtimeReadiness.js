@@ -5,6 +5,7 @@ function createRuntimeReadiness(options = {}) {
   let stage = STAGES.has(options.stage) ? options.stage : 'starting';
   let reason = String(options.reason || 'startup').trim() || 'startup';
   let changedAt = now();
+  let detailsProvider = typeof options.detailsProvider === 'function' ? options.detailsProvider : null;
 
   function transition(nextStage, nextReason) {
     const allowed = stage === 'starting'
@@ -18,17 +19,22 @@ function createRuntimeReadiness(options = {}) {
   }
 
   function getSnapshot() {
+    const details = detailsProvider?.() || {};
     return {
       stage,
       live: stage !== 'stopped',
-      ready: stage === 'ready',
+      ready: stage === 'ready' && details.messageIngressReady !== false,
       reason,
-      changedAt
+      changedAt,
+      ...details
     };
   }
 
   return {
     getSnapshot,
+    setDetailsProvider(provider) {
+      detailsProvider = typeof provider === 'function' ? provider : null;
+    },
     markReady: (nextReason = 'startup_complete') => transition('ready', nextReason),
     beginDrain: (nextReason = 'shutdown') => transition('draining', nextReason),
     markStopped: (nextReason = 'shutdown_complete') => transition('stopped', nextReason)

@@ -29,12 +29,20 @@ const {
   buildOutboundMessageMeta,
   recordOutboundMessageEvent
 } = require('../core/outboundMessageDiagnostics');
+const { getDeliveryContext } = require('../src/platforms/deliveryContext');
+const { isPlatformAdminPrincipal } = require('../src/platforms/admin');
 
 const ADMIN_USER_IDS = new Set((config.ADMIN_USER_IDS || []).map((item) => String(item || '').trim()).filter(Boolean));
 const REASONING_FORWARD_NODE_MAX_CHARS = 3500;
 
 function isAdminUser(userId = '') {
-  return ADMIN_USER_IDS.has(String(userId || '').trim());
+  const normalized = String(userId || '').trim();
+  return ADMIN_USER_IDS.has(normalized) || isPlatformAdminPrincipal(normalized);
+}
+
+function assertQqPlatform() {
+  const platform = String(getDeliveryContext()?.target?.platform || 'qq').trim().toLowerCase();
+  if (platform !== 'qq') throw new Error('QQ-only capability');
 }
 
 function normalizeText(value) {
@@ -403,6 +411,7 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
 }
 
 async function publishQzoneForContext(input = '', context = {}, options = {}) {
+  assertQqPlatform();
   const { userId, groupId } = requireGroupContext(context);
   assertAdmin(userId);
   const normalized = normalizeQzonePublishInput(input);
@@ -476,6 +485,7 @@ function createScheduledCommand(action = '', when = '', contentOrArgs = '', cont
 
   const { userId } = requireGroupContext(context);
   if (normalizedAction === 'qzone_post') {
+    assertQqPlatform();
     assertAdmin(userId);
     const qzoneAutoPublishEnabled = options.qzoneAutoPublishEnabled !== undefined
       ? options.qzoneAutoPublishEnabled

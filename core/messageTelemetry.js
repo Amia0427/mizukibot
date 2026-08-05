@@ -169,6 +169,10 @@ function createMessageTelemetryCoordinator(deps = {}) {
     const routeMeta = replyOptions?.routeMeta && typeof replyOptions.routeMeta === 'object'
       ? replyOptions.routeMeta
       : {};
+    if (
+      String(routeMeta.chatType || routeMeta.chat_type || '').trim().toLowerCase() === 'group'
+      && routeMeta.allowLongTermGroupMemory === false
+    ) return;
     const requestTrace = normalizeRequestTrace(routeMeta.requestTrace);
     const userId = String(routeMeta.userId || routeMeta.user_id || '').trim();
     const sessionKey = resolveShortTermSessionKey(userId, routeMeta);
