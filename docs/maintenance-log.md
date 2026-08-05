@@ -1,3 +1,10 @@
+## 运行维护 2026-08-05 11:04 +08:00
+
+- 新增 `docs/pjsk-user-guide.md`，面向普通用户说明曲库筛选、单谱结构分析、私聊/群聊发图差异、一次性引用、同名歧义、数据边界和常见问题；明确简中/英文标题只作为搜索别名，当前不提供个人成绩、社区定数或歌词。
+- 新增 `docs/pjsk-update-announcement-2026-08-05.md`，提供可直接发布的 QQ 群公告短版和更新日志长版；README 与 PJSK 技术文档已补充用户入口及 `2026-08-05 11:04 +08:00` 时间戳。
+- 验收：公告中的 4 条公开示例通过当前 Router 探针，2 条查询分别命中 `pjsk_song_search`，2 条分析/发图分别命中 `pjsk_chart_analyze`；`developerDocumentation.test.js`、`git diff --check` 均退出 0。
+- 本轮只修改文档，不改业务代码，不纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未推送远端；PJSK 面向用户的公告与使用说明小目标已完成。
+
 ## 运行维护 2026-08-05 10:57 +08:00
 
 - 小目标：完成 PJSK 曲库、谱面结构分析、候选集约束 RAG 和 QQ 谱面图链路；功能提交为 `77e1b1c`。实现位于 `src/features/pjsk/`，未向 `maimai` 增加字段，也未抽象通用音游框架。
