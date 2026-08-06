@@ -799,7 +799,7 @@ function createMessageRouteFlow(deps = {}) {
     let adminReply = '';
     if (!hasAdminAccess(route, senderId)) {
       adminReply = '这个按钮现在只给管理员按哦。';
-      await sendGroupReply({
+      const sent = await sendGroupReply({
         chatType: normalizedChatType,
         groupId,
         userId: senderId,
@@ -811,7 +811,8 @@ function createMessageRouteFlow(deps = {}) {
       });
       return {
         handled: true,
-        replyText: adminReply
+        replyText: adminReply,
+        sent: Boolean(sent)
       };
     }
 
@@ -952,7 +953,7 @@ function createMessageRouteFlow(deps = {}) {
       adminReply = '这个管理员命令我没认出来。发 /help 看看能用哪些吧。';
     }
 
-    await sendGroupReply({
+    const sent = await sendGroupReply({
       chatType: normalizedChatType,
       groupId,
       userId: senderId,
@@ -965,7 +966,8 @@ function createMessageRouteFlow(deps = {}) {
 
     return {
       handled: true,
-      replyText: adminReply
+      replyText: adminReply,
+      sent: Boolean(sent)
     };
   }
 

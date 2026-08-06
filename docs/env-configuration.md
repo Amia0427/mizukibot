@@ -1,6 +1,12 @@
 # Env Configuration
 
-更新时间：2026-08-04 23:42 +08:00
+更新时间：2026-08-06 23:26 +08:00
+
+## NapCat OneBot action
+
+- `NAPCAT_ACTION_TIMEOUT_MS=30000`：机器人调用 NapCat HTTP action 的总超时。
+- `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`：`send_msg`、`send_private_msg` 和 `send_group_msg` 传给 NapCat 的内部发送等待上限。该值应小于 `NAPCAT_ACTION_TIMEOUT_MS`，预留 HTTP 响应余量；调用方显式传入 `params.timeout` 时保留调用方值。
+- NapCat `onebot11` 配置的 `timeout.baseTimeout` 过低时，QQ 内部 `NodeIKernelMsgService/sendMsg` 可能在消息实际回调前超时。机器人现在对消息 action 显式传递该等待值，不改变“响应不确定时不自动重发”的重复消息保护策略。
 
 ## 主回复输出预算
 

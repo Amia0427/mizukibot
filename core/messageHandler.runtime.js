@@ -3233,7 +3233,7 @@ function createMessageHandler({
         command: String(route?.meta?.command?.cmd || '').trim(),
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
-      await routeFlow.dispatchAdminRoute({
+      const adminRouteResult = await routeFlow.dispatchAdminRoute({
         route,
         groupId,
         senderId,
@@ -3241,6 +3241,7 @@ function createMessageHandler({
         userInfo: null,
         chatType
       });
+      const adminRouteSent = adminRouteResult?.sent === true;
       appendTraceTiming('admin_route_dispatch_done', {
         stage: 'admin_route_dispatch_done',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
@@ -3256,7 +3257,7 @@ function createMessageHandler({
         groupId: String(groupId || '').trim(),
         userId: String(senderId || '').trim(),
         chatType,
-        sent: true,
+        sent: adminRouteSent,
         replyPath: 'admin_route',
         command: String(route?.meta?.command?.cmd || '').trim(),
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
@@ -3268,7 +3269,7 @@ function createMessageHandler({
       appendRequestCompleteTrace({
         routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
         topRouteType: routeExecutionPlan.topRouteType,
-        sent: true,
+        sent: adminRouteSent,
         command: String(route?.meta?.command?.cmd || '').trim()
       });
       return;

@@ -1,5 +1,11 @@
 # MizukiBot
 
+## NapCat 消息发送超时修复 2026-08-06 23:41 +08:00
+
+- 根因：NapCat 对 `send_group_msg` 使用 `timeout.baseTimeout=10000` 等待 QQ 内部 `NodeIKernelMsgService/sendMsg` 的成功回调；本次群总结首段发送耗时 `10014ms`，因此在回调到达前被 NapCat 判定超时。机器人原有策略不会重试送达结果不确定的发送，避免重复消息。
+- 修复：`send_msg`、`send_private_msg` 和 `send_group_msg` action 在未显式指定时携带 `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`，并保持 HTTP action 总超时有 1 秒余量；管理员路由的 `sent` 诊断字段改为使用真实发送结果。
+- 验收：NapCat action、重试策略、管理员群总结和私聊路由共 4 项定向测试通过；重启主进程后 `/live`、`/ready` 均返回 200，NapCat `get_status` 返回 `online=true`、`good=true`；使用新 action 发送群消息并通过 `get_msg` 回读，返回 `message_id=1940400047`、`post_type=message_sent`，发送耗时未触发 10 秒超时。
+
 ## 主动私聊窗口漏发修复 2026-08-06 23:28 +08:00
 
 - 修复稳定机会到达后先消费窗口、再检查沉默时间和发送条件导致的整窗漏发：NapCat 离线、沉默不足、最小间隔不足或已达日上限时保留窗口，条件在窗口结束前恢复即可继续判断；进入模型判断后仍立即消费，保持防重复与中断恢复语义。

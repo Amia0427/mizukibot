@@ -1,5 +1,6 @@
 const assert = require('assert');
 const axios = require('axios');
+const config = require('../config');
 
 const {
   getActionClientConnectionState,
@@ -60,16 +61,31 @@ module.exports = (async () => {
     assert.strictEqual(isActionClientConnected(client), false);
     assert.strictEqual(getActionClientConnectionState(client).connected, false);
 
-    axios.post = async () => ({
-      data: {
-        status: 'ok',
-        retcode: 0,
-        data: { ok: true }
-      }
-    });
+    const requests = [];
+    axios.post = async (url, params, options) => {
+      requests.push({ url, params, options });
+      return {
+        data: {
+          status: 'ok',
+          retcode: 0,
+          data: { ok: true }
+        }
+      };
+    };
     assert.deepStrictEqual(await client.callAction('get_msg', { message_id: 1 }), { ok: true });
     assert.strictEqual(client.getConnectionState().connected, true);
     assert.strictEqual(client.getConnectionState().readyStateName, 'http');
+
+    await client.callAction('send_group_msg', { group_id: 1, message: 'hello' });
+    const sendRequest = requests.at(-1);
+    assert.strictEqual(
+      sendRequest.params.timeout,
+      Math.min(config.NAPCAT_MESSAGE_SEND_TIMEOUT_MS, Math.max(1000, config.NAPCAT_ACTION_TIMEOUT_MS - 1000))
+    );
+    assert.strictEqual(sendRequest.options.timeout, config.NAPCAT_ACTION_TIMEOUT_MS);
+
+    await client.callAction('send_private_msg', { user_id: 1, message: 'hello', timeout: 12000 });
+    assert.strictEqual(requests.at(-1).params.timeout, 12000, 'explicit message timeout must be preserved');
   } finally {
     axios.post = originalAxiosPost;
   }
