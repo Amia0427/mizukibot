@@ -1262,7 +1262,7 @@ function createMessageHandler({
     formatStyleProfileAsText,
     formatSocialContextAsText,
     formatRelationshipGraphAsText,
-    sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
+    sendGroupReply: (...args) => replyRuntime.sendReply(...args),
     sendReply: (...args) => replyRuntime.sendReply(...args),
     updateFavor,
     saveData,

@@ -13,14 +13,19 @@ function normalizeText(value) {
 
 function buildContext(msg = {}) {
   const canonical = msg.canonical_message;
-  const chatType = normalizeText(msg.message_type).toLowerCase() === 'private' ? 'private' : 'group';
+  const actor = canonical?.actor;
+  const conversation = canonical?.conversation;
+  const chatType = normalizeText(msg.message_type || conversation?.chatType).toLowerCase() === 'private'
+    ? 'private'
+    : 'group';
+  const userId = normalizeText(msg.user_id || actor?.personId || actor?.externalId);
   return {
     text: normalizeText(canonical?.text || msg.raw_message),
     platform: normalizeText(msg.platform || canonical?.platform || 'qq').toLowerCase() || 'qq',
     chatType,
-    qqUserId: normalizeText(msg.user_id),
-    userId: normalizeText(msg.user_id),
-    groupId: chatType === 'group' ? normalizeText(msg.group_id) : ''
+    qqUserId: userId,
+    userId,
+    groupId: chatType === 'group' ? normalizeText(msg.group_id || conversation?.conversationId) : ''
   };
 }
 
@@ -31,21 +36,11 @@ function approvalReply(result = {}) {
   return '';
 }
 
-function createWeixinCommandBridge(options = {}) {
-  const config = options.config;
-  const runtime = options.runtime;
-  const approvalService = options.approvalService;
-  const sendWithRetry = options.sendWithRetry;
-  const privateAccessAllowed = options.isPrivateAccessAllowed || ((context) => isPrivateChatAccessAllowed({
-    chatType: context.chatType,
-    userId: context.userId,
-    config
-  }));
-  if (!runtime || !approvalService || typeof sendWithRetry !== 'function') {
-    throw new TypeError('weixin command bridge dependencies are required');
+function createCommandReplySender(sendWithRetry) {
+  if (typeof sendWithRetry !== 'function') {
+    throw new TypeError('weixin command reply sender requires sendWithRetry');
   }
-
-  async function sendReply(context, payload) {
+  return async (context, payload) => {
     const message = [{ type: 'text', data: { text: payload.text } }];
     if (Buffer.isBuffer(payload.image)) {
       message.push({
@@ -59,6 +54,21 @@ function createWeixinCommandBridge(options = {}) {
         ? { user_id: context.userId, message }
         : { group_id: context.groupId, message }
     }, 1, 300);
+  };
+}
+
+function createWeixinCommandBridge(options = {}) {
+  const config = options.config;
+  const runtime = options.runtime;
+  const approvalService = options.approvalService;
+  const sendReply = createCommandReplySender(options.sendWithRetry);
+  const privateAccessAllowed = options.isPrivateAccessAllowed || ((context) => isPrivateChatAccessAllowed({
+    chatType: context.chatType,
+    userId: context.userId,
+    config
+  }));
+  if (!runtime || !approvalService) {
+    throw new TypeError('weixin command bridge dependencies are required');
   }
 
   function shouldHandle(text) {
@@ -87,8 +97,38 @@ function createWeixinCommandBridge(options = {}) {
   return { handle, sendReply, shouldHandle };
 }
 
+function createDisabledWeixinCommandHandler(options = {}) {
+  const config = options.config;
+  const sendReply = createCommandReplySender(options.sendWithRetry);
+  const privateAccessAllowed = options.isPrivateAccessAllowed || ((context) => isPrivateChatAccessAllowed({
+    chatType: context.chatType,
+    userId: context.userId,
+    config
+  }));
+  function shouldHandle(text) {
+    return Boolean(parseWeixinCommand(normalizeText(text)));
+  }
+
+  async function handle(msg) {
+    const context = buildContext(msg);
+    if (!shouldHandle(context.text)) return false;
+    if (context.chatType === 'private' && !privateAccessAllowed(context)) return false;
+    await sendReply(context, { text: '微信功能尚未启用，请联系管理员。' });
+    return true;
+  }
+
+  return { handle, shouldHandle };
+}
+
 function createWeixinMainRuntime(options = {}) {
-  if (options.config?.WEIXIN_ENABLED !== true) return null;
+  if (options.config?.WEIXIN_ENABLED !== true) {
+    return {
+      approvalService: null,
+      close: async () => {},
+      commandHandler: createDisabledWeixinCommandHandler(options),
+      runtime: null
+    };
+  }
   const store = options.store;
   const loginClient = options.loginClient || createIlinkClient({
     fetch: options.fetch || globalThis.fetch,

@@ -1,6 +1,9 @@
 const assert = require('assert');
 
-const { createWeixinCommandBridge } = require('../src/platforms/weixin/main-runtime');
+const {
+  createWeixinCommandBridge,
+  createWeixinMainRuntime
+} = require('../src/platforms/weixin/main-runtime');
 
 module.exports = (async () => {
   const calls = [];
@@ -46,6 +49,32 @@ module.exports = (async () => {
   assert.strictEqual(calls[1][2].platform, 'weixin');
   assert.strictEqual(calls[2][0], 'send');
   assert.match(calls[2][1].params.message[0].data.text, /platform_mismatch/);
+
+  const disabledCalls = [];
+  const disabledRuntime = createWeixinMainRuntime({
+    config: { WEIXIN_ENABLED: false },
+    isPrivateAccessAllowed: () => true,
+    async sendWithRetry(payload) {
+      disabledCalls.push(payload);
+      return true;
+    }
+  });
+  assert.ok(disabledRuntime?.commandHandler);
+  assert.strictEqual(disabledRuntime.commandHandler.shouldHandle('/微信 状态'), true);
+  assert.strictEqual(disabledRuntime.commandHandler.shouldHandle('/工具确认 WX-ONE'), false);
+  assert.strictEqual(await disabledRuntime.commandHandler.handle({
+    canonical_message: {
+      platform: 'qq',
+      text: '/微信 状态',
+      actor: { externalId: 'canonical-user' },
+      conversation: { chatType: 'private', conversationId: 'canonical-user' }
+    }
+  }), true);
+  assert.strictEqual(disabledCalls.length, 1);
+  assert.strictEqual(disabledCalls[0].action, 'send_private_msg');
+  assert.strictEqual(disabledCalls[0].params.user_id, 'canonical-user');
+  assert.match(disabledCalls[0].params.message[0].data.text, /微信功能尚未启用/);
+  await disabledRuntime.close();
 
   console.log('weixinMainRuntime.test.js passed');
 })().catch((error) => {
