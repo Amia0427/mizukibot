@@ -7,6 +7,7 @@ const { memoryNotebookToolSchemas } = require('./toolSchemas/memoryNotebook');
 const { extraToolSchemas } = require('./toolSchemas/extra');
 const { skillsAndIntegrationsToolSchemas } = require('./toolSchemas/skillsAndIntegrations');
 const { maimaiToolSchemas } = require('./toolSchemas/maimai');
+const { pjskToolSchemas } = require('./toolSchemas/pjsk');
 
 const TOOL_SCHEMAS = [
   ...baseToolSchemas,
@@ -15,7 +16,8 @@ const TOOL_SCHEMAS = [
   ...memoryNotebookToolSchemas,
   ...extraToolSchemas,
   ...skillsAndIntegrationsToolSchemas,
-  ...maimaiToolSchemas
+  ...maimaiToolSchemas,
+  ...pjskToolSchemas
 ];
 
 module.exports = { TOOL_SCHEMAS };

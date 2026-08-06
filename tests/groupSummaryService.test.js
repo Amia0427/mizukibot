@@ -135,6 +135,49 @@ module.exports = (async () => {
   assert.strictEqual(summaryResult.sampledMessages, 2);
   assert.strictEqual(calls[0].options.count, 50);
 
+  let qqHistoryCalled = false;
+  const platformSummary = await generateGroupSummary({
+    groupId: 'discord:group:guild-1:channel-1:',
+    conversationKey: 'discord:group:guild-1:channel-1:',
+    platform: 'discord',
+    userId: 'person-1',
+    command: { payload: '20' }
+  }, {
+    config: {
+      GROUP_SUMMARY_DEFAULT_LIMIT: 200,
+      GROUP_SUMMARY_MAX_LIMIT: 500,
+      GROUP_SUMMARY_MODEL_MAX_CHARS: 12000,
+      GROUP_SUMMARY_STYLE: 'daily'
+    },
+    getGroupMessageHistoryCached: async () => {
+      qqHistoryCalled = true;
+      return [];
+    },
+    groupContextStore: {
+      list(key, options) {
+        assert.strictEqual(key, 'discord:group:guild-1:channel-1:');
+        assert.strictEqual(options.limit, 20);
+        return [{
+          senderId: 'discord:user-2',
+          senderName: 'Alice',
+          text: '跨平台总结内容',
+          imageUrls: ['https://cdn.example/image.png'],
+          occurredAt: 1_710_000_000_000
+        }];
+      }
+    },
+    requestNonStreamingReply: async (messages) => {
+      assert.ok(messages[0].content.includes('discord 群聊总结助手'));
+      assert.ok(messages[1].content.includes('跨平台总结内容'));
+      assert.ok(messages[1].content.includes('[图片]'));
+      return { visibleText: 'Discord 群总结' };
+    }
+  });
+  assert.strictEqual(platformSummary.ok, true);
+  assert.strictEqual(platformSummary.text, 'Discord 群总结');
+  assert.strictEqual(platformSummary.stats.imageCount, 1);
+  assert.strictEqual(qqHistoryCalled, false);
+
   const emptyResult = await generateGroupSummary({
     groupId: 'g1',
     userId: 'admin',

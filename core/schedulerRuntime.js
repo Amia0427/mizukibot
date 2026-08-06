@@ -32,13 +32,17 @@ function createSchedulerRuntime(options = {}) {
   async function executeTask(task = {}) {
     const commandType = String(task.commandType || '').trim();
     if (commandType === 'group_message') {
-      const ok = await sendGroupMessage(task.groupId, task.payload?.message || '', {
+      const target = task.deliveryTarget && typeof task.deliveryTarget === 'object'
+        ? task.deliveryTarget
+        : task.groupId;
+      const ok = await sendGroupMessage(target, task.payload?.message || '', {
         source: 'scheduler_runtime',
         routePolicyKey: 'scheduled/group-message',
         triggerReason: 'scheduled_task_due',
         topRouteType: 'proactive',
         routeMeta: {
           groupId: String(task.groupId || '').trim(),
+          platform: String(task.platform || 'qq').trim().toLowerCase() || 'qq',
           taskId: String(task.id || '').trim(),
           commandType
         }
@@ -50,6 +54,12 @@ function createSchedulerRuntime(options = {}) {
     }
 
     if (commandType === 'qzone_post') {
+      if (String(task.platform || 'qq').trim().toLowerCase() !== 'qq') {
+        return {
+          success: false,
+          reason: 'QZone only supports QQ'
+        };
+      }
       const qzoneAutoPublishEnabled = options.qzoneAutoPublishEnabled !== undefined
         ? options.qzoneAutoPublishEnabled
         : config.QZONE_AUTO_PUBLISH_ENABLED;

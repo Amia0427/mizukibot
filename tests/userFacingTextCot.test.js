@@ -42,6 +42,61 @@ module.exports = (() => {
     '诶，先别急，我接着说。',
     'roleplay inner protocol leak blocks should be stripped'
   );
+  assert.strictEqual(
+    sanitizeUserFacingText('哈？！ （心想：先别让对方看见这段内部判断。）\n真正的回复。'),
+    '哈？！ \n真正的回复。',
+    'wrapped roleplay reasoning should be stripped from visible text'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('(内心OS：这里仍是内部思考)正文'),
+    '正文',
+    'ascii wrapped roleplay reasoning should be stripped'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('心里OS：这里仍是内部思考\n\n正文'),
+    '正文',
+    'unwrapped roleplay reasoning paragraphs should be stripped'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('前缀（心想：流式内容还没有结束'),
+    '前缀',
+    'unterminated roleplay reasoning should not be streamed'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('前缀（内心O'),
+    '前缀',
+    'partial roleplay reasoning markers should not be streamed'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('(心想：内部)', { preserveThink: true }),
+    '',
+    'preserveThink must not expose roleplay reasoning as user-facing text'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('大家常说“内心OS”，但这里没有输出思考块。'),
+    '大家常说“内心OS”，但这里没有输出思考块。',
+    'ordinary mentions of inner monologue should remain visible'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('■ Two pigs, one shoving the other. Reply as Mizuki, 1:45am, casual, no brackets, no emoji, short chunks. --- 哈哈哈这个接得太准了吧'),
+    '哈哈哈这个接得太准了吧',
+    'reply-as reasoning preambles should be stripped from visible text'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('普通讨论 Reply as Mizuki --- 不是模型输出格式。'),
+    '普通讨论 Reply as Mizuki --- 不是模型输出格式。',
+    'reply-as mentions without role instructions should remain visible'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('普通讨论 Reply as   , casual --- 角色为空。'),
+    '普通讨论 Reply as   , casual --- 角色为空。',
+    'reply-as envelopes with an empty role should remain visible'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('普通讨论 Reply as Mizuki,   --- 指令为空。'),
+    '普通讨论 Reply as Mizuki,   --- 指令为空。',
+    'reply-as envelopes with empty instructions should remain visible'
+  );
 
   console.log('userFacingTextCot.test.js passed');
 })();

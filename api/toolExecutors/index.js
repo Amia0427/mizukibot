@@ -48,6 +48,12 @@ const {
 } = require('./skillRuntime');
 const { validateMaimaiToolInvocation } = require('../../src/features/maimai/invocation-policy');
 const { getMaimaiRuntime, isMaimaiEnabled } = require('../../src/features/maimai/runtime');
+const { validatePjskToolInvocation } = require('../../src/features/pjsk/invocation-policy');
+const { pjskReferenceStore } = require('../../src/features/pjsk/reference-store');
+const { renderAndSendChart, shouldSendChartImage } = require('../../src/features/pjsk/renderer');
+const { getPjskRuntime, isPjskEnabled } = require('../../src/features/pjsk/runtime');
+const { GROUP_PRIVATE_ONLY_REPLY, formatSubscriptionResult } = require('../../src/features/weather-alerts/commands');
+const { getWeatherAlertRuntime } = require('../../src/features/weather-alerts/runtime');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -221,7 +227,65 @@ async function executeMaimaiTool(toolName, methodName, args = {}) {
   return runtime.retrieval[methodName](args);
 }
 
+function buildBlockedPjskResult(reason) {
+  const messages = {
+    pjsk_route_mismatch: '当前问题未确认需要 PJSK 曲库或谱面数据，已阻止工具调用。',
+    pjsk_title_required: '请提供要分析的完整曲名和难度。',
+    pjsk_title_not_grounded: '谱面标题不在当前问题中，请明确写出曲名。',
+    pjsk_difficulty_not_grounded: '谱面难度不在当前问题中，请明确写出难度。',
+    pjsk_reference_invalid: '上一次谱面引用已失效，请重新提供曲名和难度。'
+  };
+  return { status: 'blocked', reason, answerPolicy: 'clarify', message: messages[reason] || 'PJSK 工具调用已阻止。' };
+}
+
+function savePjskReference(context, chart) {
+  if (!chart?.chartKey) return false;
+  return pjskReferenceStore.save(context, {
+    chartKey: chart.chartKey,
+    title: chart.title,
+    difficulty: chart.difficulty
+  });
+}
+
+async function executePjskTool(toolName, args = {}) {
+  if (!isPjskEnabled()) return { status: 'disabled', message: 'PJSK 功能未启用。' };
+  const context = args.__context || {};
+  const validation = validatePjskToolInvocation(toolName, args, context, { enabled: true });
+  if (!validation.allowed) return buildBlockedPjskResult(validation.reason);
+  const runtime = getPjskRuntime();
+  if (toolName === 'pjsk_song_search') {
+    const result = await runtime.retrieval.searchSongs(args);
+    if (result.status === 'ok' && result.results.length === 1) savePjskReference(context, result.results[0]);
+    return result;
+  }
+
+  const input = validation.reference
+    ? {
+        ...args,
+        chartKey: validation.reference.chartKey,
+        title: validation.reference.title,
+        difficulty: validation.reference.difficulty
+      }
+    : args;
+  const result = await runtime.retrieval.analyzeChart(input);
+  if (result.status !== 'ok' || !result.chart) return result;
+  savePjskReference(context, result.chart);
+  if (!shouldSendChartImage(context)) return { ...result, image: { requested: false, status: 'not_requested' } };
+  const source = runtime.catalog.getRawSus(result.chart.chartKey, result.evidence?.generationId);
+  if (!source?.raw_sus) return { ...result, image: { requested: true, status: 'source_unavailable' } };
+  const image = await (runtime.renderAndSendChart || renderAndSendChart)({
+    chart: result.chart,
+    sus: source.raw_sus,
+    context
+  });
+  return { ...result, image };
+}
+
 const TOOL_EXECUTORS = {
+  pjsk_song_search: async (args = {}) => executePjskTool('pjsk_song_search', args),
+
+  pjsk_chart_analyze: async (args = {}) => executePjskTool('pjsk_chart_analyze', args),
+
   maimai_chart_search: async (args = {}) => {
     return executeMaimaiTool('maimai_chart_search', 'searchCharts', args);
   },
@@ -715,6 +779,21 @@ const TOOL_EXECUTORS = {
 
   skill_weather: async (args = {}) => {
     return nativeWeather.getWeatherSummary(args);
+  },
+
+  weather_alert_subscription: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    if (String(context.chatType || '').trim().toLowerCase() !== 'private') return GROUP_PRIVATE_ONLY_REPLY;
+    const runtime = getWeatherAlertRuntime();
+    if (!runtime?.enabled) return '天气预警功能当前未启用。';
+    const principalId = String(context.userId || '').trim();
+    const action = String(args.action || '').trim().toLowerCase();
+    const location = String(args.location || '').trim();
+    if (!principalId) throw new Error('weather alert subscription requires principalId');
+    if (['subscribe', 'unsubscribe'].includes(action) && !location) {
+      return `请提供要${action === 'subscribe' ? '订阅' : '取消'}的完整市、区或县名。`;
+    }
+    return formatSubscriptionResult(await runtime.service.execute(principalId, action, location));
   },
 
   skill_weather_cloud: async (args = {}) => {

@@ -11,8 +11,8 @@ const {
   blockHasAnthropicCacheControl,
   buildModelRouteDiagnostics,
   clampTemperatureForProvider,
-  coerceTrailingAnthropicAssistantContextToUser,
   config,
+  ensureAnthropicConversationEndsWithUser,
   extractErrorCode,
   extractAnthropicCacheControl,
   extractAnthropicMessageCacheControl,
@@ -651,7 +651,7 @@ async function mapMessagesToAnthropic(messages) {
 
   return {
     system: systemBlocks,
-    messages: coerceTrailingAnthropicAssistantContextToUser(
+    messages: ensureAnthropicConversationEndsWithUser(
       out.length ? out : [{ role: 'user', content: [{ type: 'text', text: '(empty input)' }] }]
     )
   };

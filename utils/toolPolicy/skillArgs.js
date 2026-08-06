@@ -4,7 +4,23 @@ function normalizeWeatherArgs(args = {}) {
   const location = String(args.location ?? args.city ?? args.text ?? '').trim();
   if (location.length > 120) throw new Error('skill_weather location too long');
   if (/[\r\n<>`]/.test(location)) throw new Error('skill_weather location contains unsafe characters');
+  const requestedSections = Array.isArray(args.sections)
+    ? args.sections
+    : (args.sections === undefined ? ['overview'] : [args.sections]);
+  const sections = Array.from(new Set(requestedSections.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)));
+  const supportedSections = new Set(['overview', 'hourly', 'minutely', 'air', 'warning']);
+  if (sections.some((section) => !supportedSections.has(section))) {
+    throw new Error('skill_weather sections must contain overview, hourly, minutely, air, or warning');
+  }
+  if (sections.length === 0) sections.push('overview');
+  const days = args.days === undefined ? 4 : Number(args.days);
+  if (!Number.isInteger(days) || days < 1 || days > 10) throw new Error('skill_weather days must be an integer between 1 and 10');
+  const hours = args.hours === undefined ? 24 : Number(args.hours);
+  if (!Number.isInteger(hours) || hours < 1 || hours > 24) throw new Error('skill_weather hours must be an integer between 1 and 24');
   next.location = location;
+  next.sections = sections;
+  next.days = days;
+  next.hours = hours;
   return next;
 }
 

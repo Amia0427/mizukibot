@@ -8,6 +8,7 @@ const {
 } = require('../../utils/memory');
 const { getRecentDailySummaries } = require('../../utils/dailyJournal');
 const { getSessionContextSummaryStoreSnapshot } = require('../../utils/sessionContextSummaryStore');
+const { resolveShortTermSessionKey } = require('../../utils/shortTermMemory');
 
 function clampText(value, maxChars) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -15,8 +16,13 @@ function clampText(value, maxChars) {
   return Array.from(text).slice(0, Math.max(1, Number(maxChars) || 1)).join('');
 }
 
-function normalizePrivateHistory(userId, limit = 16) {
-  const items = Array.isArray(chatHistory[`direct:${userId}`]) ? chatHistory[`direct:${userId}`] : [];
+function normalizePrivateHistory(userId, limit = 16, target = null) {
+  const sessionKey = resolveShortTermSessionKey(userId, target ? {
+    platform: target.platform,
+    chatType: 'private',
+    conversationKey: target.key
+  } : {});
+  const items = Array.isArray(chatHistory[sessionKey]) ? chatHistory[sessionKey] : [];
   return items.slice(-Math.max(1, Number(limit) || 1)).map((item) => ({
     role: String(item?.role || '').trim() === 'assistant' ? 'assistant' : 'user',
     content: clampText(item?.content, 320)
@@ -62,13 +68,13 @@ function buildLongTermMemory(userId) {
 
 function createPrivateProactiveContextProvider(options = {}) {
   const historyLimit = Math.max(1, Number(options.historyLimit || 16) || 16);
-  return async function buildPrivateProactiveContext(userId, userState, now = Date.now()) {
+  return async function buildPrivateProactiveContext(userId, userState, now = Date.now(), target = null) {
     const affinity = getUserAffinityState(userId) || {};
     const journal = getRecentDailySummaries(userId, 3);
     return {
       userId: String(userId || '').trim(),
       currentTime: new Date(now).toISOString(),
-      privateHistory: normalizePrivateHistory(userId, historyLimit),
+      privateHistory: normalizePrivateHistory(userId, historyLimit, target),
       relationship: {
         relationship: clampText(affinity.relationship || affinity.level, 80),
         attitude: clampText(affinity.attitude, 120),

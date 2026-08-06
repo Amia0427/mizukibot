@@ -26,6 +26,8 @@ const {
 } = require('../utils/toolReplyFormatting');
 const { isAtBot, detectIntentHybrid } = require('./router');
 const { applyDeterministicToolRouting } = require('./router/toolRouting');
+const { shouldRunPassiveAwareness } = require('../src/platforms/accessPolicy');
+const { runWithDeliveryContext } = require('../src/platforms/deliveryContext');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
@@ -34,6 +36,7 @@ const { createForegroundConcurrencyController } = require('./foregroundConcurren
 const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
 const {
+  buildUntrustedAttachmentInput,
   createContinuousMessagePreprocessor,
   cheapParseMessageEntry,
   resolveContinuousEntryDetails

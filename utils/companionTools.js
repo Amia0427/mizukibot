@@ -9,11 +9,14 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'maimai_chart_search',
   'maimai_chart_analyze',
   'maimai_player_analysis',
+  'pjsk_song_search',
+  'pjsk_chart_analyze',
   'render_qq_visual',
   'getWeather',
   'skill_earthquake_latest',
   'skill_weather',
   'skill_weather_cloud',
+  'weather_alert_subscription',
   'notebook_search',
   'notebook_list_docs',
   'notebook_append_journal',
@@ -36,7 +39,8 @@ const COMPANION_SAFE_READ_TOOLS = Object.freeze([
   'read_shared_link',
   'maimai_chart_search',
   'maimai_chart_analyze',
-  'maimai_player_analysis'
+  'maimai_player_analysis',
+  'pjsk_song_search'
 ]);
 
 function parseToolList(value = '') {

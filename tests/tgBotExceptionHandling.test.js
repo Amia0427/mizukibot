@@ -43,57 +43,27 @@ module.exports = (async () => {
 
     const { handleTelegramMessage } = require('../core/tgBot');
 
-    const typingFailureSends = [];
-    await assert.doesNotReject(handleTelegramMessage({
-      async sendChatAction() {
-        throw new Error('telegram typing failed');
-      },
-      async sendMessage(chatId, text) {
-        typingFailureSends.push({ chatId, text });
+    const dispatched = [];
+    const bot = {
+      async getFileLink(fileId) {
+        return `https://api.telegram.org/file/${fileId}`;
       }
-    }, createMessage(), {
-      askAIByGraph: async () => 'reply after typing failure'
+    };
+    await assert.doesNotReject(handleTelegramMessage(bot, createMessage(), {
+      botInfo: { id: 'tg-bot-1', username: 'mizuki_bot' },
+      onMessage: async (message, source) => dispatched.push({ message, source })
     }));
-    assert.deepStrictEqual(typingFailureSends, [{
-      chatId: 'tg-chat-1',
-      text: 'reply after typing failure'
-    }]);
-    assert.ok(errors.some((entry) => String(entry[0]).includes('sendChatAction failed')));
+    assert.strictEqual(dispatched.length, 1);
+    assert.strictEqual(dispatched[0].message.platform, 'telegram');
+    assert.strictEqual(dispatched[0].message.text, 'hello');
+    assert.strictEqual(dispatched[0].source, 'telegram_polling_compat');
 
-    let fallbackAttempts = 0;
-    await assert.doesNotReject(handleTelegramMessage({
-      async sendChatAction() {},
-      async sendMessage() {
-        fallbackAttempts += 1;
-        throw new Error('telegram send failed');
-      }
-    }, createMessage({ message_id: 'tg-msg-ai-fail' }), {
-      askAIByGraph: async () => {
-        throw new Error('model failed');
+    await assert.doesNotReject(handleTelegramMessage(bot, createMessage({ message_id: 'tg-dispatch-fail' }), {
+      onMessage: async () => {
+        throw new Error('主管线处理失败');
       }
     }));
-    assert.strictEqual(fallbackAttempts, 1, 'AI failure should attempt exactly one fallback message');
-    assert.ok(errors.some((entry) => String(entry[0]).includes('AI processing failed')));
-    assert.ok(errors.some((entry) => String(entry[0]).includes('sendMessage failed')));
-
-    const chunkAttempts = [];
-    let chunkSendCount = 0;
-    await assert.doesNotReject(handleTelegramMessage({
-      async sendChatAction() {},
-      async sendMessage(chatId, text) {
-        chunkSendCount += 1;
-        chunkAttempts.push({ chatId, textLength: String(text).length });
-        if (chunkSendCount === 1) {
-          throw new Error('first chunk failed');
-        }
-      }
-    }, createMessage({ message_id: 'tg-msg-chunks' }), {
-      askAIByGraph: async () => 'x'.repeat(3501)
-    }));
-    assert.deepStrictEqual(chunkAttempts, [
-      { chatId: 'tg-chat-1', textLength: 3500 },
-      { chatId: 'tg-chat-1', textLength: 1 }
-    ]);
+    assert.ok(errors.some((entry) => String(entry[0]).includes('message dispatch failed')));
 
     await assert.doesNotReject(handleTelegramMessage({
       async sendChatAction() {
@@ -103,8 +73,8 @@ module.exports = (async () => {
         throw new Error('should not be called without chat id');
       }
     }, { message_id: 'tg-missing-chat', text: 'hello' }, {
-      askAIByGraph: async () => {
-        throw new Error('should not call AI without chat id');
+      onMessage: async () => {
+        throw new Error('should not dispatch without chat id');
       }
     }));
 

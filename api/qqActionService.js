@@ -29,12 +29,20 @@ const {
   buildOutboundMessageMeta,
   recordOutboundMessageEvent
 } = require('../core/outboundMessageDiagnostics');
+const { getDeliveryContext } = require('../src/platforms/deliveryContext');
+const { isPlatformAdminPrincipal } = require('../src/platforms/admin');
 
 const ADMIN_USER_IDS = new Set((config.ADMIN_USER_IDS || []).map((item) => String(item || '').trim()).filter(Boolean));
 const REASONING_FORWARD_NODE_MAX_CHARS = 3500;
 
 function isAdminUser(userId = '') {
-  return ADMIN_USER_IDS.has(String(userId || '').trim());
+  const normalized = String(userId || '').trim();
+  return ADMIN_USER_IDS.has(normalized) || isPlatformAdminPrincipal(normalized);
+}
+
+function assertQqPlatform() {
+  const platform = String(getDeliveryContext()?.target?.platform || 'qq').trim().toLowerCase();
+  if (platform !== 'qq') throw new Error('QQ-only capability');
 }
 
 function normalizeText(value) {
@@ -91,9 +99,16 @@ function requireGroupContext(context = {}) {
   if (!groupId) {
     throw new Error('group context required');
   }
+  const deliveryTarget = context.deliveryTarget
+    || routeMeta.deliveryTarget
+    || routeMeta.delivery_target
+    || getDeliveryContext()?.target
+    || null;
   return {
     groupId,
-    userId: normalizeText(context.userId)
+    userId: normalizeText(context.userId),
+    platform: normalizeText(routeMeta.platform || deliveryTarget?.platform || 'qq').toLowerCase() || 'qq',
+    deliveryTarget
   };
 }
 
@@ -403,6 +418,7 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
 }
 
 async function publishQzoneForContext(input = '', context = {}, options = {}) {
+  assertQqPlatform();
   const { userId, groupId } = requireGroupContext(context);
   assertAdmin(userId);
   const normalized = normalizeQzonePublishInput(input);
@@ -440,12 +456,14 @@ function createTaskResponse(task = {}, normalizedWhen = {}) {
 
 function createScheduledTask(input = {}, context = {}, options = {}) {
   const store = options.store || getScheduledTaskStore();
-  const { groupId, userId } = requireGroupContext(context);
+  const { groupId, userId, platform, deliveryTarget } = requireGroupContext(context);
   const when = normalizeText(input.when);
   const normalizedWhen = normalizeWhenExpression(when);
   const created = store.createTask({
     ownerUserId: userId,
     groupId,
+    platform,
+    deliveryTarget,
     kind: input.kind,
     commandType: input.commandType,
     when,
@@ -476,6 +494,7 @@ function createScheduledCommand(action = '', when = '', contentOrArgs = '', cont
 
   const { userId } = requireGroupContext(context);
   if (normalizedAction === 'qzone_post') {
+    assertQqPlatform();
     assertAdmin(userId);
     const qzoneAutoPublishEnabled = options.qzoneAutoPublishEnabled !== undefined
       ? options.qzoneAutoPublishEnabled

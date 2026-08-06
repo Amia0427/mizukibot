@@ -244,6 +244,9 @@ function applyDefaultTestEnv(env = process.env) {
   if (env.MEMORY_CLI_RERANK_ENABLED === undefined || env.MEMORY_CLI_RERANK_ENABLED === '') {
     env.MEMORY_CLI_RERANK_ENABLED = 'false';
   }
+  if (!String(env.NAPCAT_HTTP_API_BASE_URL || '').trim()) {
+    env.NAPCAT_HTTP_API_BASE_URL = 'http://127.0.0.1:1';
+  }
   return env;
 }
 

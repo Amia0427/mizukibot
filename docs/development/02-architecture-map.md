@@ -1,17 +1,21 @@
 # 架构地图与代码落点
 
-> 源码核验时间：2026-08-04 12:42 +08:00（Asia/Shanghai）。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
+> 源码核验时间：2026-08-06 09:37 +08:00（Asia/Shanghai）。本项目正处于从历史目录向 `src/` 分域迁移的阶段，目录名不能单独代表实现所有权。
 
 本文用于回答三个问题：进程如何协作、代码当前由谁实现、一个新改动应该放在哪里。
 
 ## 1. 架构总览
 
-MizukiBot 是 CommonJS Node.js 单仓库应用。根目录 `index.js` 是生产主进程的 composition root；QQ 消息经 NapCat 进入消息管线，路由后调用 LangGraph V2、模型和工具，最终通过 NapCat action 发回。回复后的记忆与向量维护可以由独立 worker 异步完成。
+MizukiBot 是 CommonJS Node.js 单仓库应用。根目录 `index.js` 是生产主进程的 composition root；QQ、Discord 和 Telegram 先由 `src/platforms/` 归一化，再共用消息管线、LangGraph V2、模型、工具和记忆。回复后的记忆与向量维护可以由独立 worker 异步完成。
 
 ```mermaid
 flowchart LR
   QQ["QQ 用户/群"]
+  Discord["Discord 用户/频道"]
+  Telegram["Telegram 用户/群"]
   NapCat["NapCat / OneBot 11"]
+  Adapters["平台适配器\nsrc/platforms"]
+  Registry["统一入站/出站与身份\nPlatformRegistry"]
   Main["主进程\nindex.js"]
   Web["Web 管理与健康检查\nweb/server/index.js"]
   Ingress["消息入口队列\ncore/messageIngressDispatcher.js"]
@@ -20,20 +24,26 @@ flowchart LR
   Graph["LangGraph V2\napi/runtimeV2/host/index.js"]
   Model["模型协议与 HTTP\napi/runtimeV2/model + src/model/http"]
   Tools["工具与能力执行\napi/toolExecutors + api/runtimeV2/capabilities"]
-  Action["QQ action\napi/qqActionService.js"]
+  Action["统一出站 action\nPlatformActionClient"]
   Queue["post-reply 队列\nDATA_DIR/post_reply_jobs"]
   Worker["post-reply worker\nscripts/post-reply-worker.js"]
   Stores["运行数据\nDATA_DIR"]
   Console["诊断命令\nscripts/console.js"]
 
   QQ <--> NapCat
-  NapCat -->|HTTP reverse / optional WS| Main
+  NapCat -->|HTTP reverse / optional WS| Adapters
+  Discord -->|Gateway| Adapters
+  Telegram -->|long polling| Adapters
+  Adapters --> Registry --> Main
   Main --> Web
   Main --> Ingress --> Handler --> Route --> Graph
   Graph --> Model
   Graph --> Tools
   Graph --> Queue
-  Graph --> Action --> NapCat
+  Graph --> Action --> Registry
+  Registry --> NapCat
+  Registry --> Discord
+  Registry --> Telegram
   Queue --> Worker --> Stores
   Main --> Stores
   Console --> Stores
@@ -45,7 +55,7 @@ flowchart LR
 
 | 进程/入口 | 主要职责 | 持有的长生命周期资源 | 不应承担 |
 | --- | --- | --- | --- |
-| 主进程 `index.js` | 配置校验、单实例、Web、NapCat ingress/action、消息处理、调度和优雅停机 | Web/HTTP reverse server、可选 WebSocket、message ingress dispatcher、scheduler、SQLite/hot stores | 重型回复后记忆工作，除非明确启用 inline worker |
+| 主进程 `index.js` | 配置校验、单实例、Web、平台适配器注册/生命周期、消息处理、调度和优雅停机 | Web/HTTP reverse server、NapCat transport、Discord Gateway、Telegram polling、message ingress dispatcher、scheduler、SQLite/hot stores | 平台协议解析和业务命令实现；重型回复后记忆工作，除非明确启用 inline worker |
 | post-reply worker `scripts/post-reply-worker.js` | 消费回复后任务、记忆提取、物化和向量维护 | worker 单实例锁、队列轮询、worker readiness、SQLite/hot stores | 接收 NapCat 消息、发送主回复、启动 Web 管理服务 |
 | console `scripts/console.js` | 配置检查和定向诊断 | 仅命令执行期间加载的配置/存储 | 常驻服务、交互式 REPL、替代生产健康检查 |
 | Web 服务 `web/server/index.js` | `/live`、`/ready`、管理页面和受保护 API | Express server、session/rate-limit 状态 | 直接成为模型或消息域的实现 owner |
@@ -62,22 +72,28 @@ package.json#start
   -> acquireSingleInstanceLock()
   -> startServer()
   -> initializeMemeManager()
+  -> createPlatformRuntime()
   -> startNapCatTransport()
+  -> platformRuntime.start()
   -> waitForServerListening()
   -> runtimeReadiness.markReady()
 ```
 
-NapCat 事件进入后，高层链路是：
+任一平台消息进入后的高层链路是：
 
 ```text
-acceptNapCatIncomingMessage()
-  -> prepareNapCatEventPacket()
+PlatformAdapter.normalize()
+  -> InboundMessage / DeliveryTarget
+  -> PlatformRegistry.prepareInbound()
   -> acceptIncomingMessage()
   -> messageIngressDispatcher.enqueue() 或 handleIncomingMessage()
   -> createMessageHandler(...).handleIncomingMessage()
   -> 路由 / 执行计划 / LangGraph V2
-  -> replyRuntime / qqActionService
+  -> replyRuntime / PlatformActionClient
+  -> 当前 DeliveryTarget 对应的平台适配器
 ```
+
+QQ 仍保留 `acceptNapCatIncomingMessage()`、OneBot/CQ 兼容、HTTP reverse、WebSocket 和 action 语义；字段不足以构造统一消息的兼容事件会继续走旧入口。Discord/TG 不把原始 SDK 对象传入业务层。
 
 入口队列负责限制全局 active/queued 数量；`handleIncomingMessage()` 内部还会按群聊/私聊、用户和会话获取并发锁。这两层不能互相替代。
 
@@ -87,6 +103,7 @@ acceptNapCatIncomingMessage()
 | --- | --- | --- |
 | `index.js` | 主进程 composition root 和生命周期 | 只做接线、启动、停机和 transport 选择；不要把业务规则继续堆进来 |
 | `src/` | 新的分域入口与已迁移实现：features、memory、message、model、runtime-v2、shared | 是迁移目标，但不是所有模块的实现源；先沿 `require()` 找 owner |
+| `src/platforms/` | 平台契约、QQ/Discord/TG 适配器、身份与群短期上下文、出站注册表 | SDK/CQ 结构止于适配器；业务层只消费统一消息和投递目标 |
 | `core/` | QQ 消息、路由、调度、主动/被动行为及仍未迁走的核心实现 | 消息管线仍大量由这里拥有；`.chunk.js` 可能是保留兼容资产，不能当垃圾删除 |
 | `api/` | LangGraph V2、模型编排、工具 schema/executor、外部服务适配和公共兼容入口 | `api/runtimeV2/host` 仍是图运行时 owner；不要把它误当成纯 HTTP API 层 |
 | `utils/` | 跨域策略、存储、记忆实现、prompt 编译、诊断、并发和运行时基础设施 | 新增前检查是否已有同职责模块；有状态 helper 必须有唯一 owner |
@@ -227,6 +244,8 @@ agent_decide -> humanize -> final_validate -> persist -> END
 | worker readiness | `DATA_DIR/runtime/post-reply-worker/worker-state.json` | 独立 worker owner；不要由 Web 或主进程伪造 ready |
 | Memory V3 | `DATA_DIR/memory-v3` | 事件日志是长期记忆业务真值；通过 `utils/memory-v3/repository.js`、materializer 和 worker 管理，禁止手改 projection 当作源数据 |
 | SQLite/profile/worldbook | `DATA_DIR/*.sqlite` 或对应配置路径 | 通过 store 模块访问；进程停机时统一关闭已加载连接 |
+| 平台人物与身份 | `DATA_DIR/platform-identities.sqlite` | 外部身份映射、绑定码、别名、最近私聊目标和审计由 `identityStore` 独占；历史只逻辑聚合，不批量改写 |
+| Discord/TG 群短期上下文 | `DATA_DIR/platform-group-context.sqlite` | 仅白名单频道/群写入，按会话保留 24 小时、最多 500 条；禁止长期群记忆和 post-reply 学习 |
 | 短期会话 | `DATA_DIR/short_term_sessions` 等 | session key 和 scope 必须使用既有 resolver，不能另造命名规则 |
 | prompt | `prompts/` + `prompt-manifest.json` | 是版本化源码资产，不属于 `DATA_DIR`；私有 prompt 仍不得提交 |
 | 生成图片、skill cache、上传临时文件 | `DATA_DIR/create-agent`、`skill_cache`、`qzone_uploads` 等 | 运行产物，不进入源码目录，也不默认提交 |

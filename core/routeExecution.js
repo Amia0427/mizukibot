@@ -6,6 +6,7 @@ const { normalizeToolNames } = require('../utils/localToolAccess');
 const { getPolicyDefinition: getPolicyDefinitionFromProfiles } = require('./routeProfiles');
 const { getPolicy } = require('../utils/toolPolicy');
 const config = require('../config');
+const { filterToolsForPlatform } = require('../src/platforms/accessPolicy');
 const { filterCompanionAllowedTools } = require('../utils/companionTools');
 const { routeHasReadableCardContext } = require('../utils/cardContext');
 const { isAdminUserId, isPrivateChatAccessAllowed } = require('../utils/privilegedPrivateChat');
@@ -147,6 +148,7 @@ function isPrivateSafeTool(toolName = '') {
   const normalized = String(toolName || '').trim();
   if (!normalized) return false;
   if (normalized === 'render_qq_visual') return true;
+  if (normalized === 'weather_alert_subscription') return true;
 
   const blockedByName = new Set([
     'publish_qzone',
@@ -167,7 +169,10 @@ function isPrivateSafeTool(toolName = '') {
 }
 
 function filterAllowedToolsForChatType(route = {}, allowedTools = [], runtimeConfig = config) {
-  const rawTools = normalizeToolNames(allowedTools);
+  const rawTools = filterToolsForPlatform(
+    normalizeToolNames(allowedTools),
+    route?.meta?.platform || 'qq'
+  );
   if (isPrivateAdminUser(route, runtimeConfig)) return rawTools;
   const companionTools = filterCompanionAllowedTools(rawTools, runtimeConfig);
   const cardWebTools = routeHasReadableCardContext(route) && rawTools.includes('web_fetch')

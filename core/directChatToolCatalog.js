@@ -3,6 +3,7 @@ const { GLOBAL_TOOL_NAME_SET } = require('../api/globalToolRuntime');
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { getPolicy } = require('../utils/toolPolicy');
 const { isAdminUser } = require('../api/qqActionService');
+const { filterToolsForPlatform } = require('../src/platforms/accessPolicy');
 const EXCLUDED_DIRECT_CHAT_TOOL_NAMES = new Set([
   'assistant_task_breakdown'
 ]);
@@ -90,8 +91,8 @@ const TOOL_ROUTING_METADATA = Object.freeze({
   skill_weather: {
     routingRole: 'weather_specialist',
     overlapGroup: 'weather',
-    preferWhen: ['weather requests', 'current conditions or four-day forecast lookup'],
-    avoidWhen: ['non-weather factual lookup'],
+    preferWhen: ['weather requests', 'current conditions, forecasts, air quality, or explicit weather warnings'],
+    avoidWhen: ['satellite cloud image requests', 'non-weather factual lookup'],
     preferredOver: ['getWeather', 'web_search']
   },
   skill_weather_cloud: {
@@ -99,6 +100,13 @@ const TOOL_ROUTING_METADATA = Object.freeze({
     overlapGroup: 'weather',
     preferWhen: ['China-region or full-disk satellite image requests', 'infrared, visible, or water vapor cloud image requests'],
     avoidWhen: ['current conditions or forecast requests'],
+    preferredOver: ['skill_weather', 'getWeather', 'web_search']
+  },
+  weather_alert_subscription: {
+    routingRole: 'weather_alert_subscription_manager',
+    overlapGroup: 'weather_alerts',
+    preferWhen: ['subscribe to district weather warnings', 'list, pause, resume, or cancel weather warning subscriptions'],
+    avoidWhen: ['current conditions or forecast requests', 'general weather warning explanations'],
     preferredOver: ['skill_weather', 'getWeather', 'web_search']
   },
   skill_earthquake_latest: {
@@ -285,10 +293,10 @@ function isToolVisibleInContext(toolName = '', context = {}) {
 function buildDirectChatToolCatalog(context = {}) {
   const schemaDescriptions = buildSchemaDescriptionMap();
   const dynamicDescriptors = buildDynamicDescriptorMap();
-  const toolNames = normalizeToolNames([
+  const toolNames = filterToolsForPlatform(normalizeToolNames([
     ...getToolNames(),
     ...Array.from(dynamicDescriptors.keys())
-  ]).filter((toolName) => !isExcludedDirectChatTool(toolName) && isToolVisibleInContext(toolName, context));
+  ]), context.platform).filter((toolName) => !isExcludedDirectChatTool(toolName) && isToolVisibleInContext(toolName, context));
 
   return toolNames.map((toolName) => {
     const policy = getPolicy(toolName);

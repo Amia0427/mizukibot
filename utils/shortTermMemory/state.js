@@ -388,6 +388,16 @@ function resolveShortTermSessionKey(userId, routeMeta = {}) {
   const explicitSessionId = String(meta.sessionId || meta.session_id || '').trim();
   if (explicitSessionId) return explicitSessionId;
 
+  const platform = String(meta.platform || 'qq').trim().toLowerCase() || 'qq';
+  const conversationKey = String(meta.conversationKey || meta.conversation_key || '').trim();
+  const chatType = String(meta.chatType || meta.chat_type || '').trim().toLowerCase() === 'private'
+    ? 'private'
+    : 'group';
+  if (platform === 'weixin' && chatType === 'private') return `direct:${uid}`;
+  if (platform !== 'qq' && conversationKey) {
+    return `${platform}-${chatType}:${conversationKey}:user:${uid}`;
+  }
+
   const groupId = String(meta.groupId || meta.group_id || '').trim();
   if (groupId) return `qq-group:${groupId}:user:${uid}`;
 

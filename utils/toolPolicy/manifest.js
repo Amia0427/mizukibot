@@ -95,17 +95,41 @@ assignPolicy(TOOL_POLICIES, [
   'minecraft_status'
 ], createPolicy({ risk: 'medium', capability: 'network' }));
 
+TOOL_POLICIES.skill_weather = createPolicy({
+  risk: 'low',
+  capability: 'network',
+  effect: 'none',
+  confirmation: 'none'
+});
+
 assignPolicy(TOOL_POLICIES, [
   'maimai_chart_search',
   'maimai_chart_analyze',
-  'maimai_player_analysis'
+  'maimai_player_analysis',
+  'pjsk_song_search'
 ], createPolicy({ risk: 'low', capability: 'local_read' }));
+
+TOOL_POLICIES.pjsk_chart_analyze = createPolicy({
+  risk: 'medium',
+  capability: 'local_read',
+  effect: 'external_send',
+  confirmation: 'none',
+  scope: 'group'
+});
 
 TOOL_POLICIES.skill_weather_cloud = createPolicy({
   risk: 'medium',
   capability: 'network',
   effect: 'external_send',
   confirmation: 'none'
+});
+
+TOOL_POLICIES.weather_alert_subscription = createPolicy({
+  risk: 'medium',
+  capability: 'local_write',
+  effect: 'local_write',
+  confirmation: 'explicit',
+  scope: 'user'
 });
 
 assignPolicy(TOOL_POLICIES, [
@@ -292,6 +316,12 @@ function resolveToolPolicy(toolName, args = {}) {
       none: ['get', 'list', 'query', 'related'],
       local_write: ['create', 'update', 'relate', 'validate', 'schema-append'],
       destructive: ['delete']
+    });
+  }
+  if (name === 'weather_alert_subscription') {
+    return resolveActionPolicy(basePolicy, action, {
+      none: ['list'],
+      local_write: ['subscribe', 'unsubscribe', 'pause', 'resume']
     });
   }
   if (name === 'create_scheduled_command') {

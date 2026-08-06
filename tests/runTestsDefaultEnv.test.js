@@ -13,7 +13,8 @@ const probe = spawnSync(
       ...process.env,
       MODEL_TLS_IMPERSONATION_ENABLED: '',
       MODEL_TLS_IMPERSONATION_STREAM_ENABLED: '',
-      MEMORY_CLI_RERANK_ENABLED: ''
+      MEMORY_CLI_RERANK_ENABLED: '',
+      NAPCAT_HTTP_API_BASE_URL: ''
     },
     encoding: 'utf8'
   }
@@ -35,9 +36,11 @@ assert.strictEqual(path.resolve(payload.env.TMPDIR), expectedTempRoot);
 assert.strictEqual(payload.env.MODEL_TLS_IMPERSONATION_ENABLED, 'false');
 assert.strictEqual(payload.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED, 'false');
 assert.strictEqual(payload.env.MEMORY_CLI_RERANK_ENABLED, 'false');
+assert.strictEqual(payload.env.NAPCAT_HTTP_API_BASE_URL, 'http://127.0.0.1:1');
 assert.strictEqual(payload.config.MODEL_TLS_IMPERSONATION_ENABLED, false);
 assert.strictEqual(payload.config.MODEL_TLS_IMPERSONATION_STREAM_ENABLED, false);
 assert.strictEqual(payload.config.MEMORY_CLI_RERANK_ENABLED, false);
+assert.strictEqual(payload.config.NAPCAT_HTTP_API_BASE_URL, 'http://127.0.0.1:1');
 assert.strictEqual(payload.transport.tlsImpersonationEnabled, false);
 assert.strictEqual(payload.transport.tlsImpersonationStreamEnabled, false);
 

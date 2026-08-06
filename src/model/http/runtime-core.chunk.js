@@ -231,6 +231,20 @@ function coerceTrailingAnthropicAssistantContextToUser(messages = []) {
   });
 }
 
+function ensureAnthropicConversationEndsWithUser(messages = []) {
+  const items = coerceTrailingAnthropicAssistantContextToUser(messages);
+  const lastRole = normalizeText(items[items.length - 1]?.role).toLowerCase();
+  if (lastRole !== 'assistant') return items;
+
+  return items.concat([{
+    role: 'user',
+    content: [{
+      type: 'text',
+      text: 'Continue the preceding response without repeating already generated content.'
+    }]
+  }]);
+}
+
 function messageHasAnthropicContent(message = {}) {
   const content = Array.isArray(message?.content) ? message.content : [];
   if (content.length === 0) return false;
@@ -659,6 +673,7 @@ module.exports = {
   coerceTrailingAnthropicAssistantContextToUser,
   config,
   createModelRouteTracePatch,
+  ensureAnthropicConversationEndsWithUser,
   ensureAnthropicMessagesUrl,
   extractAnthropicCacheControl,
   extractErrorCode,

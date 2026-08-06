@@ -172,6 +172,7 @@ function createMessageRouteFlow(deps = {}) {
     normalGroupMainReplyRateLimiter,
     sendGroupPoke,
     generateGroupSummary = generateGroupSummaryDefault,
+    groupContextStore = null,
     actionClient = null
   } = deps;
   const {
@@ -798,7 +799,7 @@ function createMessageRouteFlow(deps = {}) {
     let adminReply = '';
     if (!hasAdminAccess(route, senderId)) {
       adminReply = '这个按钮现在只给管理员按哦。';
-      await sendGroupReply({
+      const sent = await sendGroupReply({
         chatType: normalizedChatType,
         groupId,
         userId: senderId,
@@ -810,7 +811,8 @@ function createMessageRouteFlow(deps = {}) {
       });
       return {
         handled: true,
-        replyText: adminReply
+        replyText: adminReply,
+        sent: Boolean(sent)
       };
     }
 
@@ -836,8 +838,10 @@ function createMessageRouteFlow(deps = {}) {
           groupId,
           userId: senderId,
           botQQ: config.BOT_QQ,
+          platform: route?.meta?.platform || 'qq',
+          conversationKey: route?.meta?.conversationKey || groupId,
           command: route?.meta?.command || {}
-        });
+        }, { groupContextStore, actionClient });
         adminReply = String(summaryResult?.text || '').trim() || '群总结这次没生成稳。等一下再试一次吧。';
       }
     } else if (cmd === 'qzone_post') {
@@ -949,7 +953,7 @@ function createMessageRouteFlow(deps = {}) {
       adminReply = '这个管理员命令我没认出来。发 /help 看看能用哪些吧。';
     }
 
-    await sendGroupReply({
+    const sent = await sendGroupReply({
       chatType: normalizedChatType,
       groupId,
       userId: senderId,
@@ -962,7 +966,8 @@ function createMessageRouteFlow(deps = {}) {
 
     return {
       handled: true,
-      replyText: adminReply
+      replyText: adminReply,
+      sent: Boolean(sent)
     };
   }
 

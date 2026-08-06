@@ -125,6 +125,7 @@ module.exports = (async () => {
     if (indexTest) {
       indexTest.stopNapCatWebSocketForTest();
       indexTest.setMessageIngressDispatcherForTest(null);
+      await indexTest.platformRuntime.close();
     }
     if (client && client.readyState !== WebSocket.CLOSED) {
       client.terminate();

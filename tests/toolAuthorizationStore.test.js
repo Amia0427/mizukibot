@@ -1,10 +1,12 @@
 const assert = require('assert');
 const path = require('path');
+const Database = require('better-sqlite3');
 
 const { createToolAuthorizationStore } = require('../utils/toolAuthorizationStore');
+const { createDeliveryTarget } = require('../src/platforms/contracts');
 
-function actor(userId = 'user-1', chatType = 'group', groupId = 'group-1') {
-  return { userId, chatType, groupId };
+function actor(userId = 'user-1', chatType = 'group', groupId = 'group-1', platform = 'qq') {
+  return { userId, chatType, groupId, platform };
 }
 
 function pendingInput(requestKey, overrides = {}) {
@@ -99,6 +101,30 @@ module.exports = (() => {
   assert.strictEqual(rejected.ticket.status, 'cancelled');
   assert.strictEqual(rejected.ticket.terminalReason, 'policy_changed');
 
+  const crossPlatform = store.createPending(pendingInput('request-weixin', {
+    actor: actor('user-1', 'private', '', 'weixin'),
+    approvalActor: actor('user-1', 'private', '', 'qq'),
+    originRoute: {
+      platform: 'weixin',
+      chatType: 'private',
+      accountId: 'bot-1',
+      peerId: 'wx-user-1'
+    }
+  })).ticket;
+  assert.strictEqual(crossPlatform.actor.platform, 'weixin');
+  assert.strictEqual(crossPlatform.approvalActor.platform, 'qq');
+  assert.deepStrictEqual(crossPlatform.originRoute, createDeliveryTarget({
+    platform: 'weixin',
+    chatType: 'private',
+    accountId: 'bot-1',
+    peerId: 'wx-user-1'
+  }));
+  assert.deepStrictEqual(
+    store.claim(crossPlatform.id, actor('user-1', 'private', '', 'weixin')),
+    { ok: false, reason: 'platform_mismatch' }
+  );
+  assert.strictEqual(store.claim(crossPlatform.id, actor('user-1', 'private', '', 'qq')).ok, true);
+
   const uncertainInput = store.createPending(pendingInput('request-5')).ticket;
   assert.strictEqual(store.claim(uncertainInput.id, actor()).ok, true);
   const uncertain = store.markUncertain(uncertainInput.id, { errorCode: 'executor_interrupted' });
@@ -141,6 +167,83 @@ module.exports = (() => {
     { ok: false, reason: 'already_consumed', status: 'uncertain' }
   );
   restarted.close();
+
+  const legacyFile = path.join(
+    __dirname,
+    '..',
+    'tmp',
+    `tool-authorization-legacy-${process.pid}-${Date.now()}.sqlite`
+  );
+  const legacyDb = new Database(legacyFile);
+  legacyDb.exec(`
+    CREATE TABLE tool_authorizations (
+      id TEXT PRIMARY KEY,
+      request_key TEXT NOT NULL UNIQUE,
+      tool_name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      args_json TEXT,
+      context_json TEXT,
+      args_hash TEXT NOT NULL,
+      context_hash TEXT NOT NULL,
+      policy_json TEXT NOT NULL,
+      policy_version TEXT NOT NULL,
+      confirmation TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      chat_type TEXT NOT NULL,
+      group_id TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      started_at INTEGER,
+      completed_at INTEGER,
+      result_hash TEXT,
+      terminal_reason TEXT,
+      error_code TEXT
+    );
+    CREATE TABLE tool_authorization_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      authorization_id TEXT,
+      ts INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      reason TEXT,
+      status TEXT,
+      tool_name TEXT,
+      actor_user_id TEXT,
+      actor_chat_type TEXT,
+      actor_group_id TEXT,
+      metadata_json TEXT
+    );
+  `);
+  const legacyPolicy = pendingInput('legacy').policy;
+  legacyDb.prepare(`
+    INSERT INTO tool_authorizations (
+      id, request_key, tool_name, status, args_json, context_json, args_hash,
+      context_hash, policy_json, policy_version, confirmation, user_id,
+      chat_type, group_id, created_at, expires_at, updated_at
+    ) VALUES (?, ?, ?, 'pending', '{}', '{}', ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+  `).run(
+    'TA-LEGACY',
+    'legacy-request',
+    'schedule_group_message',
+    require('../utils/toolAuthorizationStore').hashValue({}),
+    require('../utils/toolAuthorizationStore').hashValue({}),
+    JSON.stringify(legacyPolicy),
+    legacyPolicy.version,
+    legacyPolicy.confirmation,
+    'legacy-user',
+    'private',
+    now,
+    now + 1000,
+    now
+  );
+  legacyDb.close();
+
+  const migrated = createToolAuthorizationStore({ file: legacyFile, now: () => now });
+  const legacyTicket = migrated.getTicket('TA-LEGACY');
+  assert.strictEqual(legacyTicket.actor.platform, 'qq');
+  assert.deepStrictEqual(legacyTicket.approvalActor, actor('legacy-user', 'private', '', 'qq'));
+  migrated.close();
 
   console.log('toolAuthorizationStore.test.js passed');
 })();

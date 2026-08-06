@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 const { openSqliteDatabase } = require('./sqliteConnection');
+const { createDeliveryTarget } = require('../src/platforms/contracts');
 
 const TERMINAL_STATUSES = new Set(['completed', 'uncertain', 'cancelled', 'expired']);
 
@@ -13,10 +14,23 @@ function normalizeText(value = '') {
 function normalizeActor(value = {}) {
   const chatType = normalizeText(value.chatType || value.chat_type).toLowerCase();
   return {
+    platform: normalizeText(value.platform).toLowerCase() || 'qq',
     userId: normalizeText(value.userId || value.user_id),
     chatType,
     groupId: chatType === 'group' ? normalizeText(value.groupId || value.group_id) : ''
   };
+}
+
+function normalizeOriginRoute(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const target = createDeliveryTarget(value);
+  if (
+    target.platform === 'weixin'
+    && (target.chatType !== 'private' || !target.containerId || !target.externalUserId)
+  ) {
+    throw new TypeError('Weixin origin route must target the bound private chat');
+  }
+  return target;
 }
 
 function stringify(value) {
@@ -60,9 +74,15 @@ function initSchema(db) {
       policy_json TEXT NOT NULL,
       policy_version TEXT NOT NULL,
       confirmation TEXT NOT NULL,
+      platform TEXT NOT NULL DEFAULT 'qq',
       user_id TEXT NOT NULL,
       chat_type TEXT NOT NULL,
       group_id TEXT NOT NULL DEFAULT '',
+      approval_platform TEXT NOT NULL DEFAULT 'qq',
+      approval_user_id TEXT NOT NULL DEFAULT '',
+      approval_chat_type TEXT NOT NULL DEFAULT '',
+      approval_group_id TEXT NOT NULL DEFAULT '',
+      origin_route_json TEXT,
       created_at INTEGER NOT NULL,
       expires_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
@@ -89,11 +109,39 @@ function initSchema(db) {
       actor_user_id TEXT,
       actor_chat_type TEXT,
       actor_group_id TEXT,
+      actor_platform TEXT NOT NULL DEFAULT 'qq',
       metadata_json TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tool_authorization_audit_ticket
       ON tool_authorization_audit(authorization_id, id);
   `);
+
+  const authorizationColumns = new Set(db.pragma('table_info(tool_authorizations)').map((column) => column.name));
+  const authorizationMigrations = [
+    ['platform', "TEXT NOT NULL DEFAULT 'qq'"],
+    ['approval_platform', "TEXT NOT NULL DEFAULT 'qq'"],
+    ['approval_user_id', "TEXT NOT NULL DEFAULT ''"],
+    ['approval_chat_type', "TEXT NOT NULL DEFAULT ''"],
+    ['approval_group_id', "TEXT NOT NULL DEFAULT ''"],
+    ['origin_route_json', 'TEXT']
+  ];
+  for (const [name, definition] of authorizationMigrations) {
+    if (!authorizationColumns.has(name)) db.exec(`ALTER TABLE tool_authorizations ADD COLUMN ${name} ${definition}`);
+  }
+  db.exec(`
+    UPDATE tool_authorizations
+    SET approval_user_id = user_id,
+        approval_chat_type = chat_type,
+        approval_group_id = group_id
+    WHERE approval_user_id = '' OR approval_chat_type = '';
+    CREATE INDEX IF NOT EXISTS idx_tool_authorizations_approval_actor
+      ON tool_authorizations(approval_platform, approval_user_id, approval_chat_type, approval_group_id, status);
+  `);
+
+  const auditColumns = new Set(db.pragma('table_info(tool_authorization_audit)').map((column) => column.name));
+  if (!auditColumns.has('actor_platform')) {
+    db.exec("ALTER TABLE tool_authorization_audit ADD COLUMN actor_platform TEXT NOT NULL DEFAULT 'qq'");
+  }
 }
 
 function rowToTicket(row = null) {
@@ -111,10 +159,18 @@ function rowToTicket(row = null) {
     policyVersion: row.policy_version,
     confirmation: row.confirmation,
     actor: {
+      platform: row.platform || 'qq',
       userId: row.user_id,
       chatType: row.chat_type,
       groupId: row.group_id
     },
+    approvalActor: {
+      platform: row.approval_platform || 'qq',
+      userId: row.approval_user_id || row.user_id,
+      chatType: row.approval_chat_type || row.chat_type,
+      groupId: row.approval_group_id || row.group_id
+    },
+    originRoute: parseJson(row.origin_route_json, null),
     createdAt: Number(row.created_at || 0),
     expiresAt: Number(row.expires_at || 0),
     updatedAt: Number(row.updated_at || 0),
@@ -137,6 +193,7 @@ function rowToAuditEvent(row = {}) {
     status: row.status || '',
     toolName: row.tool_name || '',
     actor: {
+      platform: row.actor_platform || 'qq',
       userId: row.actor_user_id || '',
       chatType: row.actor_chat_type || '',
       groupId: row.actor_group_id || ''
@@ -164,7 +221,8 @@ function createToolAuthorizationStore(options = {}) {
     INSERT INTO tool_authorization_audit (
       authorization_id, ts, type, decision, reason, status, tool_name,
       actor_user_id, actor_chat_type, actor_group_id, metadata_json
-    ) VALUES (?, ?, 'tool_authorization_decision', ?, ?, ?, ?, ?, ?, ?, ?)
+      , actor_platform
+    ) VALUES (?, ?, 'tool_authorization_decision', ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   function insertAudit(input = {}) {
@@ -179,7 +237,8 @@ function createToolAuthorizationStore(options = {}) {
       actor.userId || null,
       actor.chatType || null,
       actor.groupId || null,
-      stringify(input.metadata && typeof input.metadata === 'object' ? input.metadata : {})
+      stringify(input.metadata && typeof input.metadata === 'object' ? input.metadata : {}),
+      actor.platform
     );
   }
 
@@ -217,12 +276,24 @@ function createToolAuthorizationStore(options = {}) {
     const requestKey = normalizeText(input.requestKey);
     const toolName = normalizeText(input.toolName);
     const actor = normalizeActor(input.actor);
+    const approvalActor = normalizeActor(input.approvalActor || actor);
+    const originRoute = normalizeOriginRoute(input.originRoute);
     const policy = input.policy && typeof input.policy === 'object' ? { ...input.policy } : {};
-    if (!requestKey || !toolName || !actor.userId || !['private', 'group'].includes(actor.chatType)) {
+    if (
+      !requestKey
+      || !toolName
+      || !actor.userId
+      || !['private', 'group'].includes(actor.chatType)
+      || !approvalActor.userId
+      || !['private', 'group'].includes(approvalActor.chatType)
+    ) {
       throw new TypeError('invalid tool authorization input');
     }
     if (actor.chatType === 'group' && !actor.groupId) {
       throw new TypeError('group tool authorization requires groupId');
+    }
+    if (approvalActor.chatType === 'group' && !approvalActor.groupId) {
+      throw new TypeError('group tool authorization approval requires groupId');
     }
 
     const create = db.transaction(() => {
@@ -238,8 +309,10 @@ function createToolAuthorizationStore(options = {}) {
         INSERT INTO tool_authorizations (
           id, request_key, tool_name, status, args_json, context_json,
           args_hash, context_hash, policy_json, policy_version, confirmation,
-          user_id, chat_type, group_id, created_at, expires_at, updated_at
-        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          platform, user_id, chat_type, group_id,
+          approval_platform, approval_user_id, approval_chat_type, approval_group_id,
+          origin_route_json, created_at, expires_at, updated_at
+        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
         requestKey,
@@ -251,9 +324,15 @@ function createToolAuthorizationStore(options = {}) {
         stringify(policy),
         normalizeText(policy.version),
         normalizeText(policy.confirmation),
+        actor.platform,
         actor.userId,
         actor.chatType,
         actor.groupId,
+        approvalActor.platform,
+        approvalActor.userId,
+        approvalActor.chatType,
+        approvalActor.groupId,
+        originRoute ? stringify(originRoute) : null,
         createdAt,
         expiresAt,
         createdAt
@@ -281,8 +360,12 @@ function createToolAuthorizationStore(options = {}) {
   }
 
   function actorMismatchReason(ticket, actor) {
-    if (ticket.actor.userId !== actor.userId) return 'identity_mismatch';
-    if (ticket.actor.chatType !== actor.chatType || ticket.actor.groupId !== actor.groupId) {
+    if (ticket.approvalActor.platform !== actor.platform) return 'platform_mismatch';
+    if (ticket.approvalActor.userId !== actor.userId) return 'identity_mismatch';
+    if (
+      ticket.approvalActor.chatType !== actor.chatType
+      || ticket.approvalActor.groupId !== actor.groupId
+    ) {
       return 'context_mismatch';
     }
     return '';
@@ -488,5 +571,6 @@ module.exports = {
   TERMINAL_STATUSES,
   createToolAuthorizationStore,
   hashValue,
-  normalizeActor
+  normalizeActor,
+  normalizeOriginRoute
 };

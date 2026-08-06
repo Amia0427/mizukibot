@@ -39,4 +39,15 @@ const startupFailure = createRuntimeReadiness({ now: () => 2000 });
 assert.strictEqual(startupFailure.beginDrain('startup_failed'), true);
 assert.strictEqual(startupFailure.markStopped('exit'), true);
 
+const platformReadiness = createRuntimeReadiness({
+  now: () => 3000,
+  detailsProvider: () => ({
+    messageIngressReady: false,
+    platforms: [{ platform: 'discord', status: 'degraded' }]
+  })
+});
+platformReadiness.markReady();
+assert.strictEqual(platformReadiness.getSnapshot().ready, false);
+assert.strictEqual(platformReadiness.getSnapshot().platforms[0].platform, 'discord');
+
 console.log('runtimeReadiness.test.js passed');

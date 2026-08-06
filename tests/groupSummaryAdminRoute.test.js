@@ -97,7 +97,18 @@ module.exports = (async () => {
   });
   assert.strictEqual(adminResult.handled, true);
   assert.strictEqual(adminResult.replyText, 'summary ok');
+  assert.strictEqual(adminResult.sent, true);
   assert.strictEqual(adminCase.sent[0].replyText, 'summary ok');
+
+  const failedSendCase = createFlow({ sendGroupReply: async () => false });
+  const failedSendResult = await failedSendCase.routeFlow.dispatchAdminRoute({
+    route: groupSummaryRoute(true),
+    groupId: 'g1',
+    senderId: 'admin_1',
+    rawText: '/群总结 50',
+    chatType: 'group'
+  });
+  assert.strictEqual(failedSendResult.sent, false);
 
   const deniedCase = createFlow();
   const deniedResult = await deniedCase.routeFlow.dispatchAdminRoute({
@@ -108,6 +119,7 @@ module.exports = (async () => {
     chatType: 'group'
   });
   assert.strictEqual(deniedResult.replyText, '这个按钮现在只给管理员按哦。');
+  assert.strictEqual(deniedResult.sent, true);
   assert.strictEqual(deniedCase.sent[0].replyText, '这个按钮现在只给管理员按哦。');
 
   const privateCase = createFlow();

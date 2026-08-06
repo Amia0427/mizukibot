@@ -1,6 +1,22 @@
 const axios = require('axios');
 const config = require('../config');
 
+const MESSAGE_SEND_ACTIONS = new Set(['send_msg', 'send_private_msg', 'send_group_msg']);
+
+function addMessageSendTimeout(action, params, requestTimeout) {
+  if (!MESSAGE_SEND_ACTIONS.has(action) || Object.prototype.hasOwnProperty.call(params, 'timeout')) {
+    return params;
+  }
+
+  const configuredTimeout = Number(config.NAPCAT_MESSAGE_SEND_TIMEOUT_MS);
+  if (!Number.isFinite(configuredTimeout) || configuredTimeout <= 0) return params;
+
+  return {
+    ...params,
+    timeout: Math.min(configuredTimeout, Math.max(1000, requestTimeout - 1000))
+  };
+}
+
 class NapCatActionError extends Error {
   constructor(message, options = {}) {
     super(String(message || 'NapCat action failed'));
@@ -89,7 +105,8 @@ function createNapCatHttpActionClient() {
     try {
       const actionTimeout = Math.max(1000, Number(options.timeoutMs || timeout) || timeout);
       pendingCount += 1;
-      const response = await axios.post(`${baseURL}/${actionName}`, params, { headers, timeout: actionTimeout });
+      const requestParams = addMessageSendTimeout(actionName, params, actionTimeout);
+      const response = await axios.post(`${baseURL}/${actionName}`, requestParams, { headers, timeout: actionTimeout });
       markConnected();
       const data = response.data || {};
 

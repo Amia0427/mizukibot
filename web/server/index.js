@@ -67,8 +67,9 @@ function handleLivenessRequest(_req, res, readiness) {
 }
 
 function handleReadinessRequest(_req, res, readiness) {
-  const ready = getReadinessSnapshot(readiness).ready === true;
-  return res.status(ready ? 200 : 503).json({ ok: ready });
+  const snapshot = getReadinessSnapshot(readiness);
+  const ready = snapshot.ready === true;
+  return res.status(ready ? 200 : 503).json({ ok: ready, ...snapshot });
 }
 
 function handleHealthRequest(req, res, readiness) {

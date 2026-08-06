@@ -1,5 +1,74 @@
 # MizukiBot
 
+## NapCat 消息发送超时修复 2026-08-06 23:41 +08:00
+
+- 根因：NapCat 对 `send_group_msg` 使用 `timeout.baseTimeout=10000` 等待 QQ 内部 `NodeIKernelMsgService/sendMsg` 的成功回调；本次群总结首段发送耗时 `10014ms`，因此在回调到达前被 NapCat 判定超时。机器人原有策略不会重试送达结果不确定的发送，避免重复消息。
+- 修复：`send_msg`、`send_private_msg` 和 `send_group_msg` action 在未显式指定时携带 `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`，并保持 HTTP action 总超时有 1 秒余量；管理员路由的 `sent` 诊断字段改为使用真实发送结果。
+- 验收：NapCat action、重试策略、管理员群总结和私聊路由共 4 项定向测试通过；重启主进程后 `/live`、`/ready` 均返回 200，NapCat `get_status` 返回 `online=true`、`good=true`；使用新 action 发送群消息并通过 `get_msg` 回读，返回 `message_id=1940400047`、`post_type=message_sent`，发送耗时未触发 10 秒超时。
+
+## 主动私聊窗口漏发修复 2026-08-06 23:28 +08:00
+
+- 修复稳定机会到达后先消费窗口、再检查沉默时间和发送条件导致的整窗漏发：NapCat 离线、沉默不足、最小间隔不足或已达日上限时保留窗口，条件在窗口结束前恢复即可继续判断；进入模型判断后仍立即消费，保持防重复与中断恢复语义。
+- 实现提交 `7e55a30`；主动私聊六项定向测试、lint、typecheck、`git diff --check` 和 182.3 秒完整 `npm test` 均退出 0。
+- 2026-08-06 23:27 +08:00 重启后主进程 PID `38796`、主动扫描器均正常运行，`/live`、`/ready` 返回 200；今日窗口已于 23:00 结束，未清空历史游标或执行补发，小目标已完成。
+
+## 微信 iLink 私聊命令修复 2026-08-06 11:37 +08:00
+
+- 修复 `WEIXIN_ENABLED=false` 时 `/微信 ...` 未被接管，以及管理员私聊回复被错误发送为 `send_group_msg` 的问题；关闭状态会直接提示功能未启用，通用管理员路由改为按 `chatType` 选择私聊或群聊目标。
+- 微信命令上下文可从统一 `canonical_message` 回退读取用户与会话字段，避免多平台信封缺少 QQ 顶层兼容字段时丢失回复目标。
+- 实现提交 `8598fbd`；13 个微信/私聊定向测试、855 文件 lint、typecheck、147.9 秒完整测试、SQLite `quick_check=ok` 均通过。2026-08-06 11:30 +08:00 本地主进程重启后 `/live`、`/ready` 返回 200，微信 worker 为 `online/heartbeat`。
+- 本地已启用微信并生成未提交的独立主密钥；真实二维码获取与扫码确认仍需绑定用户在 QQ 私聊重新发送 `/微信 绑定` 完成，未把该步骤记为已验收。本轮测试运行时为 Node 24.14.1。
+
+## 微信 iLink 私聊适配 2026-08-06 10:47 +08:00
+
+- 机器人直接接入腾讯公开 iLink 协议，以独立 worker 维护账号长轮询，并通过 SQLite inbox/outbox 与主进程可靠通信；默认 `WEIXIN_ENABLED=false`，启用时必须配置 `WEIXIN_CREDENTIAL_MASTER_KEY`。
+- QQ 用户可在 QQ 私聊使用 `/微信 绑定|状态|换绑|解绑|通知 QQ|通知 微信`。微信身份一对一映射到 QQ 号，记忆、画像、好感度、权限、短期上下文和工具数据继续只使用 QQ 号，不复制用户数据。
+- 微信只允许绑定者私聊。群消息、群事件、非绑定者私聊和目标机器人不匹配的消息，会在媒体下载、上下文令牌保存、会话、模型、记忆和工具调用前静默丢弃并做无正文审计；项目没有微信群开关、入群或群发送接口。
+- 首阶段支持文本、图片、20 MiB 内文件和微信已提供转写文字的语音；不支持视频、原生语音回复及无转写语音的本地识别。面向用户的公告、绑定步骤和常见问题见 [瑞希的微信 iLink 更新公告与详细使用教程](docs/weixin-ilink-user-guide.md)，实现与自动化验收见 [微信 iLink 私聊适配实施记录](docs/superpowers/plans/2026-08-06-weixin-ilink-private-adapter.md)。
+- Node 20.20.2 下 39 个定向测试文件和 110.6 秒完整测试均通过，SQLite `quick_check=ok`；当前没有真实 iLink 测试账号，因此真实扫码、跨平台连续对话、微信主动通知和真实解绑尚未验收。项目层禁群不能阻止微信客户端发生物理拉群，但被拉群后不会处理或回复群消息。
+
+## Discord / Telegram 多平台适配 2026-08-06 09:37 +08:00
+
+- QQ、Discord Gateway 与 Telegram long polling 已统一接入现有消息、路由、模型、工具、记忆和命令管线；任一适配器掉线只标记该平台 degraded，`/ready` 会返回各平台健康状态。
+- 外部身份使用 `discord:<id>`、`telegram:<id>`，可在私聊通过一次性 `/bind` 码与 QQ 身份绑定；长期记忆按全部身份别名逻辑聚合，新数据只写统一人物主键，短期对话仍按平台、频道和 thread/topic 隔离。
+- Discord/TG 的被动群感知仅对显式白名单开启，保留 24 小时且每会话最多 500 条，只用于被动回复和群总结；QZone、QQ 动态及其自动发布继续为 QQ 专属。
+- 配置、平台前置条件、绑定流程和上线检查见 [Discord / Telegram 多平台部署](docs/multi-platform-deployment.md)，代码边界见 [架构地图](docs/development/02-architecture-map.md)。
+- Node 20.19.5 下多平台与 QQ 聚焦回归、lint、typecheck、暂存密钥扫描和 diff check 通过；完整测试的并行工具授权/微信工作区阻断详见 [维护日志](docs/maintenance-log.md)，未写入真实 token，未推送远端。
+
+## PJSK 曲库与谱面 RAG 2026-08-05 11:10 +08:00
+
+- 功能提交 `77e1b1c` 新增独立 `src/features/pjsk/`，以日服 master DB 为事实库、简中和英文标题为别名；SQLite 负责精确筛选，LanceDB 只在 SQL 候选内重排，向量不可用时明确降级为 `sql_only`。
+- 新增 `pjsk_song_search` 与 `pjsk_chart_analyze`。单谱分析使用固定版本 `susToUSC` 计算结构特征和代表段；私聊自动发送完整谱面图，群聊仅在当前消息明确要求“谱面图、看谱、发图”时发送。
+- 真实 `Tell Your World` MASTER 26 验收通过：master DB 与 SUS 解析物量均为 1147，PNG 为 5248×2688、1,143,348 字节、非空，封面缓存成功。7 项 PJSK 回归、828 文件 lint、typecheck、Prompt、密钥扫描和 158.1 秒完整测试均通过。
+- Docker 构建未通过：本机只有 Docker CLI，没有 daemon、Docker Desktop、WSL 或其他容器运行时，未擅自安装系统软件；源码、锁定 wheel 和字体配置已由静态测试覆盖，但不能宣称镜像构建成功。面向用户的说明见 [PJSK 使用指南](docs/pjsk-user-guide.md)、[曲库 RAG 原理与机制](docs/pjsk-rag-explained.md) 与 [PJSK 更新公告](docs/pjsk-update-announcement-2026-08-05.md)，实现与维护见 [PJSK 曲库、谱面分析与 RAG](docs/pjsk-sql-rag.md)。
+- 用户文档中的 4 条公开示例已通过当前 Router 探针：曲库筛选和信息查询命中 `pjsk_song_search`，单谱分析和谱面图请求命中 `pjsk_chart_analyze`。
+- [PJSK 曲库 RAG 原理与机制](docs/pjsk-rag-explained.md) 面向普通用户解释 SQL 精确筛选、候选集内向量重排、generation 隔离、单谱确定性分析、降级状态和事实可信度边界。
+
+## 混合 content reasoning 前缀隔离 2026-08-05 09:48 +08:00
+
+- 01:45 的泄漏请求实际走管理员 `claude-opus-5` 非流式路由；第三方网关把英文分析和最终中文答复一起写入普通 `content`，不是 `gemini-3-flash-preview-search` 的这次回复，也不是独立 reasoning 字段解析失败。
+- 实现提交 `55cf28e` 严格识别“非空分析 + `Reply as <role>, <instructions> ---` + 非空正文”，把前缀并入 `reasoningText` 供现有合并转发折叠发送，只让后缀进入可见正文与持久化；`prompts/runtime/roleplay-inner-protocol.txt` 和流式发送逻辑未修改。
+- Gemini 对照探针确认请求携带 `reasoning_effort=high`，但第三方 OpenAI-compatible 网关响应的 `message` 只有 `role/content`，未返回 `reasoning`、`reasoning_content` 或 `thinking`；只能确认网关未回传思维链，不能证明模型内部没有推理。
+- 验收：8 项 reasoning/转发回归、812 文件 lint、typecheck、Prompt、diff check 和 165.8 秒完整测试均退出 0；完整测试使用 Node 24.14.1，当前环境未提供项目声明的 Node 20，未重启服务，未推送远端。
+
+## NapCat 测试隔离 2026-08-05 00:10 +08:00
+
+- `消息不存在` 堆栈已定位到 NapCat `GetMsg`：测试子进程继承本地 `.env` 后，把测试消息 ID 发给了真实 `127.0.0.1:3000`，不是线上消息发送失败。
+- 实现提交 `6acffdc` 将未显式配置的测试 NapCat 地址隔离到 `127.0.0.1:1`，显式 mock 地址仍会保留；正式启动流程和 NapCat 配置未修改。
+- 验收：4 项定向测试、目标 ESLint、typecheck 和 `git diff --check` 均退出 0；小目标已完成，未推送远端。
+
+## 角色内心 reasoning 正文隔离 2026-08-04 23:56 +08:00
+
+- 所有上游模型均通过第三方 OpenAI-compatible 网关接入；网关若将 reasoning 混入 `choices[].message.content` 或流式 `delta.content`，用户可见文本边界会剥离“（心想：……）”“(内心OS：……)”等内部思考块。
+- 实现提交 `69fc96c` 同时覆盖流式、非流式、安全检查和 Runtime V2 持久化前复检；`prompts/runtime/roleplay-inner-protocol.txt` 继续只约束内部 reasoning，未被修改。
+- 验收：`npm run lint`、`npm run typecheck`、`npm run check:prompts`、完整 `npm test` 和 `git diff --check` 均退出 0；未重启服务，未推送远端。
+
+## 主回复输出预算 2026-08-04 23:34 +08:00
+
+- 普通主回复的 `AI_MAX_TOKENS` 与代码默认值已由 `8192` 提高到 `50000`，管理员预算保持 `50000`；短期记忆、上下文窗口、快速回复及其他专用模型预算未调整。
+- 实现提交 `67979c2`；配置探针输出主回复、普通用户和管理员预算均为 `50000`，`mainModelGenerationParams` 聚焦测试、目标 ESLint 与 typecheck 均通过。
+- 验收（2026-08-04 23:42 +08:00）：本地 `.env` 已同步并完成重启，新主进程/worker 为 `31244/35372`，`/ready` 返回 200；真实 `gcli.ggchan.dev` 请求记录 `max_tokens=50000`、HTTP 200、`finish_reason=stop`，小目标已完成，未推送远端。
+
 ## 舞萌误召回收敛 2026-08-04 13:05 +08:00
 
 - 功能提交 `c82ad3d` 将舞萌工具授权收紧为“确认舞萌领域 + 确认需要谱面或成绩数据”双门禁；普通的写作手法、UI 交互、键盘滑键、蓝牙掉音、数学定数及舞萌闲聊均不再暴露舞萌工具。
@@ -56,11 +125,15 @@
 - Node 20 全量测试 116 秒、覆盖率 145.6 秒退出 0；覆盖率为 overall `72.10/78.51/62.16`、web `79.84/87.50/80.59`、Runtime V2 `77.69/63.29/63.97`、stable boundaries `86.00/80.38/72.74`（行/函数/分支）。提交 `461a289` 将 V8 Function 基线校准到项目唯一运行边界 Node 20，其他指标阈值未降低。
 - 外部 nightly 只验证 producer 自报元数据、时效、覆盖量和阈值，不执行真实模型、生成脱敏回放或认证 producer 身份；当前分支未推送。
 
-## 环境数据查询 2026-08-02 14:17 +08:00
+## 环境数据查询 2026-08-07 00:36 +08:00
 
 - 地震查询接入 USGS FDSN GeoJSON：发送“最新地震”默认返回全球最近 24 小时 M4.5+ 的 5 条事件；“中国最近一周 4 级以上地震，给我 3 条”可指定中国范围、时间窗、最低震级和条数。
+- 天气查询统一接入和风天气，需要在本地 `.env` 配置 `QWEATHER_API_HOST` 和 32 位密钥内容 `QWEATHER_API_KEY`；`QWEATHER_API_SECRET` 仅作为兼容别名，控制台中的 10 位 API KEY 标识不参与请求，`AMAP_KEY` 继续供附近地点等既有工具使用。
+- `skill_weather` 支持全球地点、实况与 1-10 日预报、1-24 小时逐小时预报、中国区域两小时分钟降水、空气质量和有效天气预警；可发送“上海未来 24 小时天气”“北京空气质量”“广州天气预警”“伦敦天气”或组合查询，没有明确地点时会要求补充。
+- 私聊可用 `/天气预警 订阅 北京市朝阳区`、`取消`、`列表`、`暂停` 和 `恢复` 管理区县级预警，每个统一人物最多订阅 5 个地区；自然语言订阅写操作需要执行一次 `/工具确认 <ID>`，群聊不支持管理订阅。
+- 预警每 5 分钟扫描一次，同一人物同批预警合并为一条瑞希回复；23:00–07:30 的蓝色、黄色预警延迟到静默结束前重新确认，橙色、红色及未知等级立即发送。V1 不提供群订阅、逐平台订阅、自定义静默时间、普通天气定时报送或解除通知。
 - 气象云图接入 JMA Himawari：发送“最新卫星云图”“可见光云图”或“水汽云图”会获取亚太全圆盘最新时次的红外、可见光或水汽 JPEG，并直接发送到当前 QQ 会话；NapCat 发送失败时回复保留 JMA 原图链接。
-- 两项能力均为按需实时查询，不新增订阅、轮询或定时推送；USGS 与 JMA 异常会沿现有工具错误链路明确降级。
+- 地震、天气与云图查询均为按需实时查询；只有显式订阅的区县会后台扫描预警，海外分钟降水会明确返回不支持，数据源异常沿现有只读工具错误链路处理。
 
 ## 运行维护 2026-08-01 03:50 +08:00
 
@@ -706,3 +779,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-07-12 15:20 +08:00，lint 已覆盖 727 个 JS 与全部 71 个 chunk，完整 npm test 在 307.5 秒内全部通过，依赖审计 0 漏洞且安全/密钥诊断通过；Docker daemon 已启动，但真实镜像构建仍阻塞于基础镜像获取。
 维护记录：2026-07-12 16:51 +08:00，已建立 32 项仓库改进总路线与第一阶段安全边界执行计划，并将 README、Docker 部署文档中的 NapCat reverse 说明更新为签名/显式兼容模式；本轮只改文档，验收为计划文件存在、旧空对象/Bearer-only 探针已明确标注失效且 `git diff --check` 通过。
 维护记录：2026-08-04 14:43 +08:00，实现提交 `de13971` 已修复 PR #5 的供应链漏洞：根项目与嵌套技能 audit 均为 0，476 个锁定版本实时 OSV 查询为 0 漏洞，Node 20 关键门禁及 177 秒完整测试通过；当前分支未推送远端。
+维护记录：2026-08-04 23:41 +08:00，实现提交 `f18ae99` 已在 Anthropic Messages 请求边界处理尾部 assistant prefill：保留原消息并追加 user 续写指令，避免不支持预填充的模型返回 HTTP 400；定向测试、812 文件 lint、typecheck、diff check 和 213.3 秒完整测试全部通过，当前分支未推送远端。

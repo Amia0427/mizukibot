@@ -190,9 +190,9 @@ module.exports = (async () => {
     await requestAssistantMessageWithDefaults([{ role: 'user', content: 'hi' }], {
       userId: 'user-1'
     });
-    assert.strictEqual(defaultConfig.MAIN_REPLY_DEFAULT_MAX_TOKENS, 8192);
-    assert.strictEqual(defaultConfig.AI_MAX_TOKENS, 8192);
-    assert.strictEqual(sent[0].body.max_tokens, 8192);
+    assert.strictEqual(defaultConfig.MAIN_REPLY_DEFAULT_MAX_TOKENS, 50000);
+    assert.strictEqual(defaultConfig.AI_MAX_TOKENS, 50000);
+    assert.strictEqual(sent[0].body.max_tokens, 50000);
 
     restoreEnv(snapshot);
     process.env.API_KEY = 'main-key';

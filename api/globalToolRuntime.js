@@ -224,7 +224,8 @@ function formatArgsSummary(toolName, args = {}) {
     return `timezone=${JSON.stringify(String(normalizedArgs.timezone || '').trim() || config.TIMEZONE)}`;
   }
   if (toolName === 'skill_weather') {
-    return `location=${JSON.stringify(String(normalizedArgs.location || '').trim())}`;
+    const sections = Array.isArray(normalizedArgs.sections) ? normalizedArgs.sections : ['overview'];
+    return `location=${JSON.stringify(String(normalizedArgs.location || normalizedArgs.city || normalizedArgs.text || '').trim())}, sections=${JSON.stringify(sections)}, days=${Number(normalizedArgs.days ?? 4)}, hours=${Number(normalizedArgs.hours ?? 24)}`;
   }
   if (toolName === 'skill_earthquake_latest') {
     return `scope=${JSON.stringify(String(normalizedArgs.scope || 'global').trim())}, time_window=${JSON.stringify(String(normalizedArgs.time_window || 'day').trim())}, min_magnitude=${Number(normalizedArgs.min_magnitude ?? 4.5)}, limit=${Number(normalizedArgs.limit ?? 5)}`;

@@ -418,15 +418,46 @@ const skillsAndIntegrationsToolSchemas = [
     type: 'function',
     function: {
       name: 'skill_weather',
-      description: 'Query current conditions and a four-day forecast for a Chinese location with AMap Weather',
+      description: 'Query QWeather for worldwide current conditions, daily or hourly forecasts, China minutely precipitation, air quality, and active weather warnings',
       parameters: {
         type: 'object',
         additionalProperties: false,
         properties: {
           location: { type: 'string', description: 'Location name' },
           city: { type: 'string', description: 'Alias of location' },
-          text: { type: 'string', description: 'Alias of location' }
+          text: { type: 'string', description: 'Alias of location' },
+          sections: {
+            type: 'array',
+            items: { type: 'string', enum: ['overview', 'hourly', 'minutely', 'air', 'warning'] },
+            uniqueItems: true,
+            description: 'Weather sections to query; defaults to overview'
+          },
+          days: { type: 'integer', minimum: 1, maximum: 10, description: 'Daily forecast length; defaults to 4' },
+          hours: { type: 'integer', minimum: 1, maximum: 24, description: 'Hourly forecast length; defaults to 24' }
         }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'weather_alert_subscription',
+      description: 'Manage the current private-chat user weather warning subscriptions. Use list without confirmation; subscribe, unsubscribe, pause, and resume require one-time tool confirmation.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['subscribe', 'unsubscribe', 'list', 'pause', 'resume'],
+            description: 'Subscription action'
+          },
+          location: {
+            type: 'string',
+            description: 'Full Chinese city, district, or county name; required for subscribe and unsubscribe'
+          }
+        },
+        required: ['action']
       }
     }
   },

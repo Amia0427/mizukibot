@@ -26,6 +26,8 @@ const {
 } = require('../utils/toolReplyFormatting');
 const { isAtBot, detectIntentHybrid } = require('./router');
 const { applyDeterministicToolRouting } = require('./router/toolRouting');
+const { shouldRunPassiveAwareness } = require('../src/platforms/accessPolicy');
+const { runWithDeliveryContext } = require('../src/platforms/deliveryContext');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
@@ -34,6 +36,7 @@ const { createForegroundConcurrencyController } = require('./foregroundConcurren
 const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
 const {
+  buildUntrustedAttachmentInput,
   createContinuousMessagePreprocessor,
   cheapParseMessageEntry,
   resolveContinuousEntryDetails
@@ -392,8 +395,8 @@ function composeDirectRoutePrompt({
   ].filter(Boolean).join('\n\n');
 }
 
-function markDirectSessionPresenceReplied({ groupId, senderId }) {
-  const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+function markDirectSessionPresenceReplied({ groupId, senderId, sessionKey: inputSessionKey = '' }) {
+  const sessionKey = inputSessionKey || resolveShortTermSessionKey(senderId, { groupId });
   const now = Date.now();
   updateShortTermPresence(sessionKey, shortTermMemory, {}, (current) => ({
     ...current,
@@ -425,8 +428,8 @@ function buildInboundSessionTiming({ continuousMeta = null, previousPresence = n
   };
 }
 
-function markDirectSessionHumanInbound({ groupId, senderId, sessionTiming = null }) {
-  const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+function markDirectSessionHumanInbound({ groupId, senderId, sessionKey: inputSessionKey = '', sessionTiming = null }) {
+  const sessionKey = inputSessionKey || resolveShortTermSessionKey(senderId, { groupId });
   const timing = sessionTiming && typeof sessionTiming === 'object' ? sessionTiming : {};
   const inboundAt = Number(timing.currentInboundAt || 0) || Date.now();
   updateShortTermPresence(sessionKey, shortTermMemory, {}, (current) => ({
@@ -655,7 +658,8 @@ function createMessageHandler({
   runVisionCaptionWorkerOverride = null,
   normalGroupMainReplyRateLimiterOverride = null,
   triggerRemoteRestartOverride = null,
-  smallTheaterRuntimeOverride = null
+  smallTheaterRuntimeOverride = null,
+  groupContextStore = null
 }) {
   const {
     createSmallTheaterRuntime,
@@ -1258,7 +1262,7 @@ function createMessageHandler({
     formatStyleProfileAsText,
     formatSocialContextAsText,
     formatRelationshipGraphAsText,
-    sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
+    sendGroupReply: (...args) => replyRuntime.sendReply(...args),
     sendReply: (...args) => replyRuntime.sendReply(...args),
     updateFavor,
     saveData,
@@ -1281,6 +1285,7 @@ function createMessageHandler({
     markThinkingEmojiBeforeLlm,
     buildSubagentContextSummary,
     normalGroupMainReplyRateLimiter,
+    groupContextStore,
     actionClient: globalNapCatActionClient
   });
 
@@ -1497,6 +1502,19 @@ function createMessageHandler({
     const senderId = msg.user_id;
     const groupId = msg.group_id;
     const chatType = String(msg.message_type || '').trim().toLowerCase() === 'private' ? 'private' : 'group';
+    const platform = String(msg?.platform || 'qq').trim().toLowerCase() || 'qq';
+    const conversationKey = String(
+      msg?.canonical_message?.conversation?.key
+      || msg?.delivery_target?.key
+      || groupId
+      || ''
+    ).trim();
+    const shortTermRouteMeta = {
+      platform,
+      chatType,
+      conversationKey,
+      ...(!isPrivateChatType(chatType) && groupId ? { groupId } : {})
+    };
     const privilegedPrivateChat = isPrivilegedPrivateChatUser({
       chatType,
       userId: senderId,
@@ -1507,13 +1525,13 @@ function createMessageHandler({
     }
     recordPrivateProactiveActivity(senderId, chatType);
 
-    const rawInboundFreshnessSessionKey = resolveShortTermSessionKey(
-      senderId,
-      isPrivateChatType(chatType) ? {} : { groupId }
-    );
+    const rawInboundFreshnessSessionKey = platform !== 'qq' && conversationKey
+      ? `${platform}-${chatType}:${conversationKey}:user:${String(senderId || '').trim()}`
+      : resolveShortTermSessionKey(senderId, shortTermRouteMeta);
     const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
     const toolAuthorizationCommand = await handleToolAuthorizationCommand(rawMessageText, {
+      platform: String(msg?.platform || 'qq').trim().toLowerCase() || 'qq',
       userId: senderId,
       chatType,
       groupId: String(groupId || '').trim()
@@ -1531,20 +1549,27 @@ function createMessageHandler({
         decision: String(decisionEvent.decision || toolAuthorizationCommand.result?.status || '').trim(),
         reason: String(decisionEvent.reason || toolAuthorizationCommand.result?.reason || '').trim()
       });
-      const sent = await sendGroupReply({
-        chatType,
-        groupId,
-        userId: senderId,
-        senderId,
-        replyText: toolAuthorizationCommand.replyText,
-        atSender: false,
-        retries: 1,
-        waitMs: 300,
-        source: 'message_handler',
-        routePolicyKey: 'tool/authorization',
-        triggerReason: 'tool_authorization_command',
-        topRouteType: 'admin'
-      });
+      const authorizationOriginRoute = toolAuthorizationCommand.deliveryTarget;
+      const sendAuthorizationReply = () => sendGroupReply({
+          chatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: toolAuthorizationCommand.replyText,
+          atSender: false,
+          retries: 1,
+          waitMs: 300,
+          source: 'message_handler',
+          routePolicyKey: 'tool/authorization',
+          triggerReason: 'tool_authorization_command',
+          topRouteType: 'admin'
+        });
+      const sent = authorizationOriginRoute
+        ? await runWithDeliveryContext({
+          target: authorizationOriginRoute,
+          personId: senderId
+        }, sendAuthorizationReply)
+        : await sendAuthorizationReply();
       appendRequestCompleteTrace({
         routePolicyKey: 'tool/authorization',
         topRouteType: 'admin',
@@ -1888,8 +1913,10 @@ function createMessageHandler({
     const slashCommandTextForConcurrency = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
     const adminFastCommandForConcurrency = isAdminUser(senderId)
       && /^\s*\/check(?:\s|$)/i.test(String(slashCommandTextForConcurrency || '').trim());
-    const inboundSessionKey = rawInboundFreshnessSessionKey;
     const isPrivateInbound = isPrivateChatType(chatType);
+    const inboundSessionKey = isPrivateInbound
+      ? resolveShortTermSessionKey(senderId, shortTermRouteMeta)
+      : rawInboundFreshnessSessionKey;
     const concurrencyScope = isPrivateInbound ? 'private' : 'default';
     const concurrencyLane = isAdminUser(senderId) ? 'admin' : 'general';
     const selectedInboundConcurrency = isPrivateInbound ? privateInboundConcurrency : inboundConcurrency;
@@ -2495,7 +2522,7 @@ function createMessageHandler({
         });
       }
     }
-    const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+    const sessionKey = resolveShortTermSessionKey(senderId, shortTermRouteMeta);
     const stableThreadId = resolveThreadId({
       userId: senderId,
       routePolicyKey: '',
@@ -2525,6 +2552,7 @@ function createMessageHandler({
     markDirectSessionHumanInbound({
       groupId,
       senderId,
+      sessionKey,
       sessionTiming
     });
     const inboundContext = buildInboundMessageContext({
@@ -2644,6 +2672,10 @@ function createMessageHandler({
     }
     inboundContext.quotePriority = directedContext?.quotePriority || null;
     if (!isPrivateChatType(chatType) && !directBotAnchor) {
+      if (!shouldRunPassiveAwareness({
+        platform: effectiveMsg?.platform || msg?.platform,
+        allowPassiveContext: effectiveMsg?.allow_passive_context === true
+      })) return;
       const passiveFlowResult = await runPassiveFlow({
         inboundContext,
         handlePassiveGroupAwareness,
@@ -2794,6 +2826,9 @@ function createMessageHandler({
       userId: String(senderId || ''),
       groupId: isPrivateChatType(chatType) ? '' : String(groupId || ''),
       chatType,
+      platform: String(effectiveMsg?.platform || msg?.platform || 'qq').trim().toLowerCase() || 'qq',
+      deliveryTarget: effectiveMsg?.delivery_target || msg?.delivery_target || null,
+      conversationKey: isPrivateChatType(chatType) ? '' : String(groupId || ''),
       directedContext,
       directedContextSummary: routerContextSummary,
       effectiveIntentText: runtimeQuestionText,
@@ -2803,7 +2838,16 @@ function createMessageHandler({
       cardOnly: inboundContext.cardOnly
     };
     route = applyDeterministicToolRouting(route);
-    if (visualContext) {
+    const attachmentPrompt = String(continuousMeta?.attachmentPrompt || '').trim();
+    if (attachmentPrompt) {
+      runtimeQuestionText = buildUntrustedAttachmentInput(
+        runtimeQuestionText,
+        attachmentPrompt
+      ).modelText;
+      inboundContext.effectiveIntentText = runtimeQuestionText;
+      inboundContext.runtimeQuestionText = runtimeQuestionText;
+    }
+    if (visualContext || attachmentPrompt) {
       route.meta.visualContext = visualContext;
       route.meta.imageUrls = effectiveVisualInputUrls;
       route.meta.persistUserText = persistUserText;
@@ -2970,7 +3014,7 @@ function createMessageHandler({
           if (!sent) {
             console.warn('[normal-fast-reply] send failed, fallback to formal route');
           } else {
-            if (!isPrivateChatType(chatType)) {
+            if (!isPrivateChatType(chatType) && effectiveMsg?.allow_long_term_group_memory !== false) {
               sideEffects.recordInboundHumanMessage({
                 groupId,
                 senderId,
@@ -3036,7 +3080,7 @@ function createMessageHandler({
               }
             );
             saveData();
-            markDirectSessionPresenceReplied({ groupId: fastGroupId, senderId });
+            markDirectSessionPresenceReplied({ groupId: fastGroupId, senderId, sessionKey });
             replyRuntime.recordBotReply({
               chatType,
               groupId: fastGroupId,
@@ -3048,7 +3092,7 @@ function createMessageHandler({
             if (isPrivateChatType(chatType)) {
               registerPrivateProactiveUserAfterReply(senderId);
             }
-            if (!isPrivateChatType(chatType)) {
+            if (!isPrivateChatType(chatType) && effectiveMsg?.allow_long_term_group_memory !== false) {
               await sideEffects.runDirectReplyFollowup({
                 groupId,
                 senderId,
@@ -3189,7 +3233,7 @@ function createMessageHandler({
         command: String(route?.meta?.command?.cmd || '').trim(),
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
-      await routeFlow.dispatchAdminRoute({
+      const adminRouteResult = await routeFlow.dispatchAdminRoute({
         route,
         groupId,
         senderId,
@@ -3197,6 +3241,7 @@ function createMessageHandler({
         userInfo: null,
         chatType
       });
+      const adminRouteSent = adminRouteResult?.sent === true;
       appendTraceTiming('admin_route_dispatch_done', {
         stage: 'admin_route_dispatch_done',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
@@ -3212,7 +3257,7 @@ function createMessageHandler({
         groupId: String(groupId || '').trim(),
         userId: String(senderId || '').trim(),
         chatType,
-        sent: true,
+        sent: adminRouteSent,
         replyPath: 'admin_route',
         command: String(route?.meta?.command?.cmd || '').trim(),
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
@@ -3224,7 +3269,7 @@ function createMessageHandler({
       appendRequestCompleteTrace({
         routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
         topRouteType: routeExecutionPlan.topRouteType,
-        sent: true,
+        sent: adminRouteSent,
         command: String(route?.meta?.command?.cmd || '').trim()
       });
       return;
@@ -3282,7 +3327,7 @@ function createMessageHandler({
       lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
     });
 
-    if (!isPrivateChatType(chatType)) {
+    if (!isPrivateChatType(chatType) && effectiveMsg?.allow_long_term_group_memory !== false) {
       const groupSideEffectsStartedAt = Date.now();
       try {
         sideEffects.recordInboundHumanMessage({
@@ -3491,6 +3536,8 @@ function createMessageHandler({
       });
       const sent = await sendGroupReply({
         chatType,
+        platform: String(effectiveMsg?.platform || msg?.platform || 'qq').trim().toLowerCase() || 'qq',
+        allowLongTermGroupMemory: effectiveMsg?.allow_long_term_group_memory !== false,
         groupId,
         userId: senderId,
         senderId,
@@ -3525,7 +3572,7 @@ function createMessageHandler({
       });
       if (sent) {
         maybeRunDeferredPersist(replyEnvelope);
-        markDirectSessionPresenceReplied({ groupId, senderId });
+        markDirectSessionPresenceReplied({ groupId, senderId, sessionKey });
         replyRuntime.recordBotReply({
           chatType,
           groupId: isPrivateChatType(chatType) ? '' : groupId,

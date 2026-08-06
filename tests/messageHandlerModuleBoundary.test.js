@@ -84,12 +84,12 @@ const legacyBindings = collectTopLevelNames(parse('message-handler-legacy-combin
 const implementationBindings = collectTopLevelNames(parse(implementationPath));
 
 assert.strictEqual(legacyBindings.functions.length, 46, 'legacy top-level function count');
-assert.strictEqual(legacyBindings.variables.length, 160, 'legacy top-level binding count');
+assert.strictEqual(legacyBindings.variables.length, 163, 'legacy top-level binding count');
 assert.strictEqual(new Set(legacyBindings.functions).size, 46, 'legacy function names must be unique');
-assert.strictEqual(new Set(legacyBindings.variables).size, 160, 'legacy variable bindings must be unique');
+assert.strictEqual(new Set(legacyBindings.variables).size, 163, 'legacy variable bindings must be unique');
 assert.strictEqual(
   new Set([...legacyBindings.functions, ...legacyBindings.variables]).size,
-  206,
+  209,
   'legacy top-level names must be unique'
 );
 assert.deepStrictEqual(

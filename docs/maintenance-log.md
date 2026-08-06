@@ -1,3 +1,76 @@
+## 运行维护 2026-08-07 01:12 +08:00
+
+- 天气预警订阅实现提交 `cdc36622` 已完成：新增和风 Geo 地点解析、`weatheralert/v1/current/{latitude}/{longitude}` 预警查询、JSON 热存储、区县订阅命令/工具、5 分钟扫描、夜间蓝黄延迟、去重合并投递、瑞希 Runtime V2 主模型路由和私聊上下文追加；未修改 `prompts/admin.txt`。
+- 和风真实只读诊断通过：`npm run diag:weather-alerts -- --query "北京市朝阳区"` 返回 10 个候选并精确选中 `101010300`，新版接口返回 1 条高温黄色预警，来源为朝阳区气象台；旧 `/v7/warning/list` 与 `/v7/warning/now` 不再调用，按每个唯一订阅 LocationID 直接用经纬度查询。
+- 天气预警定向测试、工具确认执行测试、`npm run lint`、`npm run typecheck`、暂存区密钥扫描和 `git diff --cached --check` 通过；Node 20.20.2 原生依赖重编译后完整 `scripts/run-tests.js` 用时 231.8 秒并退出 0，随后已恢复 Node 24 原生依赖。
+- 重启本地进程后 `/live`、`/ready` 均返回 HTTP 200；运行时状态文件记录 `lastError` 为空且下一次扫描已排程，QQ 与微信平台状态在线。未向真实用户发送预警消息，未推送远端。
+
+## 运行维护 2026-08-07 01:05 +08:00
+
+- 和风天气统一能力实现提交 `b351f1a` 已完成：`skill_weather` 使用专属 Host 和 `X-QW-Api-Key` 密钥内容认证，支持全球地点、实况、日预报、逐小时、分钟降水、空气质量、天气预警及组合查询；高德不再参与天气查询，`AMAP_KEY` 仅保留给附近地点等既有工具。
+- 真实只读验收通过：上海实况、4 日预报、24 小时预报、24 个分钟降水点、空气质量和预警均成功；伦敦实况、4 日预报、24 小时预报、空气质量和预警成功，海外分钟降水明确返回地域限制；未向真实 QQ 会话发送消息。
+- 定向环境数据、路由、原生技能、Schema、执行器、策略、Companion 和全局注册测试通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 通过。`npm test` 已执行但受工作区运行中的 Node 进程锁定 `better_sqlite3.node` 影响，`npm rebuild better-sqlite3` 同样因 `EBUSY/EPERM` 未完成，相关失败集中在 LangGraph/平台等无关测试；和风天气相关测试未失败。
+- Host、密钥内容和本地 `.env` 未写入 README、维护日志、证据、错误消息或提交；当前分支未推送远端。
+
+## 运行维护 2026-08-06 23:41 +08:00
+
+- 根因：NapCat `napcat.mjs` 的 `NodeIKernelMsgService/sendMsg` 使用 `NodeIKernelMsgListener/onMsgInfoListUpdate` 等待 QQ 成功回调；现场 `send_group_msg` 首段耗时 `10014ms`，命中 `D:\napcat\config\onebot11_3326471600.json` 的 `timeout.baseTimeout=10000`，而不是机器人 HTTP 网络断开。
+- 最小修复：新增 `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`，消息 action 未显式传值时由 HTTP action client 注入，保留 1 秒 HTTP 余量；管理员路由返回真实 `sent` 状态，修复发送失败仍被 request trace 记为成功的问题；不改变送达不确定时禁止重试的重复消息保护。
+- 验收：`node scripts/run-tests.js tests/napcatActionClientConnectionState.test.js tests/napcatActionRetry.test.js tests/groupSummaryAdminRoute.test.js tests/privateChatAdminRouting.test.js`、目标 ESLint、`npm run typecheck` 和 `git diff --check` 通过；重启主进程后 `/live`、`/ready` 返回 200，NapCat `get_status` 为 `online=true/good=true`；实际发送群消息并用 `get_msg` 回读成功，`message_id=1940400047`、`post_type=message_sent`，未在 10 秒处超时。
+- 提交后记录：代码与文档提交 `86cae39` 已完成；未推送远端。未修改 `prompts/admin.txt`，未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`。
+
+## 运行维护 2026-08-06 10:58 +08:00
+
+- 新增 `docs/weixin-ilink-user-guide.md`，以瑞希口吻提供可直接发布的微信 iLink 长版更新公告，并详细说明首次绑定、身份与数据共享、媒体边界、通知平台、换绑、解绑、QQ 专属操作审批、私聊禁群、安全说明和常见问题。
+- README 已增加用户文档入口；文案明确只供完成真实 iLink 账号验收并启用功能的实例发布，没有把当前尚未执行的真实扫码验收描述成已经上线。
+- 本轮只修改用户文档、README 和维护日志，不改微信业务代码；未纳入 `.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js`，不推送远端。
+- 提交后记录（2026-08-06 11:03 +08:00）：瑞希口吻的微信更新公告与详细教程提交 `d1fdeee` 已完成，本小目标已完成；当前分支未推送远端。
+
+## 运行维护 2026-08-06 10:47 +08:00
+
+- 微信 iLink 私聊适配已完成：独立 worker、加密 SQLite 绑定与可靠队列、二维码绑定/换绑/解绑、统一 QQ canonical 身份、来源平台回复、主动通知偏好、图片/文件/语音转写和跨平台授权均已接入。
+- 私聊安全边界已覆盖：微信群、群事件、非绑定者、非 USER 消息和目标 bot 不匹配均在媒体下载、上下文令牌、会话、模型、记忆和工具前丢弃；审计不记录正文，代码未提供微信群开关、入群或群发送接口。
+- Node 20.20.2、ABI 115 验收：39 个微信/平台/授权定向测试文件通过；`TEST_CONCURRENCY=4 npm test` 用时 110.6 秒并退出 0；隔离微信 SQLite 探针返回 `quick_check={"ok":true,"messages":["ok"]}`。系统 Node 24.14.1 下 `npm run lint` 检查 855 个文件、`npm run typecheck` 和 `git diff --check` 均退出 0。
+- 当前没有真实 iLink 测试账号，未执行真实二维码扫码、QQ/微信连续对话、微信主动通知和真实解绑；没有伪造验收结果。未纳入 `.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js`，未推送远端。
+- 提交后记录（2026-08-06 10:53 +08:00）：微信 iLink 私聊适配功能提交 `d79ce00` 已完成，本小目标已完成；当前分支未推送远端。
+
+## 运行维护 2026-08-06 10:05 +08:00
+
+- 多平台适配收尾提交 `5d7ffae` 已完成：Discord、Telegram 与 QQ 共用消息归一化、身份/记忆、短期会话、群总结、定时投递和主动私聊链路；本小目标已完成。
+- Node 20.19.5 最终验收：31 项多平台、QQ action、群总结、调度和主动私聊回归通过；855 个 JavaScript 文件 lint、typecheck、暂存密钥检查、31 个暂存 JavaScript 语法检查及 `git diff --cached --check` 均通过。完整 `npm test` 仍沿用下方已记录的并行工作区阻断结论，不宣称通过。
+- 提交仅包含本任务 36 个文件；未纳入微信、工具授权、依赖文件、`.env.example`、`.belt/`、`AGENT.md`、`prompts/admin.txt` 或其他并行改动，未推送远端。
+
+## 运行维护 2026-08-06 09:37 +08:00
+
+- 多平台适配：提交 `492eab0` 建立统一 `InboundMessage`、`DeliveryTarget`、平台能力、SQLite 身份/绑定与群短期上下文；提交 `7d0e857` 将 QQ、Discord Gateway、Telegram long polling 接入现有路由、模型、工具、记忆和命令主管线。本轮补齐图片/引用/提及归一化、跨身份记忆聚合、平台会话隔离、群总结、定时投递、主动私聊和适配器故障隔离。
+- 兼容边界：QQ 继续保留 NapCat/OneBot/CQ、HTTP reverse、WebSocket、action、群历史和 QZone；旧任务默认 QQ。Discord/TG 群记录只在白名单写入 24 小时/500 条短期库，不进入长期群记忆或 post-reply 学习；`core/tgBot.js` 仅保留适配器兼容门面。
+- Node 20.19.5 验收：30 个多平台、QQ、调度和主动私聊聚焦测试通过；本轮额外复测 `messageIngressAsyncEntrypointSource`、`platformQqCompatibility`、`platformAdapters`、`napcatWsIngressSmoke` 全部通过。`npm run lint` 检查 855 个 JS 文件通过，`npm run typecheck`、`npm run check:secrets`、`git diff --check` 通过。
+- 完整 `npm test` 于 174.8 秒退出 1。多平台和 QQ 聚焦用例通过；当前并行工作区的 `messageToolAuthorizationIngress.test.js` 尚待工具授权附件接线，`messageHandlerModuleBoundary.test.js` 尚待同步其新增导入白名单。运行中发现并修复本任务的精简 QQ 事件兼容回退；微信入口夹具造成的并行失败未纳入本任务提交。不能把该次全量运行记为通过。
+- 环境与保护：系统 Node 为 24.14.1，正式测试使用隔离的 Node 20.19.5 和 ABI 115 `better-sqlite3`，未重建正在运行的 Node 24 模块；未修改 `prompts/admin.txt`，未纳入微信、工具授权、`.belt/`、`AGENT.md` 或并行未跟踪文件，未写入真实密钥，未推送远端。
+
+## 运行维护 2026-08-05 11:10 +08:00
+
+- 新增 `docs/pjsk-rag-explained.md`，面向普通用户解释机器人不是背诵曲库，而是先从当前数据库检索证据、再由模型组织回答；文档包含从当前问题、SQL 候选、候选内向量重排到主模型回答和单谱分析的完整流程图。
+- 文档明确 SQLite 决定结果资格、LanceDB 只决定候选内排序，向量 generation 不匹配时降级为 `sql_only`；同时说明 SUS 确定性特征、99% generation 门禁、同名歧义、一次性引用、防补造校验以及不同事实的可信度边界。
+- README、PJSK 使用指南和技术文档已增加原理说明入口及 `2026-08-05 11:10 +08:00` 时间戳。`developerDocumentation.test.js`、文档结构探针和 `git diff --check` 均退出 0。
+- 本轮只修改文档，不改曲库、同步、检索、路由或图片代码，不纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未推送远端；面向用户的 PJSK 曲库 RAG 原理说明小目标已完成。
+
+## 运行维护 2026-08-05 11:04 +08:00
+
+- 新增 `docs/pjsk-user-guide.md`，面向普通用户说明曲库筛选、单谱结构分析、私聊/群聊发图差异、一次性引用、同名歧义、数据边界和常见问题；明确简中/英文标题只作为搜索别名，当前不提供个人成绩、社区定数或歌词。
+- 新增 `docs/pjsk-update-announcement-2026-08-05.md`，提供可直接发布的 QQ 群公告短版和更新日志长版；README 与 PJSK 技术文档已补充用户入口及 `2026-08-05 11:04 +08:00` 时间戳。
+- 验收：公告中的 4 条公开示例通过当前 Router 探针，2 条查询分别命中 `pjsk_song_search`，2 条分析/发图分别命中 `pjsk_chart_analyze`；`developerDocumentation.test.js`、`git diff --check` 均退出 0。
+- 本轮只修改文档，不改业务代码，不纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未推送远端；PJSK 面向用户的公告与使用说明小目标已完成。
+
+## 运行维护 2026-08-05 10:57 +08:00
+
+- 小目标：完成 PJSK 曲库、谱面结构分析、候选集约束 RAG 和 QQ 谱面图链路；功能提交为 `77e1b1c`。实现位于 `src/features/pjsk/`，未向 `maimai` 增加字段，也未抽象通用音游框架。
+- 数据与检索：日服 Sekai-World master DB 是唯一事实库，简中/英文标题只作为同 `musicId` 别名；SUS 和封面运行时读取 sekai.best。SQLite generation 可独立激活，LanceDB generation 必须与当前 SQL generation 一致，向量失败返回 `sql_only`，最终结果与最多 100 个 SQL 候选按内容哈希求交。
+- 路由与图片：只在当前消息同时确认 PJSK 领域和曲库/谱面数据意图时授权唯一工具；执行器复核当前问题、曲名、难度和一次性引用。引用仅同会话下一条消息、5 分钟有效；私聊自动发图，群聊只有明确图片意图才发图，渲染或发送失败保留文本分析。
+- 自动验收：7 项 PJSK 回归、`localRouterFallback` 相邻回归、828 文件 lint、typecheck、Prompt、全仓及暂存区密钥扫描、diff check 均通过；完整 `npm test` 用时 158.1 秒并退出 0。首次全量测试发现 PJSK 后处理误清普通 `force_tools`，增加 `hadPjskTool` 约束后隔离测试和全量测试通过。
+- 真实验收：`npm run smoke:pjsk` 命中 `jp:1:master`（Tell Your World，MASTER 26），master/解析物量均为 1147；SUS 哈希 `70396177270843c438568888ce072cfad2c3526901b6174427165cb0b337da0e`，PNG 5248×2688、14,106,624 像素、1,143,348 字节、非空，封面缓存成功。QQ 私聊/群聊策略使用伪发送测试验证，未向真实 QQ 会话发送图片。
+- 未完成项：`docker build -t mizukibot:pjsk-test .` 运行 220.7 秒后因本机 `docker_engine` 不存在退出 1；本机未安装 Docker Desktop 服务、可执行文件、WSL 或替代容器运行时，因此未宣称 Docker 构建通过。未修改 `prompts/admin.txt`，未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未推送远端；除容器环境验收外，本地功能小目标已完成。
+
 ## 运行维护 2026-08-04 13:05 +08:00
 
 - 小目标：收敛舞萌谱面 SQL/RAG 的普通聊天误召回；功能提交为 `c82ad3d`。`classifyMaimaiIntent()` 以“明确舞萌名或至少两个专属谱面信号”确认领域，再要求谱面检索、单谱分析或当前用户成绩意图，仅授权唯一目标工具并保留其他领域工具。
@@ -1916,3 +1989,42 @@
 - 兼容性：Sharp 0.35 拒绝旧测试夹具中的无效 JPEG 扫描参数，测试改为动态生成有效 JPEG，生产图片容错逻辑未放宽。
 - 验收：根项目与嵌套技能 `npm audit` 均为 0；两个锁文件共 476 个版本的实时 OSV 查询为 0 漏洞；CI/Supply Chain policy、812 文件 lint、typecheck、prompt、全仓密钥、许可证、SBOM、Node 20.20.2 Sharp 编码与关键测试全部通过；第二轮完整 `npm test` 177 秒退出 0。
 - 提交后记录：实现提交 `de13971` 已完成，本小目标已完成；文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-08-04 23:41 +08:00
+
+- 根因：Anthropic 请求整形只会修正尾部的内部 assistant 上下文；普通 assistant 文本位于消息末尾时仍按 prefill 发出，不支持该能力的模型返回 HTTP 400。
+- 修复：实现提交 `f18ae99` 在协议边界保留原 assistant 消息，并追加最小 user 续写指令，保证发送给 Anthropic Messages 的正常生成请求以 user 结束；模型、endpoint、提示词和其他 provider 均未调整。
+- 验收：Anthropic 消息顺序、provider 请求规范化及 prompt cache 三项定向测试通过；`npm run lint` 检查 812 个文件、`npm run typecheck`、`git diff --check` 均通过；完整 `npm test` 213.3 秒退出 0。
+- 提交后记录：实现提交 `f18ae99` 已完成，本小目标已完成；文档单独提交，当前分支未推送远端。
+
+## 运行维护 2026-08-04 23:56 +08:00
+
+- 根因：`prompts/runtime/roleplay-inner-protocol.txt` 有意要求内部 reasoning 使用“心想/内心OS”格式；部分第三方 OpenAI-compatible 网关未稳定提供独立 reasoning 字段，而是把内部思考混入 `choices[].message.content` 或流式 `delta.content`，导致现有正文清洗未识别该格式。
+- 修复：实现提交 `69fc96c` 在统一用户可见文本边界识别全角/半角括号、未闭合流式片段和独立“心里OS”段落；安全检查同步判定泄漏，Runtime V2 `final_validate` 在持久化前再次清洗，避免污染连续性记录。所有上游仍按 OpenAI-compatible 响应处理，不按原生 Gemini 或 Anthropic 协议分流。
+- 边界：`prompts/runtime/roleplay-inner-protocol.txt` 与 `utils/runtimePrompts.js` 未修改，内部 reasoning 的角色化约束保留；普通正文对“内心OS”一词的讨论不被误删，未修改网关配置、模型或 endpoint。
+- 验收：流式、非流式、泄漏检查和最终持久化回归通过；`npm run lint` 检查 812 个文件、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0；完整 `npm test` 172.6 秒退出 0。
+- 提交后记录：实现提交 `69fc96c` 已完成，本小目标已完成；未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`，未重启服务，未推送远端。
+
+## 运行维护 2026-08-05 09:48 +08:00
+
+- 根因：01:45 的真实泄漏请求走管理员 `transform/vision-summary`、`agent_decide`、非流式 `claude-opus-5` 路由。第三方网关未提供独立 reasoning 字段，而是把英文场景分析、`Reply as Mizuki, ... ---` 元指令和最终中文答复合并写入普通 `content`；既有清洗只识别 think 标签及“心想/内心OS”，所以 715 字符整体进入发送和持久化。
+- 修复：实现提交 `55cf28e` 在非流式响应归一化边界严格拆分完整 `Reply as` 信封，把英文前缀与上游已有 reasoning 用空行合并到 `reasoningText`，后缀作为唯一正文；用户可见文本清洗和泄漏守卫复用同一解析器，`final_validate` 在持久化前再次兜底。缺少角色、指令、分隔符、分析前缀或最终正文时均不拆分。
+- 折叠链路：现有 `maybeSendReasoningForward -> sendReasoningForwardMessage` 继续只消费 `reasoningText`，因此拆出的前缀会作为 QQ 合并转发记录发送，正文只发送分隔符后的中文答复。`prompts/runtime/roleplay-inner-protocol.txt` 未修改，流式链路也未扩展；流式内容在分隔符出现前一旦外发无法撤回，本次真实路径不属于该场景。
+- Gemini 核验：真实 OpenAI-compatible 非流式探针向 `gemini-3-flash-preview-search` 发送 `reasoning_effort=high`，HTTP 200、`finish_reason=stop`；响应 `message` 仅含 `role/content`，`reasoning`、`reasoning_content`、`thinking` 均不存在。结论只能是第三方网关未回传独立思维链，不能据此证明 Gemini 内部没有推理；本次泄漏也不是该 Gemini 请求。
+- 验收：4 项核心回归先红后绿，8 项 reasoning/合并转发相邻回归通过；`npm run lint` 检查 812 个文件，`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0，完整 `npm test` 165.8 秒退出 0。当前验收运行时为 Node 24.14.1，未找到项目声明的 Node 20，因此未宣称 Node 20 通过；`.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js` 未纳入，未重启服务，未推送远端。本小目标已完成。
+
+## 运行维护 2026-08-06 11:37 +08:00
+
+- 根因：微信功能关闭时主进程没有注册 `/微信 ...` 命令处理器，命令进入 `admin/unknown`；管理员路由虽已识别 `chatType=private`，装配时却注入群聊专用回复函数，最终向 NapCat 调用缺少 `group_id` 的 `send_group_msg`。
+- 修复：实现提交 `8598fbd` 增加关闭状态微信命令处理器，统一启用/停用状态的命令回复目标解析，并让管理员路由使用按会话类型分流的回复函数；统一信封缺少顶层兼容字段时从 `canonical_message` 回退读取用户与会话。
+- 验收：13 个微信/私聊定向测试、`npm run lint`（855 文件）、`npm run typecheck`、`git diff --check` 和 147.9 秒完整 `npm test` 均退出 0；SQLite `quick_check=ok`，共 8 张微信表。测试运行时为 Node 24.14.1。
+- 运行态：本地 `.env` 已启用微信并生成未输出、未提交的 32 字节主密钥；2026-08-06 11:30 +08:00 重启后主进程、QQ 接入和微信 worker 均在线，`/live`、`/ready` 返回 200，worker 持续写入 `heartbeat`。真实二维码获取、用户扫码确认、跨平台连续对话和解绑仍需用户参与，未宣称通过。
+- 小目标已完成：QQ 私聊命令漏接管和错误群发目标均已修复并部署；用户未提交的微信指南、`.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js` 未纳入，当前分支未推送远端。
+
+## 运行维护 2026-08-06 23:28 +08:00
+
+- 根因：`privateProactiveEngine.runScan()` 在稳定机会到达后立即把窗口写入 `consumedWindowKeys`，随后才执行 NapCat 可达性、全局沉默、最小间隔和每日上限检查；这些硬条件当时不满足时虽然没有调用模型，窗口仍被永久消费，条件稍后恢复也无法在当天重试。
+- 修复：实现提交 `7e55a30` 将窗口消费移到硬条件全部通过之后、进入模型判断之前；硬条件跳过时保留窗口并允许后续 10 分钟扫描继续判断，模型拒绝、模型失败、部分发送失败和进程中断仍按已消费处理，现有防重复边界不变。
+- 验收：新增 NapCat 恢复、沉默时间恢复、最小间隔恢复和每日额度恢复后的同窗重试断言；主动私聊六项定向测试、`npm run lint`、`npm run typecheck`、`git diff --check` 和完整 `npm test` 均退出 0，完整测试用时 182.3 秒。
+- 运行态：2026-08-06 23:27 +08:00 重启后主进程 PID `38796`，主动扫描器 `startedAt=2026-08-06T15:27:24.324Z`，`/live`、`/ready` 均返回 200。今日两个配置窗口已结束，未擅自清空既有游标或补发，明日跨日重置后按修复逻辑执行。
+- 小目标已完成：主动私聊硬条件暂时不满足时不再吞掉当天发送机会；并行微信文档、`.belt/`、`AGENT.md` 和舞萌测试未纳入，当前分支未推送远端。

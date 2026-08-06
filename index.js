@@ -42,6 +42,17 @@ const { createMainProcessLifecycle } = require('./utils/mainProcessLifecycle');
 const { closeLoadedSqliteConnections } = require('./utils/sqliteRuntime');
 const { createMaimaiCommandHandler } = require('./src/features/maimai/commands');
 const { closeMaimaiRuntime, getMaimaiRuntime, peekMaimaiRuntime } = require('./src/features/maimai/runtime');
+const { closePjskRuntime, getPjskRuntime, peekPjskRuntime } = require('./src/features/pjsk/runtime');
+const { createIdentityCommandHandler } = require('./src/platforms/identityCommands');
+const { setPlatformAdminResolver } = require('./src/platforms/admin');
+const { setPlatformIdentityAliasResolver } = require('./utils/platformIdentityAliases');
+const { createPlatformMessageProcessor } = require('./src/platforms/messageProcessor');
+const { mergeQqLegacyMessage } = require('./src/platforms/qqAdapter');
+const { createPlatformRuntime } = require('./src/platforms/runtime');
+const { createWeixinMainRuntime } = require('./src/platforms/weixin/main-runtime');
+const { ensureWeixinWorkerRunning } = require('./utils/weixinWorkerSupervisor');
+const { createWeatherAlertCommandHandler } = require('./src/features/weather-alerts/commands');
+const { initializeWeatherAlertRuntime } = require('./src/features/weather-alerts/runtime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -423,9 +434,20 @@ let dailyJournalSummaryStarted = false;
 let dailyJournalSummaryRuntime = null;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
+const platformRuntime = createPlatformRuntime(config, { qqActionClient: napcatActionClient });
+const platformActionClient = platformRuntime.actionClient;
+setPlatformAdminResolver((userId) => platformRuntime.identityStore.isAdminPrincipal(userId));
+setPlatformIdentityAliasResolver((userId) => platformRuntime.identityStore.getAliases(userId));
+runtimeReadiness.setDetailsProvider(() => platformRuntime.getReadinessSnapshot());
 const privateProactiveEngine = createPrivateProactiveEngine({
   config,
-  actionClient: napcatActionClient
+  actionClient: platformActionClient,
+  resolvePrivateTarget: platformRuntime.resolvePrivateTarget
+});
+const weatherAlertRuntime = initializeWeatherAlertRuntime({
+  config,
+  actionClient: platformActionClient,
+  resolvePrivateTarget: platformRuntime.resolvePrivateTarget
 });
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
@@ -435,16 +457,37 @@ function askAIByGraph(...args) {
 
 async function sendWithRetry(payload, retries = 1, waitMs = 500) {
   return sendNapCatActionWithRetry({
-    actionClient: napcatActionClient,
+    actionClient: platformActionClient,
     payload,
     retries,
     waitMs
   });
 }
 
+const weixinMainRuntime = createWeixinMainRuntime({
+  config,
+  store: platformRuntime.weixinStore,
+  sendWithRetry,
+  onBindingConfirmed: platformRuntime.bindWeixinIdentity,
+  onBindingRemoved: platformRuntime.unbindWeixinIdentity
+});
+
 const maimaiCommandHandler = createMaimaiCommandHandler({
   getRuntime: getMaimaiRuntime,
-  isAdmin: isAdminUser,
+  isAdmin: (userId) => platformRuntime.identityStore.isAdminPrincipal(userId),
+  sendReply: async (msg, replyText) => {
+    const isPrivate = String(msg?.message_type || '').trim().toLowerCase() === 'private';
+    await sendWithRetry({
+      action: isPrivate ? 'send_private_msg' : 'send_group_msg',
+      params: isPrivate
+        ? { user_id: String(msg?.user_id || '').trim(), message: replyText }
+        : { group_id: String(msg?.group_id || '').trim(), message: replyText }
+    }, 1, 300);
+  }
+});
+
+const weatherAlertCommandHandler = createWeatherAlertCommandHandler({
+  getRuntime: () => weatherAlertRuntime,
   sendReply: async (msg, replyText) => {
     const isPrivate = String(msg?.message_type || '').trim().toLowerCase() === 'private';
     await sendWithRetry({
@@ -459,12 +502,18 @@ const maimaiCommandHandler = createMaimaiCommandHandler({
 const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry,
-  actionClient: napcatActionClient,
-  privateProactiveEngine
+  actionClient: platformActionClient,
+  privateProactiveEngine,
+  groupContextStore: platformRuntime.groupContextStore
+});
+const platformMessageProcessor = createPlatformMessageProcessor({
+  identityCommandHandler: createIdentityCommandHandler({ store: platformRuntime.identityStore }),
+  commandHandlers: [weatherAlertCommandHandler, weixinMainRuntime?.commandHandler, maimaiCommandHandler].filter(Boolean),
+  sendWithRetry
 });
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
   ? createMessageIngressDispatcher({
-    handleMessage: handleIncomingMessage,
+    handleMessage: (msg) => platformMessageProcessor.run(msg, handleIncomingMessage),
     maxActive: config.MESSAGE_INGRESS_ASYNC_MAX_ACTIVE,
     maxQueueLength: config.MESSAGE_INGRESS_ASYNC_MAX_QUEUE_LENGTH
   })
@@ -475,13 +524,22 @@ async function acceptIncomingMessage(msg, source = '') {
     messageIngressDispatcher.enqueue(msg, { source });
     return true;
   }
-  await handleIncomingMessage(msg);
+  await platformMessageProcessor.run(msg, handleIncomingMessage);
   return true;
 }
 
 async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = prepareNapCatEventPacket) {
+  if (maimaiCommandHandler.shouldHandle(msg?.raw_message)) {
+    await maimaiCommandHandler.handle(msg);
+    return false;
+  }
   if (preparePacket(msg)) return false;
-  await acceptIncomingMessage(msg, source);
+  const qqAdapter = platformRuntime.registry.get('qq');
+  const normalized = qqAdapter.normalize(msg);
+  const prepared = normalized
+    ? mergeQqLegacyMessage(msg, platformRuntime.registry.prepareInbound(normalized))
+    : msg;
+  await acceptIncomingMessage(prepared, source);
   return true;
 }
 const napcatLogFollower = createNapcatLogFollower({
@@ -503,9 +561,12 @@ const napcatLogFollower = createNapcatLogFollower({
 });
 
 const schedulerRuntime = getSchedulerRuntime({
-  sendGroupMessage: async (groupId, message, meta = {}) => {
+  sendGroupMessage: async (target, message, meta = {}) => {
+    const groupId = typeof target === 'object'
+      ? String(target?.key || target?.conversationId || '').trim()
+      : String(target || '').trim();
     await sendGroupMessage(groupId, message, {
-      actionClient: napcatActionClient,
+      actionClient: platformActionClient,
       ...meta
     });
     return true;
@@ -526,12 +587,6 @@ function startResourceSnapshots() {
 let httpReverseServer = null;
 
 function prepareNapCatEventPacket(msg) {
-  if (maimaiCommandHandler.shouldHandle(msg?.raw_message)) {
-    void maimaiCommandHandler.handle(msg).catch((error) => {
-      console.error('[maimai command] failed:', error?.message || error);
-    });
-    return true;
-  }
   appendNapcatPacketToLog(msg);
   if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
     void napcatLogFollower.handleLivePacket(msg).catch((error) => {
@@ -543,6 +598,7 @@ function prepareNapCatEventPacket(msg) {
 
 function startConnectedRuntimes() {
   getMaimaiRuntime()?.syncScheduler?.start();
+  getPjskRuntime()?.syncScheduler?.start();
   privateProactiveEngine.start();
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {
     tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
@@ -733,7 +789,11 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     if (disconnectError) throw disconnectError;
   },
   stopRuntimes: [
+    { name: 'weather_alert', run: () => weatherAlertRuntime.engine.stop() },
+    { name: 'platform_adapters', run: () => platformRuntime.stop() },
+    { name: 'weixin_main_runtime', run: () => weixinMainRuntime?.close() },
     { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
+    { name: 'pjsk_sync_scheduler', run: () => peekPjskRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'private_proactive', run: () => privateProactiveEngine.stop() },
     { name: 'scheduler', run: () => schedulerRuntime.stop() },
     { name: 'tick', run: () => tickRuntime?.stop?.() },
@@ -766,6 +826,8 @@ const mainProcessLifecycle = createMainProcessLifecycle({
   finalize: [
     { name: 'hot_stores', run: () => flushAllHotStoresSync() },
     { name: 'maimai_runtime', run: () => closeMaimaiRuntime() },
+    { name: 'pjsk_runtime', run: () => closePjskRuntime() },
+    { name: 'platform_stores', run: () => platformRuntime.closeStores() },
     { name: 'sqlite', run: () => closeLoadedSqliteConnections() },
     { name: 'single_instance_lock', run: () => cleanupSingleInstanceLock?.() }
   ],
@@ -844,6 +906,13 @@ async function startMainProcess() {
   scheduleMainProcessEmbeddingBackfill();
   startResourceSnapshots();
   startNapCatTransport();
+  ensureWeixinWorkerRunning({
+    enabled: config.WEIXIN_ENABLED,
+    supervisorEnabled: config.WEIXIN_WORKER_SUPERVISOR_ENABLED,
+    pidFile: config.WEIXIN_WORKER_PID_FILE
+  });
+  await platformRuntime.start(acceptIncomingMessage);
+  weatherAlertRuntime.engine.start();
   await Promise.all([
     waitForServerListening(webServer),
     waitForServerListening(httpReverseServer)
@@ -903,7 +972,9 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       recordMainRuntimeState,
       runtimeStateFile: RUNTIME_STATE_FILE,
       runtimeReadiness,
+      platformRuntime,
       privateProactiveEngine,
+      weatherAlertRuntime,
       scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {
         messageIngressDispatcher = dispatcher;

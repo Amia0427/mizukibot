@@ -22,6 +22,7 @@ const { buildMemosRuntimeConfig } = require('./memosRuntime');
 const { buildOpenVikingRuntimeConfig } = require('./openVikingRuntime');
 const { buildPostReplyWatchdogRuntimeConfig } = require('./postReplyRuntime');
 const { resolveMemoryStorageMode } = require('./memoryStorageRuntime');
+const { buildPlatformRuntimeConfig } = require('./platformRuntime');
 const {
   buildMainReplyContextRuntimeConfig,
   buildSessionContextRuntimeConfig
@@ -77,7 +78,7 @@ const lowResourceMainProcessMode = lowResourceMode && runtimeRole === 'main';
 const lowResourceDisableLanceDbHotPath = pickBool('LOW_RESOURCE_DISABLE_LANCEDB_HOT_PATH', false);
 const lowResourceDisableWorldbookSemantic = pickBool('LOW_RESOURCE_DISABLE_WORLDBOOK_SEMANTIC', false);
 const lowResourceLiteBudget = lowResourceMainProcessMode;
-const MAIN_REPLY_DEFAULT_MAX_TOKENS = 8192;
+const MAIN_REPLY_DEFAULT_MAX_TOKENS = 50000;
 const CHROME_LIKE_JA3 = '771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0';
 
 function pickLiteBudgetNum(key, normalFallback, liteCap) {
@@ -104,7 +105,8 @@ module.exports = {
   LOW_RESOURCE_SKIP_LOCAL_EMBEDDING_INDEX_SCORING: pickBool('LOW_RESOURCE_SKIP_LOCAL_EMBEDDING_INDEX_SCORING', lowResourceLiteBudget),
   MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START: pickBool('MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START', false),
   TIMEZONE: pick('TIMEZONE', 'Asia/Shanghai'),
-  NAPCAT_ACTION_TIMEOUT_MS: pickNum('NAPCAT_ACTION_TIMEOUT_MS', 15000),
+  NAPCAT_ACTION_TIMEOUT_MS: Math.max(1000, pickNum('NAPCAT_ACTION_TIMEOUT_MS', 30000)),
+  NAPCAT_MESSAGE_SEND_TIMEOUT_MS: Math.max(1000, pickNum('NAPCAT_MESSAGE_SEND_TIMEOUT_MS', 25000)),
   // NapCat OneBot HTTP action endpoint (bot posts actions to NapCat)
   NAPCAT_HTTP_API_BASE_URL: pick('NAPCAT_HTTP_API_BASE_URL', 'http://127.0.0.1:3000'),
   NAPCAT_HTTP_ACTION_SECRET: pick('NAPCAT_HTTP_ACTION_SECRET', ''),
@@ -167,6 +169,10 @@ module.exports = {
   PRIVATE_PROACTIVE_GLOBAL_MODEL_DAILY_LIMIT: Math.max(0, Math.floor(pickNum('PRIVATE_PROACTIVE_GLOBAL_MODEL_DAILY_LIMIT', 50))),
   PRIVATE_PROACTIVE_MAX_UNANSWERED_BATCHES: Math.max(1, Math.floor(pickNum('PRIVATE_PROACTIVE_MAX_UNANSWERED_BATCHES', 2))),
   PRIVATE_PROACTIVE_STATE_FILE: pick('PRIVATE_PROACTIVE_STATE_FILE', path.join(DATA_DIR, 'private-proactive-state.json')),
+  WEATHER_ALERT_ENABLED: pickBool('WEATHER_ALERT_ENABLED', false),
+  QWEATHER_API_KEY: pick('QWEATHER_API_KEY', ''),
+  WEATHER_ALERT_SCAN_INTERVAL_MINUTES: Math.max(1, pickNum('WEATHER_ALERT_SCAN_INTERVAL_MINUTES', 5)),
+  WEATHER_ALERT_STATE_FILE: pick('WEATHER_ALERT_STATE_FILE', path.join(DATA_DIR, 'weather-alert-state.json')),
   SCHEDULER_RUNTIME_ENABLED: pickBool('SCHEDULER_RUNTIME_ENABLED', false),
   QZONE_AUTO_PUBLISH_ENABLED: pickBool('QZONE_AUTO_PUBLISH_ENABLED', false),
   SCHEDULED_TASK_SCAN_INTERVAL_MS: pickNum('SCHEDULED_TASK_SCAN_INTERVAL_MS', 30000),
@@ -589,6 +595,8 @@ module.exports = {
   // ===== Tools =====
   // Sensitive key must come from environment, never hard-coded.
   AMAP_KEY: pick('AMAP_KEY', ''),
+  QWEATHER_API_HOST: pick('QWEATHER_API_HOST', ''),
+  QWEATHER_API_SECRET: pick('QWEATHER_API_SECRET', pick('QWEATHER_API_KEY', '')),
   // Minecraft agent toolchain: disabled by default to avoid accidental server connections.
   MC_ENABLED: pickBool('MC_ENABLED', false),
   MC_HOST: pick('MC_HOST', '127.0.0.1'),
@@ -1311,13 +1319,8 @@ module.exports = {
   MEME_MANAGER_DATA_FILE: pick('MEME_MANAGER_DATA_FILE', path.join(DATA_DIR, 'meme_manager.json')),
   MEME_MANAGER_ASSET_DIR: pick('MEME_MANAGER_ASSET_DIR', path.join(DATA_DIR, 'memes')),
   MEME_MANAGER_RUNTIME_FILE: pick('MEME_MANAGER_RUNTIME_FILE', path.join(DATA_DIR, 'meme_runtime.json')),
-  // ===== Telegram =====
-  TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '',
-  TG_ENABLE: String(process.env.TG_ENABLE || 'false').toLowerCase() === 'true',
-  TG_ALLOWED_CHAT_IDS: (process.env.TG_ALLOWED_CHAT_IDS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
+  // ===== Platform adapters =====
+  ...buildPlatformRuntimeConfig({ DATA_DIR, dataDir: DATA_DIR, pick, pickBool, pickList, pickNum }),
 
   // ===== Persona Prompt =====
   PROMPTS_DIR,

@@ -6,13 +6,15 @@ ENV HUSKY=0
 ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+  && apt-get install -y --no-install-recommends python3 python3-venv make g++ ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json requirements-pjsk.txt ./
 RUN npm ci \
   --registry="$NPM_CONFIG_REGISTRY" \
-  && npm prune --omit=dev --registry="$NPM_CONFIG_REGISTRY"
+  && npm prune --omit=dev --registry="$NPM_CONFIG_REGISTRY" \
+  && python3 -m venv /opt/pjsk-venv \
+  && /opt/pjsk-venv/bin/pip install --no-cache-dir --only-binary=:all: --require-hashes -r requirements-pjsk.txt
 
 FROM node:20-bookworm-slim AS runtime
 
@@ -20,14 +22,16 @@ WORKDIR /app
 
 ENV NODE_ENV=production \
   DATA_DIR=/app/data \
+  PJSK_PYTHON_BIN=/opt/pjsk-venv/bin/python \
   WEB_BIND_HOST=0.0.0.0 \
   NAPCAT_HTTP_REVERSE_BIND_HOST=0.0.0.0
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates python3 \
+  && apt-get install -y --no-install-recommends ca-certificates python3 fonts-noto-cjk \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /opt/pjsk-venv /opt/pjsk-venv
 COPY api ./api
 COPY config ./config
 COPY core ./core
@@ -37,7 +41,7 @@ COPY scripts ./scripts
 COPY src ./src
 COPY utils ./utils
 COPY web ./web
-COPY index.js package.json package-lock.json .env.example .env.skills.example ./
+COPY index.js package.json package-lock.json requirements-pjsk.txt .env.example .env.skills.example ./
 
 RUN mkdir -p /app/data \
   && touch /app/runtime.env \

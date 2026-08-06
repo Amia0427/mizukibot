@@ -52,10 +52,17 @@ const {
 } = require('../../utils/webSearchRequirement');
 const {
   isEarthquakeDataQuery,
+  isWeatherDataQuery,
   isWeatherCloudQuery
 } = require('../../utils/environmentDataQuery');
 const { applyDeterministicToolRouting } = require('./toolRouting');
 const { applyMaimaiToolRouting } = require('../../src/features/maimai/planner-routing');
+const { applyPjskToolRouting } = require('../../src/features/pjsk/planner-routing');
+const { isWeatherAlertManagementText } = require('../../src/features/weather-alerts/commands');
+
+function applyRhythmGameToolRouting(route, context = {}) {
+  return applyPjskToolRouting(applyMaimaiToolRouting(route), context);
+}
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -474,6 +481,37 @@ function matchTerminalLocalRoute({ rawText = '', cleanText = '', imageUrl = null
 
 function matchActionLocalRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null, userId = '' }) {
   const actionIntentText = String(currentTurnText || cleanText || '').trim();
+  if (!imageUrl && isWeatherAlertManagementText(actionIntentText)) {
+    return makeRoute({
+      confidence: 0.98,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: {
+        risk: 'medium',
+        toolNeed: ['local-write'],
+        executionMode: 'staged',
+        needsPlanning: false,
+        needsMemory: false
+      },
+      facets: {
+        modality: 'text',
+        sourceScope: 'none',
+        domain: 'weather',
+        outputKind: 'action',
+        freshness: 'unknown'
+      },
+      meta: {
+        reason: 'weather-alert-subscription',
+        localRuleId: 'weather-alert-subscription',
+        allowedTools: ['weather_alert_subscription'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'action_guidance'
+      }
+    });
+  }
   const qqActionIntent = detectQqActionIntent(actionIntentText, imageUrl);
   if (qqActionIntent) {
     const adjustedAllowedTools = (() => {
@@ -1006,6 +1044,25 @@ function matchEnvironmentDataLocalRoute({ rawText = '', cleanText = '', currentT
       }
     });
   }
+  if (isWeatherDataQuery(queryText)) {
+    return makeRoute({
+      confidence: 0.97,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: { risk: 'low', toolNeed: ['web'], executionMode: 'staged', needsPlanning: false, needsMemory: false },
+      facets: { modality: 'text', sourceScope: 'live', domain: 'weather', outputKind: 'answer', freshness: 'latest' },
+      meta: {
+        reason: 'weather-data-query',
+        localRuleId: 'weather-data-query',
+        allowedTools: ['skill_weather'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'answer'
+      }
+    });
+  }
   return null;
 }
 
@@ -1379,8 +1436,9 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
   };
   route = markLocalRuleRoute(route, userId);
   if (sanitizeTopRouteType(route?.topRouteType) !== 'direct_chat') return route;
-  if (!detectSafetyBoundaryCaution(intentText)) return applyMaimaiToolRouting(applyDeterministicToolRouting(route));
-  return applyMaimaiToolRouting(applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
+  const rhythmGameContext = { userId, chatType };
+  if (!detectSafetyBoundaryCaution(intentText)) return applyRhythmGameToolRouting(applyDeterministicToolRouting(route), rhythmGameContext);
+  return applyRhythmGameToolRouting(applyDeterministicToolRouting(markLocalRuleRoute(makeRoute({
     ...route,
     meta: {
       ...(route.meta || {}),
@@ -1388,7 +1446,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
       effectiveIntentText: intentText || cleanText,
       quotePriority
     }
-  }), userId)));
+  }), userId)), rhythmGameContext);
 }
 
 async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, continuitySignals = {}, effectiveIntentText = '', chatType = '' }, options = {}) {
@@ -1418,7 +1476,10 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
         requestTrace: options.requestTrace
       });
       if (subagentRoute && typeof subagentRoute === 'object') {
-        return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl })));
+        return applyRhythmGameToolRouting(
+          applyDeterministicToolRouting(sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl })),
+          { userId, chatType }
+        );
       }
     }
 
@@ -1442,7 +1503,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
       effectiveIntentText: intentText || cleanText,
       quotePriority
     };
-    return applyMaimaiToolRouting(applyDeterministicToolRouting(sanitizedRoute));
+    return applyRhythmGameToolRouting(applyDeterministicToolRouting(sanitizedRoute), { userId, chatType });
   } catch (_) {
     return fallbackRoute;
   }

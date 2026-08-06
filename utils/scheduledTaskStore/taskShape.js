@@ -18,6 +18,22 @@ const {
 const QZONE_MODES = new Set(['manual', 'bot_diary', 'agent', 'generic_autodraft']);
 const QZONE_AUTODRAFT_MODES = new Set(['bot_diary', 'agent', 'generic_autodraft']);
 
+function normalizeDeliveryTarget(task = {}, groupId = '') {
+  const input = task.deliveryTarget && typeof task.deliveryTarget === 'object'
+    ? task.deliveryTarget
+    : {};
+  const platform = normalizeText(task.platform || input.platform || 'qq').toLowerCase() || 'qq';
+  const conversationId = normalizeText(input.conversationId || input.conversation_id || groupId);
+  return {
+    platform,
+    chatType: 'group',
+    conversationId,
+    containerId: normalizeText(input.containerId || input.container_id),
+    threadId: normalizeText(input.threadId || input.thread_id),
+    key: normalizeText(input.key || groupId)
+  };
+}
+
 function computeNextRunAt(task = {}, nowText = nowDateTimeText()) {
   if (task.scheduleType === 'once') {
     return normalizeText(task.executeAt);
@@ -57,10 +73,14 @@ function normalizeTask(task = {}, options = {}) {
   const status = ALLOWED_STATUSES.has(normalizeText(task.status))
     ? normalizeText(task.status)
     : 'active';
+  const groupId = normalizeText(task.groupId || task.group_id);
+  const deliveryTarget = normalizeDeliveryTarget(task, groupId);
   const normalized = {
     id: normalizeText(task.id) || makeTaskId(),
     ownerUserId: normalizeText(task.ownerUserId || task.owner_user_id || task.userId || task.user_id),
-    groupId: normalizeText(task.groupId || task.group_id),
+    groupId,
+    platform: deliveryTarget.platform,
+    deliveryTarget,
     kind,
     commandType,
     status,
@@ -101,6 +121,7 @@ function validateTaskInput(input = {}) {
   const groupId = normalizeText(input.groupId);
   const kind = normalizeText(input.kind);
   const commandType = normalizeText(input.commandType);
+  const deliveryTarget = normalizeDeliveryTarget(input, groupId);
 
   if (!ownerUserId) throw new Error('ownerUserId 不能为空');
   if (!groupId) throw new Error('groupId 不能为空');
@@ -127,6 +148,8 @@ function validateTaskInput(input = {}) {
         groupId,
         kind,
         commandType,
+        platform: deliveryTarget.platform,
+        deliveryTarget,
         scheduleType: normalizedWhen.kind === 'cron' ? 'cron' : 'once',
         cronExpr: normalizedWhen.cronExpr || '',
         executeAt: normalizedWhen.executeAt || '',
@@ -144,6 +167,8 @@ function validateTaskInput(input = {}) {
     groupId,
     kind,
     commandType,
+    platform: deliveryTarget.platform,
+    deliveryTarget,
     scheduleType: normalizedWhen.kind === 'cron' ? 'cron' : 'once',
     cronExpr: normalizedWhen.cronExpr || '',
     executeAt: normalizedWhen.executeAt || '',
@@ -154,6 +179,7 @@ function validateTaskInput(input = {}) {
 
 module.exports = {
   computeNextRunAt,
+  normalizeDeliveryTarget,
   normalizePayload,
   normalizeTask,
   validateTaskInput

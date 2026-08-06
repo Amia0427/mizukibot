@@ -1,6 +1,17 @@
 # Env Configuration
 
-更新时间：2026-07-30 11:29 +08:00
+更新时间：2026-08-06 23:26 +08:00
+
+## NapCat OneBot action
+
+- `NAPCAT_ACTION_TIMEOUT_MS=30000`：机器人调用 NapCat HTTP action 的总超时。
+- `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`：`send_msg`、`send_private_msg` 和 `send_group_msg` 传给 NapCat 的内部发送等待上限。该值应小于 `NAPCAT_ACTION_TIMEOUT_MS`，预留 HTTP 响应余量；调用方显式传入 `params.timeout` 时保留调用方值。
+- NapCat `onebot11` 配置的 `timeout.baseTimeout` 过低时，QQ 内部 `NodeIKernelMsgService/sendMsg` 可能在消息实际回调前超时。机器人现在对消息 action 显式传递该等待值，不改变“响应不确定时不自动重发”的重复消息保护策略。
+
+## 主回复输出预算
+
+- 2026-08-04 23:34 +08:00：`AI_MAX_TOKENS` 与代码默认值由 `8192` 提高到 `50000`，为包含隐藏推理的主回复保留足够输出预算；管理员预算保持 `50000`，其他模型链路不变。
+- 验收（2026-08-04 23:42 +08:00）：实现提交 `67979c2`；配置探针输出 `MAIN_REPLY_DEFAULT_MAX_TOKENS=50000`、`AI_MAX_TOKENS=50000`、`ADMIN_AI_MAX_TOKENS=50000`，聚焦测试、目标 ESLint 与 typecheck 通过。重启后主进程/worker 为 `31244/35372`、`/ready` 返回 200；真实网关请求以 `max_tokens=50000` 返回 HTTP 200、`finish_reason=stop`，小目标已完成。
 
 ## QQ 私聊主动触达
 

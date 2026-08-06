@@ -6,6 +6,7 @@ const {
   analyzeMainReplyDegeneration,
   trimMainReplyDegeneratedTail
 } = require('../../../utils/mainReplyDegenerationGuard');
+const { sanitizeUserFacingText } = require('../../../utils/userFacingText');
 
 function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -31,8 +32,8 @@ function createFinalValidateNode(deps = {}) {
   return async function finalValidateNode(state) {
     const rawFinalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
     const rawDisplayReply = String(state.output?.displayReply || rawFinalReply || '').trim();
-    const protectedReply = protectFinalOutput(rawFinalReply);
-    const protectedDisplayReply = protectFinalOutput(rawDisplayReply);
+    const protectedReply = protectFinalOutput(sanitizeUserFacingText(rawFinalReply).trim());
+    const protectedDisplayReply = protectFinalOutput(sanitizeUserFacingText(rawDisplayReply).trim());
     const rawDegeneration = analyzeMainReplyDegeneration(protectedReply.text);
     const rawDisplayDegeneration = analyzeMainReplyDegeneration(protectedDisplayReply.text);
     const protectedReplyText = trimMainReplyDegeneratedTail(protectedReply.text);
