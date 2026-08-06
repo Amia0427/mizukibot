@@ -1,3 +1,10 @@
+## 运行维护 2026-08-07 01:05 +08:00
+
+- 和风天气统一能力实现提交 `b351f1a` 已完成：`skill_weather` 使用专属 Host 和 `X-QW-Api-Key` 密钥内容认证，支持全球地点、实况、日预报、逐小时、分钟降水、空气质量、天气预警及组合查询；高德不再参与天气查询，`AMAP_KEY` 仅保留给附近地点等既有工具。
+- 真实只读验收通过：上海实况、4 日预报、24 小时预报、24 个分钟降水点、空气质量和预警均成功；伦敦实况、4 日预报、24 小时预报、空气质量和预警成功，海外分钟降水明确返回地域限制；未向真实 QQ 会话发送消息。
+- 定向环境数据、路由、原生技能、Schema、执行器、策略、Companion 和全局注册测试通过；`npm run lint`、`npm run typecheck`、`npm run check:prompts`、`git diff --check` 通过。`npm test` 已执行但受工作区运行中的 Node 进程锁定 `better_sqlite3.node` 影响，`npm rebuild better-sqlite3` 同样因 `EBUSY/EPERM` 未完成，相关失败集中在 LangGraph/平台等无关测试；和风天气相关测试未失败。
+- Host、密钥内容和本地 `.env` 未写入 README、维护日志、证据、错误消息或提交；当前分支未推送远端。
+
 ## 运行维护 2026-08-06 23:41 +08:00
 
 - 根因：NapCat `napcat.mjs` 的 `NodeIKernelMsgService/sendMsg` 使用 `NodeIKernelMsgListener/onMsgInfoListUpdate` 等待 QQ 成功回调；现场 `send_group_msg` 首段耗时 `10014ms`，命中 `D:\napcat\config\onebot11_3326471600.json` 的 `timeout.baseTimeout=10000`，而不是机器人 HTTP 网络断开。
