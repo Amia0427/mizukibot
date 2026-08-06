@@ -400,16 +400,34 @@ module.exports = (async () => {
     assert.strictEqual(partialState.daily.batchesSent, 1, '部分成功仍只计一批');
     assert.strictEqual(partialState.inFlight, null);
 
-    const offline = await createDueEngine('offline', { isNapCatConnected: () => false });
+    let online = false;
+    const offline = await createDueEngine('offline', { isNapCatConnected: () => online });
     await offline.engine.scan({ now: offline.clock });
+    assert.deepStrictEqual(
+      offline.engine._test.getUserSnapshot('offline').cursor.consumedWindowKeys,
+      [],
+      'NapCat 离线时不得消费窗口'
+    );
+    online = true;
     await offline.engine.scan({ now: offline.clock });
-    assert.strictEqual(offline.calls.model, 0, 'NapCat 离线时不能调用模型');
+    assert.strictEqual(offline.calls.model, 1, 'NapCat 恢复后应在同一窗口继续判断');
 
     const notIdle = await createDueEngine('not-idle', {
       config: { PRIVATE_PROACTIVE_IDLE_MINUTES: 180 }
     });
     await notIdle.engine.scan({ now: notIdle.clock });
     assert.strictEqual(notIdle.calls.model, 0, '未达到全局沉默时间时不能调用模型');
+    assert.deepStrictEqual(
+      notIdle.engine._test.getUserSnapshot('not-idle').cursor.consumedWindowKeys,
+      [],
+      '沉默时间不足时不得消费窗口'
+    );
+    notIdle.engine._test.stateStore.update((state) => {
+      state.users['not-idle'].lastActivityAt = notIdle.clock - (181 * 60 * 1000);
+      return state;
+    }, { flushNow: true });
+    await notIdle.engine.scan({ now: notIdle.clock });
+    assert.strictEqual(notIdle.calls.model, 1, '达到沉默时间后应在同一窗口继续判断');
 
     const minimumGap = await createDueEngine('minimum-gap', {
       config: { PRIVATE_PROACTIVE_MIN_GAP_MINUTES: 60 }
@@ -420,6 +438,17 @@ module.exports = (async () => {
     }, { flushNow: true });
     await minimumGap.engine.scan({ now: minimumGap.clock });
     assert.strictEqual(minimumGap.calls.model, 0, '未达到主动私聊最小间隔时不能调用模型');
+    assert.deepStrictEqual(
+      minimumGap.engine._test.getUserSnapshot('minimum-gap').cursor.consumedWindowKeys,
+      [],
+      '最小间隔不足时不得消费窗口'
+    );
+    minimumGap.engine._test.stateStore.update((state) => {
+      state.users['minimum-gap'].lastProactiveSentAt = minimumGap.clock - (61 * 60 * 1000);
+      return state;
+    }, { flushNow: true });
+    await minimumGap.engine.scan({ now: minimumGap.clock });
+    assert.strictEqual(minimumGap.calls.model, 1, '达到最小间隔后应在同一窗口继续判断');
 
     const dailyLimited = await createDueEngine('daily-limited');
     dailyLimited.engine._test.stateStore.update((state) => {
@@ -428,6 +457,17 @@ module.exports = (async () => {
     }, { flushNow: true });
     await dailyLimited.engine.scan({ now: dailyLimited.clock });
     assert.strictEqual(dailyLimited.calls.model, 0, '达到用户每日批次上限时不能调用模型');
+    assert.deepStrictEqual(
+      dailyLimited.engine._test.getUserSnapshot('daily-limited').cursor.consumedWindowKeys,
+      [],
+      '达到每日上限时不得消费窗口'
+    );
+    dailyLimited.engine._test.stateStore.update((state) => {
+      state.users['daily-limited'].daily.batchesSent = 1;
+      return state;
+    }, { flushNow: true });
+    await dailyLimited.engine.scan({ now: dailyLimited.clock });
+    assert.strictEqual(dailyLimited.calls.model, 1, '每日额度恢复后应在同一窗口继续判断');
 
     const budgetLimited = await createDueEngine('budget-limited', {
       config: { PRIVATE_PROACTIVE_GLOBAL_MODEL_DAILY_LIMIT: 0 }

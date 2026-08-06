@@ -417,6 +417,15 @@ function createPrivateProactiveEngine(options = {}) {
       return { userId: id, windowKey: window.key, status: 'skipped', reason: 'daily_limit' };
     }
 
+    updateState((state) => {
+      const current = state.users[id];
+      if (!current) return;
+      syncDayState(state, current, timestamp);
+      if (!current.cursor.consumedWindowKeys.includes(window.key)) {
+        current.cursor.consumedWindowKeys.push(window.key);
+      }
+    }, true);
+
     const activityVersion = user.activityVersion;
     const controller = new AbortController();
     activeControllers.set(id, controller);
@@ -561,8 +570,6 @@ function createPrivateProactiveEngine(options = {}) {
         if (!user || user.registeredAt <= 0 || !user.enabled || user.autoPaused) return;
         syncDayState(state, user, timestamp);
         dueWindow = findDueWindow(userId, timestamp, user.cursor.consumedWindowKeys, privateConfig);
-        if (!dueWindow) return;
-        user.cursor.consumedWindowKeys.push(dueWindow.key);
       }, true);
       if (!dueWindow) continue;
       const result = await runOpportunity(userId, dueWindow, timestamp);
