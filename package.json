@@ -66,6 +66,7 @@
     "diag:live-state-dynamic": "node scripts/diagnose-live-state-dynamic.js",
     "diag:worldbook": "node scripts/diagnose-worldbook.js",
     "diag:provider-request": "node scripts/diagnose-provider-request.js",
+    "diag:weather-alerts": "node scripts/diagnose-weather-alerts.js",
     "verify:admin-cache-read": "node scripts/verify-admin-cache-read.js",
     "diag:main-reply-lag": "node scripts/diagnose-main-reply-lag.js",
     "diag:request-trace-preflight": "node scripts/diagnose-request-trace-preflight.js",

@@ -16,6 +16,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'skill_earthquake_latest',
   'skill_weather',
   'skill_weather_cloud',
+  'weather_alert_subscription',
   'notebook_search',
   'notebook_list_docs',
   'notebook_append_journal',

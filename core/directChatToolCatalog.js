@@ -102,6 +102,13 @@ const TOOL_ROUTING_METADATA = Object.freeze({
     avoidWhen: ['current conditions or forecast requests'],
     preferredOver: ['skill_weather', 'getWeather', 'web_search']
   },
+  weather_alert_subscription: {
+    routingRole: 'weather_alert_subscription_manager',
+    overlapGroup: 'weather_alerts',
+    preferWhen: ['subscribe to district weather warnings', 'list, pause, resume, or cancel weather warning subscriptions'],
+    avoidWhen: ['current conditions or forecast requests', 'general weather warning explanations'],
+    preferredOver: ['skill_weather', 'getWeather', 'web_search']
+  },
   skill_earthquake_latest: {
     routingRole: 'earthquake_data_specialist',
     overlapGroup: 'live_environment_data',

@@ -52,6 +52,8 @@ const { validatePjskToolInvocation } = require('../../src/features/pjsk/invocati
 const { pjskReferenceStore } = require('../../src/features/pjsk/reference-store');
 const { renderAndSendChart, shouldSendChartImage } = require('../../src/features/pjsk/renderer');
 const { getPjskRuntime, isPjskEnabled } = require('../../src/features/pjsk/runtime');
+const { GROUP_PRIVATE_ONLY_REPLY, formatSubscriptionResult } = require('../../src/features/weather-alerts/commands');
+const { getWeatherAlertRuntime } = require('../../src/features/weather-alerts/runtime');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -777,6 +779,21 @@ const TOOL_EXECUTORS = {
 
   skill_weather: async (args = {}) => {
     return nativeWeather.getWeatherSummary(args);
+  },
+
+  weather_alert_subscription: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    if (String(context.chatType || '').trim().toLowerCase() !== 'private') return GROUP_PRIVATE_ONLY_REPLY;
+    const runtime = getWeatherAlertRuntime();
+    if (!runtime?.enabled) return '天气预警功能当前未启用。';
+    const principalId = String(context.userId || '').trim();
+    const action = String(args.action || '').trim().toLowerCase();
+    const location = String(args.location || '').trim();
+    if (!principalId) throw new Error('weather alert subscription requires principalId');
+    if (['subscribe', 'unsubscribe'].includes(action) && !location) {
+      return `请提供要${action === 'subscribe' ? '订阅' : '取消'}的完整市、区或县名。`;
+    }
+    return formatSubscriptionResult(await runtime.service.execute(principalId, action, location));
   },
 
   skill_weather_cloud: async (args = {}) => {

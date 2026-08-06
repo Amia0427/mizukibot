@@ -51,6 +51,8 @@ const { mergeQqLegacyMessage } = require('./src/platforms/qqAdapter');
 const { createPlatformRuntime } = require('./src/platforms/runtime');
 const { createWeixinMainRuntime } = require('./src/platforms/weixin/main-runtime');
 const { ensureWeixinWorkerRunning } = require('./utils/weixinWorkerSupervisor');
+const { createWeatherAlertCommandHandler } = require('./src/features/weather-alerts/commands');
+const { initializeWeatherAlertRuntime } = require('./src/features/weather-alerts/runtime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -442,6 +444,11 @@ const privateProactiveEngine = createPrivateProactiveEngine({
   actionClient: platformActionClient,
   resolvePrivateTarget: platformRuntime.resolvePrivateTarget
 });
+const weatherAlertRuntime = initializeWeatherAlertRuntime({
+  config,
+  actionClient: platformActionClient,
+  resolvePrivateTarget: platformRuntime.resolvePrivateTarget
+});
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
 function askAIByGraph(...args) {
@@ -479,6 +486,19 @@ const maimaiCommandHandler = createMaimaiCommandHandler({
   }
 });
 
+const weatherAlertCommandHandler = createWeatherAlertCommandHandler({
+  getRuntime: () => weatherAlertRuntime,
+  sendReply: async (msg, replyText) => {
+    const isPrivate = String(msg?.message_type || '').trim().toLowerCase() === 'private';
+    await sendWithRetry({
+      action: isPrivate ? 'send_private_msg' : 'send_group_msg',
+      params: isPrivate
+        ? { user_id: String(msg?.user_id || '').trim(), message: replyText }
+        : { group_id: String(msg?.group_id || '').trim(), message: replyText }
+    }, 1, 300);
+  }
+});
+
 const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry,
@@ -488,7 +508,7 @@ const { handleIncomingMessage } = createMessageHandler({
 });
 const platformMessageProcessor = createPlatformMessageProcessor({
   identityCommandHandler: createIdentityCommandHandler({ store: platformRuntime.identityStore }),
-  commandHandlers: [weixinMainRuntime?.commandHandler, maimaiCommandHandler].filter(Boolean),
+  commandHandlers: [weatherAlertCommandHandler, weixinMainRuntime?.commandHandler, maimaiCommandHandler].filter(Boolean),
   sendWithRetry
 });
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
@@ -769,6 +789,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     if (disconnectError) throw disconnectError;
   },
   stopRuntimes: [
+    { name: 'weather_alert', run: () => weatherAlertRuntime.engine.stop() },
     { name: 'platform_adapters', run: () => platformRuntime.stop() },
     { name: 'weixin_main_runtime', run: () => weixinMainRuntime?.close() },
     { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
@@ -891,6 +912,7 @@ async function startMainProcess() {
     pidFile: config.WEIXIN_WORKER_PID_FILE
   });
   await platformRuntime.start(acceptIncomingMessage);
+  weatherAlertRuntime.engine.start();
   await Promise.all([
     waitForServerListening(webServer),
     waitForServerListening(httpReverseServer)
@@ -952,6 +974,7 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       runtimeReadiness,
       platformRuntime,
       privateProactiveEngine,
+      weatherAlertRuntime,
       scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {
         messageIngressDispatcher = dispatcher;

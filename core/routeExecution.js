@@ -148,6 +148,7 @@ function isPrivateSafeTool(toolName = '') {
   const normalized = String(toolName || '').trim();
   if (!normalized) return false;
   if (normalized === 'render_qq_visual') return true;
+  if (normalized === 'weather_alert_subscription') return true;
 
   const blockedByName = new Set([
     'publish_qzone',

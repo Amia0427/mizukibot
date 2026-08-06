@@ -441,6 +441,29 @@ const skillsAndIntegrationsToolSchemas = [
   {
     type: 'function',
     function: {
+      name: 'weather_alert_subscription',
+      description: 'Manage the current private-chat user weather warning subscriptions. Use list without confirmation; subscribe, unsubscribe, pause, and resume require one-time tool confirmation.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['subscribe', 'unsubscribe', 'list', 'pause', 'resume'],
+            description: 'Subscription action'
+          },
+          location: {
+            type: 'string',
+            description: 'Full Chinese city, district, or county name; required for subscribe and unsubscribe'
+          }
+        },
+        required: ['action']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'skill_youtube_transcript',
       description: 'Fetch transcript text for a YouTube video',
       parameters: {

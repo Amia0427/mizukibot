@@ -124,6 +124,14 @@ TOOL_POLICIES.skill_weather_cloud = createPolicy({
   confirmation: 'none'
 });
 
+TOOL_POLICIES.weather_alert_subscription = createPolicy({
+  risk: 'medium',
+  capability: 'local_write',
+  effect: 'local_write',
+  confirmation: 'explicit',
+  scope: 'user'
+});
+
 assignPolicy(TOOL_POLICIES, [
   'notebook_list_docs',
   'notebook_search',
@@ -308,6 +316,12 @@ function resolveToolPolicy(toolName, args = {}) {
       none: ['get', 'list', 'query', 'related'],
       local_write: ['create', 'update', 'relate', 'validate', 'schema-append'],
       destructive: ['delete']
+    });
+  }
+  if (name === 'weather_alert_subscription') {
+    return resolveActionPolicy(basePolicy, action, {
+      none: ['list'],
+      local_write: ['subscribe', 'unsubscribe', 'pause', 'resume']
     });
   }
   if (name === 'create_scheduled_command') {

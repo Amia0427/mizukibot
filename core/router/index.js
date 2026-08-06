@@ -58,6 +58,7 @@ const {
 const { applyDeterministicToolRouting } = require('./toolRouting');
 const { applyMaimaiToolRouting } = require('../../src/features/maimai/planner-routing');
 const { applyPjskToolRouting } = require('../../src/features/pjsk/planner-routing');
+const { isWeatherAlertManagementText } = require('../../src/features/weather-alerts/commands');
 
 function applyRhythmGameToolRouting(route, context = {}) {
   return applyPjskToolRouting(applyMaimaiToolRouting(route), context);
@@ -480,6 +481,37 @@ function matchTerminalLocalRoute({ rawText = '', cleanText = '', imageUrl = null
 
 function matchActionLocalRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null, userId = '' }) {
   const actionIntentText = String(currentTurnText || cleanText || '').trim();
+  if (!imageUrl && isWeatherAlertManagementText(actionIntentText)) {
+    return makeRoute({
+      confidence: 0.98,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: {
+        risk: 'medium',
+        toolNeed: ['local-write'],
+        executionMode: 'staged',
+        needsPlanning: false,
+        needsMemory: false
+      },
+      facets: {
+        modality: 'text',
+        sourceScope: 'none',
+        domain: 'weather',
+        outputKind: 'action',
+        freshness: 'unknown'
+      },
+      meta: {
+        reason: 'weather-alert-subscription',
+        localRuleId: 'weather-alert-subscription',
+        allowedTools: ['weather_alert_subscription'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'action_guidance'
+      }
+    });
+  }
   const qqActionIntent = detectQqActionIntent(actionIntentText, imageUrl);
   if (qqActionIntent) {
     const adjustedAllowedTools = (() => {
