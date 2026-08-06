@@ -1,3 +1,10 @@
+## 运行维护 2026-08-07 01:12 +08:00
+
+- 天气预警订阅实现提交 `cdc36622` 已完成：新增和风 Geo 地点解析、`weatheralert/v1/current/{latitude}/{longitude}` 预警查询、JSON 热存储、区县订阅命令/工具、5 分钟扫描、夜间蓝黄延迟、去重合并投递、瑞希 Runtime V2 主模型路由和私聊上下文追加；未修改 `prompts/admin.txt`。
+- 和风真实只读诊断通过：`npm run diag:weather-alerts -- --query "北京市朝阳区"` 返回 10 个候选并精确选中 `101010300`，新版接口返回 1 条高温黄色预警，来源为朝阳区气象台；旧 `/v7/warning/list` 与 `/v7/warning/now` 不再调用，按每个唯一订阅 LocationID 直接用经纬度查询。
+- 天气预警定向测试、工具确认执行测试、`npm run lint`、`npm run typecheck`、暂存区密钥扫描和 `git diff --cached --check` 通过；Node 20.20.2 原生依赖重编译后完整 `scripts/run-tests.js` 用时 231.8 秒并退出 0，随后已恢复 Node 24 原生依赖。
+- 重启本地进程后 `/live`、`/ready` 均返回 HTTP 200；运行时状态文件记录 `lastError` 为空且下一次扫描已排程，QQ 与微信平台状态在线。未向真实用户发送预警消息，未推送远端。
+
 ## 运行维护 2026-08-07 01:05 +08:00
 
 - 和风天气统一能力实现提交 `b351f1a` 已完成：`skill_weather` 使用专属 Host 和 `X-QW-Api-Key` 密钥内容认证，支持全球地点、实况、日预报、逐小时、分钟降水、空气质量、天气预警及组合查询；高德不再参与天气查询，`AMAP_KEY` 仅保留给附近地点等既有工具。
