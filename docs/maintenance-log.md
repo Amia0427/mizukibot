@@ -3,7 +3,7 @@
 - 根因：NapCat `napcat.mjs` 的 `NodeIKernelMsgService/sendMsg` 使用 `NodeIKernelMsgListener/onMsgInfoListUpdate` 等待 QQ 成功回调；现场 `send_group_msg` 首段耗时 `10014ms`，命中 `D:\napcat\config\onebot11_3326471600.json` 的 `timeout.baseTimeout=10000`，而不是机器人 HTTP 网络断开。
 - 最小修复：新增 `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`，消息 action 未显式传值时由 HTTP action client 注入，保留 1 秒 HTTP 余量；管理员路由返回真实 `sent` 状态，修复发送失败仍被 request trace 记为成功的问题；不改变送达不确定时禁止重试的重复消息保护。
 - 验收：`node scripts/run-tests.js tests/napcatActionClientConnectionState.test.js tests/napcatActionRetry.test.js tests/groupSummaryAdminRoute.test.js tests/privateChatAdminRouting.test.js`、目标 ESLint、`npm run typecheck` 和 `git diff --check` 通过；重启主进程后 `/live`、`/ready` 返回 200，NapCat `get_status` 为 `online=true/good=true`；实际发送群消息并用 `get_msg` 回读成功，`message_id=1940400047`、`post_type=message_sent`，未在 10 秒处超时。
-- 提交后记录：本小目标代码与文档提交后已完成；未推送远端。未修改 `prompts/admin.txt`，未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`。
+- 提交后记录：代码与文档提交 `86cae39` 已完成；未推送远端。未修改 `prompts/admin.txt`，未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`。
 
 ## 运行维护 2026-08-06 10:58 +08:00
 
