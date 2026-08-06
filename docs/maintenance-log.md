@@ -1,3 +1,9 @@
+## 运行维护 2026-08-06 10:05 +08:00
+
+- 多平台适配收尾提交 `5d7ffae` 已完成：Discord、Telegram 与 QQ 共用消息归一化、身份/记忆、短期会话、群总结、定时投递和主动私聊链路；本小目标已完成。
+- Node 20.19.5 最终验收：31 项多平台、QQ action、群总结、调度和主动私聊回归通过；855 个 JavaScript 文件 lint、typecheck、暂存密钥检查、31 个暂存 JavaScript 语法检查及 `git diff --cached --check` 均通过。完整 `npm test` 仍沿用下方已记录的并行工作区阻断结论，不宣称通过。
+- 提交仅包含本任务 36 个文件；未纳入微信、工具授权、依赖文件、`.env.example`、`.belt/`、`AGENT.md`、`prompts/admin.txt` 或其他并行改动，未推送远端。
+
 ## 运行维护 2026-08-06 09:37 +08:00
 
 - 多平台适配：提交 `492eab0` 建立统一 `InboundMessage`、`DeliveryTarget`、平台能力、SQLite 身份/绑定与群短期上下文；提交 `7d0e857` 将 QQ、Discord Gateway、Telegram long polling 接入现有路由、模型、工具、记忆和命令主管线。本轮补齐图片/引用/提及归一化、跨身份记忆聚合、平台会话隔离、群总结、定时投递、主动私聊和适配器故障隔离。
