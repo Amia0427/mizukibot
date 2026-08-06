@@ -20,20 +20,21 @@ module.exports = (async () => {
   assert.ok(String(depCheck).includes('axios:'));
 
   const weather = await nativeWeather.getWeatherSummary({ location: '上海今天天气' }, {
-    apiKey: 'test-key',
+    apiHost: 'https://weather.example.qweatherapi.com',
+    apiSecret: 'test-secret',
     httpClient: {
-      async get(url, options = {}) {
-        if (url === nativeWeather.AMAP_GEOCODE_URL) {
-          return { data: { status: '1', geocodes: [{ adcode: '310000', formatted_address: '上海市' }] } };
+      async get(url) {
+        if (url.endsWith('/geo/v2/city/lookup')) {
+          return { data: { code: '200', location: [{ name: '上海', country: '中国', lat: '31.23', lon: '121.47', tz: 'Asia/Shanghai' }] } };
         }
-        if (options.params.extensions === 'base') {
-          return { data: { status: '1', lives: [{ city: '上海市', weather: '晴', temperature: '30', humidity: '50' }] } };
+        if (url.includes('/weather/v1/current/')) {
+          return { data: { condition: { text: '晴' }, temperature: { value: 30 }, feelsLike: { value: 31 }, humidity: 0.5 } };
         }
-        return { data: { status: '1', forecasts: [{ city: '上海市', casts: [] }] } };
+        return { data: { days: [] } };
       }
     }
   });
-  assert.match(weather, /高德天气/);
+  assert.match(weather, /和风天气/);
 
   const arxivGetMissing = await nativeArxiv.getArxiv({ arxiv_id: '' });
   assert.strictEqual(arxivGetMissing, 'Missing arxiv_id.');

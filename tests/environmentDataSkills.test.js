@@ -5,10 +5,9 @@ const {
   queryLatestEarthquakes
 } = require('../api/skills_native/earthquake');
 const {
-  AMAP_GEOCODE_URL,
-  AMAP_WEATHER_URL,
   getWeatherSummary
 } = require('../api/skills_native/weather');
+const { createQWeatherClient } = require('../api/skills_native/qweatherClient');
 const {
   MAX_SOURCE_IMAGE_BYTES,
   PRODUCTS,
@@ -16,6 +15,7 @@ const {
 } = require('../api/skills_native/weatherCloud');
 
 const FIXED_NOW = new Date('2026-08-02T06:00:00.000Z');
+const QWEATHER_HOST = 'https://weather.example.qweatherapi.com';
 const LATEST_IMAGE_URL = 'https://img.nsmc.org.cn/CLOUDIMAGE/FY4B/latest.JPG';
 const LATEST_THUMBNAIL_URL = 'https://img.nsmc.org.cn/CLOUDIMAGE/FY4B/latest.JPG-thumb.JPG';
 const PREVIOUS_IMAGE_URL = 'https://img.nsmc.org.cn/CLOUDIMAGE/FY4B/previous.JPG';
@@ -57,62 +57,96 @@ function earthquakeFeature(overrides = {}) {
   };
 }
 
-function createWeatherHttpClient({ geocodes, live, forecast, status = '1' } = {}) {
+function createWeatherHttpClient({ locations, country = '中国', responseCode = '200', invalidCurrent = false } = {}) {
   const calls = [];
   return {
     calls,
     async get(url, options = {}) {
       calls.push({ url, options });
-      if (url === AMAP_GEOCODE_URL) {
+      if (url.endsWith('/geo/v2/city/lookup')) {
         return {
           data: {
-            status,
-            info: status === '1' ? 'OK' : 'INVALID_USER_KEY',
-            geocodes: geocodes ?? [{ adcode: '310000', formatted_address: '上海市' }]
-          }
-        };
-      }
-      if (url !== AMAP_WEATHER_URL) throw new Error(`unexpected weather url: ${url}`);
-      if (options.params.extensions === 'base') {
-        return {
-          data: {
-            status,
-            info: status === '1' ? 'OK' : 'INVALID_USER_KEY',
-            lives: live ?? [{
-              province: '上海',
-              city: '上海市',
-              weather: '晴',
-              temperature: '35',
-              winddirection: '东北',
-              windpower: '3',
-              humidity: '46',
-              reporttime: '2026-08-02 14:00:00'
+            code: responseCode,
+            location: locations ?? [{
+              id: '101020100',
+              name: country === '中国' ? '上海' : 'London',
+              adm1: country === '中国' ? '上海市' : 'England',
+              adm2: country === '中国' ? '上海' : 'London',
+              country,
+              lat: '31.2304',
+              lon: '121.4737',
+              tz: country === '中国' ? 'Asia/Shanghai' : 'Europe/London'
             }]
           }
         };
       }
-      return {
-        data: {
-          status,
-          info: status === '1' ? 'OK' : 'INVALID_USER_KEY',
-          forecasts: forecast ?? [{
-            province: '上海',
-            city: '上海市',
-            reporttime: '2026-08-02 14:00:00',
-            casts: Array.from({ length: 5 }, (_, index) => ({
-              date: `2026-08-0${index + 2}`,
-              dayweather: index === 1 ? '多云' : '晴',
-              nightweather: index === 1 ? '雷阵雨' : '晴',
-              daytemp: String(35 - index),
-              nighttemp: String(27 - index),
-              daywind: '东',
-              nightwind: '东北',
-              daypower: '3',
-              nightpower: '3'
+      if (url.includes('/weather/v1/current/')) {
+        if (invalidCurrent) return { data: [] };
+        return {
+          data: {
+            condition: { text: '晴' },
+            temperature: { value: 35, unit: '°C' },
+            feelsLike: { value: 38, unit: '°C' },
+            humidity: 0.46,
+            wind: { direction: { compass: '东北' }, speed: { value: 3.2 }, scale: 3 },
+            precipitation: { amount: { value: 0 } },
+            observationTime: '2026-08-02T06:00:00Z'
+          }
+        };
+      }
+      if (url.includes('/weather/v1/daily/')) {
+        return {
+          data: {
+            days: Array.from({ length: Number(options.params.days) || 4 }, (_, index) => ({
+              forecastStartTime: `2026-08-0${index + 2}T00:00:00Z`,
+              temperatureMin: { value: 27 - index },
+              temperatureMax: { value: 35 - index },
+              daytime: { condition: { text: index === 1 ? '多云' : '晴' }, precipitation: { probability: 0.2 } },
+              nighttime: { condition: { text: index === 1 ? '雷阵雨' : '晴' } }
             }))
-          }]
-        }
-      };
+          }
+        };
+      }
+      if (url.includes('/weather/v1/hourly/')) {
+        return {
+          data: {
+            hours: Array.from({ length: Number(options.params.hours) || 24 }, (_, index) => ({
+              forecastTime: new Date(FIXED_NOW.getTime() + index * 3600000).toISOString(),
+              condition: { text: index % 2 ? '多云' : '晴' },
+              temperature: { value: 35 - index / 10 },
+              precipitation: { probability: 0.1 }
+            }))
+          }
+        };
+      }
+      if (url.endsWith('/v7/minutely/5m')) {
+        return {
+          data: {
+            code: '200',
+            summary: '未来两小时无降水',
+            minutely: Array.from({ length: 24 }, (_, index) => ({
+              fxTime: new Date(FIXED_NOW.getTime() + index * 300000).toISOString(),
+              precip: '0.00'
+            }))
+          }
+        };
+      }
+      if (url.includes('/airquality/v1/current/')) {
+        return {
+          data: {
+            indexes: [{ aqi: 23, aqiDisplay: '23', category: '优' }],
+            pollutants: [{ code: 'pm2p5', name: 'PM 2.5', concentration: { value: 14, unit: 'μg/m³' } }]
+          }
+        };
+      }
+      if (url.includes('/weatheralert/v1/current/')) {
+        return {
+          data: {
+            alerts: [{ title: '高温黄色预警', severityColor: '黄色', status: '发布', text: '注意防暑。' }]
+          }
+        };
+      }
+      throw new Error(`unexpected weather url: ${url}`);
     }
   };
 }
@@ -217,61 +251,88 @@ module.exports = (async () => {
   assert.match(emptyResult, /没有符合条件的地震事件/);
 
   const weatherHttp = createWeatherHttpClient();
-  const weatherResult = await getWeatherSummary({ location: '帮我查一下上海今天天气怎么样' }, {
-    apiKey: 'unit-test-key',
-    httpClient: weatherHttp
+  const weatherResult = await getWeatherSummary({
+    location: '帮我查一下上海今天天气怎么样',
+    sections: ['overview', 'hourly', 'minutely', 'air', 'warning'],
+    days: 4,
+    hours: 24
+  }, {
+    apiHost: QWEATHER_HOST,
+    apiSecret: 'secret-content',
+    httpClient: weatherHttp,
+    now: () => FIXED_NOW
   });
-  assert.strictEqual(weatherHttp.calls.length, 3);
-  assert.strictEqual(weatherHttp.calls[0].url, AMAP_GEOCODE_URL);
-  assert.deepStrictEqual(weatherHttp.calls[0].options.params, { address: '上海', key: 'unit-test-key' });
-  assert.deepStrictEqual(
-    weatherHttp.calls.slice(1).map((call) => call.options.params.extensions).sort(),
-    ['all', 'base']
-  );
-  assert.ok(weatherHttp.calls.slice(1).every((call) => call.options.params.city === '310000'));
-  assert.match(weatherResult, /高德天气｜上海市/);
-  assert.match(weatherResult, /实况：晴，35℃，湿度 46%/);
-  assert.match(weatherResult, /多云转雷阵雨/);
-  assert.strictEqual((weatherResult.match(/^2026-/gm) || []).length, 4);
-  assert.doesNotMatch(weatherResult, /unit-test-key/);
-  assert.match(weatherResult, /来源：高德开放平台/);
+  assert.strictEqual(weatherHttp.calls.length, 7);
+  assert.strictEqual(weatherHttp.calls[0].url, `${QWEATHER_HOST}/geo/v2/city/lookup`);
+  assert.deepStrictEqual(weatherHttp.calls[0].options.params, { location: '上海', lang: 'zh', number: 1 });
+  assert.strictEqual(weatherHttp.calls[1].url, `${QWEATHER_HOST}/weather/v1/current/31.2304/121.4737`);
+  assert.strictEqual(weatherHttp.calls[2].options.params.days, 4);
+  assert.strictEqual(weatherHttp.calls[3].options.params.hours, 24);
+  assert.strictEqual(weatherHttp.calls[4].url, `${QWEATHER_HOST}/v7/minutely/5m`);
+  assert.strictEqual(weatherHttp.calls[4].options.params.location, '121.4737,31.2304');
+  assert.ok(weatherHttp.calls.every((call) => call.options.headers['X-QW-Api-Key'] === 'secret-content'));
+  assert.match(weatherResult, /和风天气/);
+  assert.match(weatherResult, /实况：晴，35℃，体感 38℃，湿度 46%/);
+  assert.match(weatherResult, /多云/);
+  assert.match(weatherResult, /未来两小时无降水/);
+  assert.match(weatherResult, /AQI：23/);
+  assert.match(weatherResult, /高温黄色预警/);
+  assert.doesNotMatch(weatherResult, /secret-content/);
+
+  const directClient = createQWeatherClient({ apiHost: `${QWEATHER_HOST}/`, apiSecret: 'secret-content', httpClient: weatherHttp });
+  await directClient.getAir('31.2304', '121.4737');
+  assert.strictEqual(weatherHttp.calls.at(-1).url, `${QWEATHER_HOST}/airquality/v1/current/31.2304/121.4737`);
 
   const noLocationResult = await getWeatherSummary({ location: '今天天气怎么样' }, {
-    apiKey: 'unit-test-key',
+    apiHost: QWEATHER_HOST,
+    apiSecret: 'unit-test-key',
     httpClient: createWeatherHttpClient()
   });
   assert.match(noLocationResult, /请提供要查询的城市/);
 
   const emptyLocationResult = await getWeatherSummary({}, {
-    apiKey: 'unit-test-key',
+    apiHost: QWEATHER_HOST,
+    apiSecret: 'unit-test-key',
     httpClient: createWeatherHttpClient()
   });
   assert.match(emptyLocationResult, /请提供要查询的城市/);
 
   const noGeocodeResult = await getWeatherSummary({ city: '不存在的地方' }, {
-    apiKey: 'unit-test-key',
-    httpClient: createWeatherHttpClient({ geocodes: [] })
+    apiHost: QWEATHER_HOST,
+    apiSecret: 'unit-test-key',
+    httpClient: createWeatherHttpClient({ locations: [] })
   });
   assert.match(noGeocodeResult, /未找到/);
 
   await assert.rejects(
-    getWeatherSummary({ location: '上海' }, { apiKey: '', httpClient: createWeatherHttpClient() }),
-    /AMAP_KEY is not configured/
+    getWeatherSummary({ location: '上海' }, { apiHost: QWEATHER_HOST, apiSecret: '', httpClient: createWeatherHttpClient() }),
+    /QWEATHER_API_SECRET/
   );
   await assert.rejects(
     getWeatherSummary({ location: '上海' }, {
-      apiKey: 'secret-value',
-      httpClient: createWeatherHttpClient({ status: '0' })
+      apiHost: QWEATHER_HOST,
+      apiSecret: 'secret-value',
+      httpClient: createWeatherHttpClient({ responseCode: '401' })
     }),
-    (error) => /AMap geocoding failed/.test(error.message) && !error.message.includes('secret-value')
+    (error) => /QWeather location lookup failed/.test(error.message) && !error.message.includes('secret-value')
   );
   await assert.rejects(
     getWeatherSummary({ location: '上海' }, {
-      apiKey: 'unit-test-key',
-      httpClient: createWeatherHttpClient({ live: [], forecast: [] })
+      apiHost: QWEATHER_HOST,
+      apiSecret: 'unit-test-key',
+      httpClient: createWeatherHttpClient({ invalidCurrent: true })
     }),
-    /response is invalid/
+    /invalid response/
   );
+
+  const overseasHttp = createWeatherHttpClient({ country: '英国' });
+  const overseasResult = await getWeatherSummary({ location: '伦敦', sections: ['minutely'] }, {
+    apiHost: QWEATHER_HOST,
+    apiSecret: 'unit-test-key',
+    httpClient: overseasHttp
+  });
+  assert.match(overseasResult, /分钟降水仅支持中国区域/);
+  assert.strictEqual(overseasHttp.calls.length, 1);
 
   const smallImage = await sharp({
     create: { width: 64, height: 64, channels: 3, background: '#4786b5' }

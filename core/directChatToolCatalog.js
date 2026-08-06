@@ -91,8 +91,8 @@ const TOOL_ROUTING_METADATA = Object.freeze({
   skill_weather: {
     routingRole: 'weather_specialist',
     overlapGroup: 'weather',
-    preferWhen: ['weather requests', 'current conditions or four-day forecast lookup'],
-    avoidWhen: ['non-weather factual lookup'],
+    preferWhen: ['weather requests', 'current conditions, forecasts, air quality, or explicit weather warnings'],
+    avoidWhen: ['satellite cloud image requests', 'non-weather factual lookup'],
     preferredOver: ['getWeather', 'web_search']
   },
   skill_weather_cloud: {

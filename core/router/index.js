@@ -52,6 +52,7 @@ const {
 } = require('../../utils/webSearchRequirement');
 const {
   isEarthquakeDataQuery,
+  isWeatherDataQuery,
   isWeatherCloudQuery
 } = require('../../utils/environmentDataQuery');
 const { applyDeterministicToolRouting } = require('./toolRouting');
@@ -1005,6 +1006,25 @@ function matchEnvironmentDataLocalRoute({ rawText = '', cleanText = '', currentT
         reason: 'earthquake-data-query',
         localRuleId: 'earthquake-data-query',
         allowedTools: ['skill_earthquake_latest'],
+        chatMode: 'text_chat',
+        toolIntent: 'force_tools',
+        responseIntent: 'answer'
+      }
+    });
+  }
+  if (isWeatherDataQuery(queryText)) {
+    return makeRoute({
+      confidence: 0.97,
+      cleanText,
+      rawText,
+      imageUrl,
+      topRouteType: 'direct_chat',
+      intent: { risk: 'low', toolNeed: ['web'], executionMode: 'staged', needsPlanning: false, needsMemory: false },
+      facets: { modality: 'text', sourceScope: 'live', domain: 'weather', outputKind: 'answer', freshness: 'latest' },
+      meta: {
+        reason: 'weather-data-query',
+        localRuleId: 'weather-data-query',
+        allowedTools: ['skill_weather'],
         chatMode: 'text_chat',
         toolIntent: 'force_tools',
         responseIntent: 'answer'

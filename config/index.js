@@ -591,6 +591,8 @@ module.exports = {
   // ===== Tools =====
   // Sensitive key must come from environment, never hard-coded.
   AMAP_KEY: pick('AMAP_KEY', ''),
+  QWEATHER_API_HOST: pick('QWEATHER_API_HOST', ''),
+  QWEATHER_API_SECRET: pick('QWEATHER_API_SECRET', pick('QWEATHER_API_KEY', '')),
   // Minecraft agent toolchain: disabled by default to avoid accidental server connections.
   MC_ENABLED: pickBool('MC_ENABLED', false),
   MC_HOST: pick('MC_HOST', '127.0.0.1'),

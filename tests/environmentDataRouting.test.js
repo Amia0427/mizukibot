@@ -13,6 +13,7 @@ const {
   deriveWeatherCloudToolArgs,
   deriveWeatherToolArgs,
   isEarthquakeDataQuery,
+  isWeatherDataQuery,
   isWeatherCloudQuery
 } = require('../utils/environmentDataQuery');
 const {
@@ -75,18 +76,78 @@ assert.strictEqual(cloudRoute.facets.freshness, 'latest');
 assert.deepStrictEqual(deriveWeatherCloudToolArgs(cloudRoute.cleanText), { channel: 'water_vapor', area: 'china' });
 
 const weatherRoute = detect('上海今天天气怎么样');
-assert.deepStrictEqual(deriveWeatherToolArgs('上海今天天气怎么样'), { location: '上海' });
-assert.deepStrictEqual(deriveWeatherToolArgs(weatherRoute.cleanText), { location: '上海' });
+assert.strictEqual(isWeatherDataQuery('上海逐小时天气'), true);
+assert.strictEqual(isWeatherDataQuery('什么是空气质量指数'), false);
+assert.deepStrictEqual(deriveWeatherToolArgs('上海今天天气怎么样'), {
+  location: '上海',
+  sections: ['overview'],
+  days: 4,
+  hours: 24
+});
+assert.deepStrictEqual(deriveWeatherToolArgs(weatherRoute.cleanText), {
+  location: '上海',
+  sections: ['overview'],
+  days: 4,
+  hours: 24
+});
+assert.deepStrictEqual(weatherRoute.meta.allowedTools, ['skill_weather']);
+assert.strictEqual(weatherRoute.intent.risk, 'low');
+assert.deepStrictEqual(weatherRoute.intent.toolNeed, ['web']);
+assert.strictEqual(weatherRoute.facets.domain, 'weather');
+assert.strictEqual(weatherRoute.facets.sourceScope, 'live');
+assert.strictEqual(weatherRoute.facets.freshness, 'latest');
 assert.notDeepStrictEqual(weatherRoute.meta.allowedTools, ['skill_weather_cloud']);
 
-for (const toolName of ['skill_earthquake_latest', 'skill_weather_cloud']) {
+const hourlyRoute = detect('上海未来12小时逐小时天气');
+assert.deepStrictEqual(hourlyRoute.meta.allowedTools, ['skill_weather']);
+assert.deepStrictEqual(deriveWeatherToolArgs(hourlyRoute.cleanText), {
+  location: '上海',
+  sections: ['hourly'],
+  days: 4,
+  hours: 12
+});
+assert.deepStrictEqual(deriveWeatherToolArgs('上海未来两小时降雨'), {
+  location: '上海',
+  sections: ['minutely'],
+  days: 4,
+  hours: 24
+});
+assert.deepStrictEqual(deriveWeatherToolArgs('北京空气质量'), {
+  location: '北京',
+  sections: ['air'],
+  days: 4,
+  hours: 24
+});
+assert.deepStrictEqual(deriveWeatherToolArgs('广州天气预警'), {
+  location: '广州',
+  sections: ['warning'],
+  days: 4,
+  hours: 24
+});
+assert.deepStrictEqual(deriveWeatherToolArgs('伦敦天气'), {
+  location: '伦敦',
+  sections: ['overview'],
+  days: 4,
+  hours: 24
+});
+assert.deepStrictEqual(deriveWeatherToolArgs('上海天气和空气质量'), {
+  location: '上海',
+  sections: ['overview', 'air'],
+  days: 4,
+  hours: 24
+});
+assert.deepStrictEqual(detect('最新卫星云图').meta.allowedTools, ['skill_weather_cloud']);
+
+for (const toolName of ['skill_earthquake_latest', 'skill_weather', 'skill_weather_cloud']) {
   assert.ok(TOOL_SCHEMAS.some((schema) => schema?.function?.name === toolName));
   assert.strictEqual(typeof TOOL_EXECUTORS[toolName], 'function');
   assert.ok(COMPANION_TOOL_PRESET.includes(toolName));
 }
 assert.ok(COMPANION_SAFE_READ_TOOLS.includes('skill_earthquake_latest'));
+assert.ok(COMPANION_SAFE_READ_TOOLS.includes('skill_weather'));
 assert.ok(!COMPANION_SAFE_READ_TOOLS.includes('skill_weather_cloud'));
 assert.ok(GLOBAL_TOOL_NAME_SET.has('skill_earthquake_latest'));
+assert.ok(GLOBAL_TOOL_NAME_SET.has('skill_weather'));
 assert.ok(!GLOBAL_TOOL_NAME_SET.has('skill_weather_cloud'));
 
 assert.deepStrictEqual(getPolicy('skill_weather_cloud'), {
@@ -102,6 +163,15 @@ assert.deepStrictEqual(getPolicy('skill_weather_cloud'), {
 });
 assert.strictEqual(getPolicy('skill_earthquake_latest').effect, 'none');
 assert.strictEqual(getPolicy('skill_earthquake_latest').capability, 'network');
+assert.strictEqual(getPolicy('skill_weather').risk, 'low');
+assert.strictEqual(getPolicy('skill_weather').effect, 'none');
+assert.strictEqual(getPolicy('skill_weather').capability, 'network');
+assert.deepStrictEqual(enforceToolPolicy('skill_weather', {}), {
+  location: '',
+  sections: ['overview'],
+  days: 4,
+  hours: 24
+});
 assert.deepStrictEqual(enforceToolPolicy('skill_earthquake_latest', {}), {
   scope: 'global',
   time_window: 'day',
