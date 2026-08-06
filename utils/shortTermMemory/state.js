@@ -390,10 +390,11 @@ function resolveShortTermSessionKey(userId, routeMeta = {}) {
 
   const platform = String(meta.platform || 'qq').trim().toLowerCase() || 'qq';
   const conversationKey = String(meta.conversationKey || meta.conversation_key || '').trim();
+  const chatType = String(meta.chatType || meta.chat_type || '').trim().toLowerCase() === 'private'
+    ? 'private'
+    : 'group';
+  if (platform === 'weixin' && chatType === 'private') return `direct:${uid}`;
   if (platform !== 'qq' && conversationKey) {
-    const chatType = String(meta.chatType || meta.chat_type || '').trim().toLowerCase() === 'private'
-      ? 'private'
-      : 'group';
     return `${platform}-${chatType}:${conversationKey}:user:${uid}`;
   }
 

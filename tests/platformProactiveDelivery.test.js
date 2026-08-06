@@ -114,6 +114,7 @@ module.exports = (async () => {
       DISCORD_BOT_TOKEN: 'test-token',
       DISCORD_REGISTER_COMMANDS: false,
       TG_ENABLE: false,
+      WEIXIN_ENABLED: false
     }, { qqActionClient, discordClient, discordModule: {} });
     await runtime.start(async () => {});
     const discordIdentity = runtime.identityStore.resolveIdentity('discord', 'discord-user');

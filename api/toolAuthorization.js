@@ -15,8 +15,10 @@ const {
 const {
   createToolAuthorizationStore,
   hashValue,
-  normalizeActor
+  normalizeActor,
+  normalizeOriginRoute
 } = require('../utils/toolAuthorizationStore');
+const { getDeliveryContext, runWithDeliveryContext } = require('../src/platforms/deliveryContext');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -31,6 +33,7 @@ function buildRequestKey(input = {}) {
     invocationKey: normalizeText(input.invocationKey),
     toolName: normalizeText(input.toolName),
     actor: normalizeActor(input.actor),
+    approvalActor: normalizeActor(input.approvalActor || input.actor),
     argsHash: hashValue(normalizeObject(input.rawArgs, {}))
   })).digest('hex');
 }
@@ -50,13 +53,18 @@ function buildAuditEvent(ticket = {}, decision = '', reason = '') {
 }
 
 function publicAuthorization(ticket = {}) {
+  let originRoute = null;
+  try {
+    originRoute = normalizeOriginRoute(ticket.originRoute);
+  } catch (_) {}
   return {
     ticketId: normalizeText(ticket.id),
     status: normalizeText(ticket.status),
     toolName: normalizeText(ticket.toolName),
     confirmation: normalizeText(ticket.confirmation || ticket.policy?.confirmation),
     expiresAt: Number(ticket.expiresAt || 0),
-    argsHash: normalizeText(ticket.argsHash)
+    argsHash: normalizeText(ticket.argsHash),
+    ...(originRoute ? { originRoute } : {})
   };
 }
 
@@ -114,12 +122,38 @@ function createToolAuthorizationService(options = {}) {
   async function executeAuthorizedToolCall(input = {}) {
     const toolName = normalizeText(input.toolName);
     const actor = normalizeActor(input.actor);
+    const approvalActor = normalizeActor(input.approvalActor || (
+      actor.platform === 'weixin'
+        ? { platform: 'qq', userId: actor.userId, chatType: 'private' }
+        : actor
+    ));
     const policy = normalizeObject(input.policy, {});
     const rawArgs = normalizeObject(input.rawArgs, {});
     const normalizedArgs = normalizeObject(input.normalizedArgs, rawArgs);
     const toolContext = normalizeObject(input.toolContext, {});
     const executor = input.executor;
     if (!toolName || typeof executor !== 'function') return denied('executor_unavailable');
+
+    let originRoute = null;
+    try {
+      originRoute = normalizeOriginRoute(input.originRoute);
+    } catch (_) {
+      return denied('invalid_origin_route');
+    }
+    if (originRoute && originRoute.platform !== actor.platform) return denied('invalid_origin_route');
+    if (originRoute?.platform === 'weixin') {
+      const deliveryContext = getDeliveryContext();
+      let currentTarget = null;
+      try {
+        currentTarget = normalizeOriginRoute(deliveryContext?.target);
+      } catch (_) {}
+      if (
+        currentTarget?.key !== originRoute.key
+        || normalizeText(deliveryContext?.personId) !== actor.userId
+      ) {
+        return denied('invalid_origin_route');
+      }
+    }
 
     const confirmation = normalizeText(policy.confirmation);
     if (confirmation === 'none') {
@@ -132,16 +166,22 @@ function createToolAuthorizationService(options = {}) {
     if (!normalizeText(input.invocationKey)) return denied('missing_invocation_key');
     if (!actor.userId || !['private', 'group'].includes(actor.chatType)) return denied('invalid_actor');
     if (actor.chatType === 'group' && !actor.groupId) return denied('invalid_actor');
+    if (!approvalActor.userId || !['private', 'group'].includes(approvalActor.chatType)) {
+      return denied('invalid_approval_actor');
+    }
+    if (approvalActor.chatType === 'group' && !approvalActor.groupId) return denied('invalid_approval_actor');
     if (confirmation === 'admin_explicit' && !isAdminUser(actor.userId)) {
       return denied('admin_required');
     }
 
     const created = store.createPending({
-      requestKey: buildRequestKey({ ...input, toolName, actor, rawArgs }),
+      requestKey: buildRequestKey({ ...input, toolName, actor, approvalActor, rawArgs }),
       toolName,
       rawArgs,
       toolContext,
       actor,
+      approvalActor,
+      originRoute,
       policy
     });
     const ticket = created.ticket;
@@ -178,6 +218,12 @@ function createToolAuthorizationService(options = {}) {
       return result;
     }
     const ticket = inspected.ticket;
+    let originRoute = null;
+    try {
+      originRoute = normalizeOriginRoute(ticket.originRoute);
+    } catch (_) {
+      return reject(ticket, 'invalid_origin_route');
+    }
     if (ticket.confirmation === 'admin_explicit' && !isAdminUser(actor.userId)) {
       return reject(ticket, 'admin_required');
     }
@@ -231,10 +277,16 @@ function createToolAuthorizationService(options = {}) {
 
     let executorCompleted = false;
     try {
-      const result = await executor({
+      const execute = () => executor({
         ...normalizeObject(normalizedArgs, {}),
         __context: normalizeObject(claimed.ticket.toolContext, {})
       });
+      const result = originRoute
+        ? await runWithDeliveryContext({
+          target: originRoute,
+          personId: claimed.ticket.actor.userId
+        }, execute)
+        : await execute();
       executorCompleted = true;
       const completed = store.complete(ticket.id, { resultHash: hashValue(result) });
       if (!completed.ok) throw new Error(`authorization completion failed: ${completed.reason}`);

@@ -31,6 +31,12 @@ function defaultPrincipalId(platform, externalUserId) {
   return platform === 'qq' ? normalizeText(externalUserId) : createExternalIdentityKey(platform, externalUserId);
 }
 
+function createIdentityError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 function createPlatformIdentityStore(options = {}) {
   const databaseFile = normalizeText(options.databaseFile || ':memory:') || ':memory:';
   const now = typeof options.now === 'function' ? options.now : Date.now;
@@ -191,6 +197,24 @@ function createPlatformIdentityStore(options = {}) {
     };
   }
 
+  function resolveBoundQqPrincipal(platformValue, externalUserIdValue) {
+    const platform = normalizePlatform(platformValue);
+    const externalUserId = normalizeText(externalUserIdValue);
+    if (!externalUserId) throw new Error('externalUserId is required');
+    const identity = statements.getIdentity.get(platform, externalUserId);
+    if (!identity) return null;
+    const principalId = canonicalPrincipalId(identity.principal_id);
+    const qqIdentity = statements.findQqIdentity.get(principalId);
+    if (!qqIdentity) return null;
+    return {
+      principalId,
+      qqUserId: normalizeText(qqIdentity.external_user_id),
+      platform,
+      externalUserId,
+      aliases: getAliases(principalId)
+    };
+  }
+
   function getAliases(principalIdValue) {
     const principalId = canonicalPrincipalId(principalIdValue);
     if (!principalId) return [];
@@ -227,6 +251,52 @@ function createPlatformIdentityStore(options = {}) {
     const secondCreatedAt = Number(statements.getPrincipal.get(second)?.created_at || 0);
     if (firstCreatedAt !== secondCreatedAt) return firstCreatedAt <= secondCreatedAt ? first : second;
     return first.localeCompare(second) <= 0 ? first : second;
+  }
+
+  function bindExternalIdentityToQqCore(platform, externalUserId, qqUserId, timestamp) {
+    const qqPrincipalId = resolveIdentityTransaction('qq', qqUserId, timestamp);
+    const existing = statements.getIdentity.get(platform, externalUserId);
+    if (existing) {
+      const existingPrincipalId = canonicalPrincipalId(existing.principal_id);
+      const existingQq = statements.findQqIdentity.get(existingPrincipalId);
+      if (existingQq && normalizeText(existingQq.external_user_id) !== qqUserId) {
+        throw createIdentityError(
+          'PLATFORM_IDENTITY_ALREADY_BOUND',
+          `${platform} identity is already bound to another QQ principal`
+        );
+      }
+      if (existingPrincipalId !== qqPrincipalId) {
+        statements.moveIdentities.run(qqPrincipalId, existingPrincipalId);
+        statements.copyAliases.run(qqPrincipalId, existingPrincipalId);
+        statements.insertAlias.run(qqPrincipalId, existingPrincipalId, timestamp);
+        statements.markMerged.run(qqPrincipalId, existingPrincipalId);
+      }
+      statements.touchIdentity.run(timestamp, platform, externalUserId);
+    } else {
+      statements.insertIdentity.run(platform, externalUserId, qqPrincipalId, timestamp, timestamp);
+    }
+    statements.insertAlias.run(qqPrincipalId, defaultPrincipalId(platform, externalUserId), timestamp);
+    statements.audit.run(
+      'identity_bound_to_qq',
+      qqPrincipalId,
+      platform,
+      externalUserId,
+      JSON.stringify({ qqUserId }),
+      timestamp
+    );
+    return resolveBoundQqPrincipal(platform, externalUserId);
+  }
+
+  const bindExternalIdentityToQqTransaction = db.transaction(bindExternalIdentityToQqCore);
+
+  function bindExternalIdentityToQq(input = {}) {
+    const platform = normalizePlatform(input.platform);
+    const externalUserId = normalizeText(input.externalUserId);
+    const qqUserId = normalizeText(input.qqUserId);
+    if (platform === 'qq') throw new Error('external platform must not be qq');
+    if (!externalUserId) throw new Error('externalUserId is required');
+    if (!qqUserId) throw new Error('qqUserId is required');
+    return bindExternalIdentityToQqTransaction(platform, externalUserId, qqUserId, now());
   }
 
   const consumeLinkTransaction = db.transaction((platform, externalUserId, normalizedCode, timestamp) => {
@@ -301,7 +371,7 @@ function createPlatformIdentityStore(options = {}) {
     }
   }
 
-  const unlinkTransaction = db.transaction((platform, externalUserId, timestamp) => {
+  function unlinkCore(platform, externalUserId, timestamp) {
     const identity = statements.getIdentity.get(platform, externalUserId);
     if (!identity) return { ok: false, reason: 'identity_not_found' };
     const principalId = canonicalPrincipalId(identity.principal_id);
@@ -317,7 +387,42 @@ function createPlatformIdentityStore(options = {}) {
     statements.insertAlias.run(detachedPrincipalId, detachedPrincipalId, timestamp);
     statements.audit.run('identity_unlinked', principalId, platform, externalUserId, JSON.stringify({ detachedPrincipalId }), timestamp);
     return { ok: true, principalId, detachedPrincipalId };
+  }
+
+  const unlinkTransaction = db.transaction(unlinkCore);
+
+  const replaceExternalIdentityForQqTransaction = db.transaction((
+    platform,
+    externalUserId,
+    previousExternalUserId,
+    qqUserId,
+    timestamp
+  ) => {
+    if (previousExternalUserId && previousExternalUserId !== externalUserId) {
+      const unlinked = unlinkCore(platform, previousExternalUserId, timestamp);
+      if (!unlinked.ok && unlinked.reason !== 'identity_not_found') {
+        throw createIdentityError('PLATFORM_IDENTITY_REPLACE_FAILED', unlinked.reason);
+      }
+    }
+    return bindExternalIdentityToQqCore(platform, externalUserId, qqUserId, timestamp);
   });
+
+  function replaceExternalIdentityForQq(input = {}) {
+    const platform = normalizePlatform(input.platform);
+    const externalUserId = normalizeText(input.externalUserId);
+    const previousExternalUserId = normalizeText(input.previousExternalUserId);
+    const qqUserId = normalizeText(input.qqUserId);
+    if (platform === 'qq') throw new Error('external platform must not be qq');
+    if (!externalUserId) throw new Error('externalUserId is required');
+    if (!qqUserId) throw new Error('qqUserId is required');
+    return replaceExternalIdentityForQqTransaction(
+      platform,
+      externalUserId,
+      previousExternalUserId,
+      qqUserId,
+      now()
+    );
+  }
 
   function unlink(input = {}) {
     const platform = normalizePlatform(input.platform);
@@ -332,6 +437,7 @@ function createPlatformIdentityStore(options = {}) {
 
   return {
     beginLink,
+    bindExternalIdentityToQq,
     canonicalPrincipalId,
     close,
     consumeLink,
@@ -340,6 +446,8 @@ function createPlatformIdentityStore(options = {}) {
     isAdminPrincipal,
     listBindings,
     recordPrivateActivity,
+    replaceExternalIdentityForQq,
+    resolveBoundQqPrincipal,
     resolveIdentity,
     unlink
   };

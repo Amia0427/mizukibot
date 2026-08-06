@@ -52,7 +52,33 @@ module.exports = (async () => {
     TG_ENABLE: false
   }, { qqActionClient });
   assert.strictEqual(healthRuntime.getReadinessSnapshot().messageIngressReady, false);
+  assert.strictEqual(healthRuntime.registry.get('weixin').enabled, false);
   await healthRuntime.close();
+
+  const masterKey = Buffer.alloc(32, 4).toString('base64');
+  const weixinRuntime = require('../src/platforms/runtime').createPlatformRuntime({
+    PLATFORM_IDENTITY_DB_FILE: ':memory:',
+    PLATFORM_GROUP_CONTEXT_DB_FILE: ':memory:',
+    PLATFORM_BIND_TTL_MS: 600000,
+    PLATFORM_GROUP_CONTEXT_RETENTION_MS: 86400000,
+    PLATFORM_GROUP_CONTEXT_MAX_MESSAGES: 500,
+    ADMIN_USER_IDS: [],
+    DISCORD_ENABLE: false,
+    TG_ENABLE: false,
+    WEIXIN_ENABLED: true,
+    WEIXIN_CREDENTIAL_MASTER_KEY: masterKey,
+    WEIXIN_DB_FILE: ':memory:'
+  }, { qqActionClient });
+  const previousBinding = { qqUserId: '12345', ilinkUserId: 'wx-old' };
+  const currentBinding = { qqUserId: '12345', ilinkUserId: 'wx-current' };
+  weixinRuntime.bindWeixinIdentity(previousBinding);
+  weixinRuntime.bindWeixinIdentity(currentBinding, previousBinding);
+  assert.strictEqual(weixinRuntime.identityStore.resolveBoundQqPrincipal('weixin', 'wx-old'), null);
+  assert.strictEqual(
+    weixinRuntime.identityStore.resolveBoundQqPrincipal('weixin', 'wx-current').principalId,
+    '12345'
+  );
+  await weixinRuntime.close();
 
   console.log('platformRuntime.test.js passed');
 })().catch((error) => {

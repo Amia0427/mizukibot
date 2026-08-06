@@ -42,7 +42,7 @@ function collectChildOutput(child) {
     let output = '';
     child.stdout.on('data', (chunk) => { output += String(chunk); });
     child.stderr.on('data', (chunk) => { output += String(chunk); });
-    child.on('exit', (code, signal) => resolve({ code, signal, output }));
+    child.on('close', (code, signal) => resolve({ code, signal, output }));
   });
 }
 
@@ -61,6 +61,7 @@ module.exports = (async () => {
   const exitListenersBeforeRequire = new Set(process.listeners('exit'));
   const originalConsoleError = console.error;
   let fakeMainBot = null;
+  let platformRuntime = null;
 
   try {
     process.env.MIZUKIBOT_INDEX_TEST_MODE = '1';
@@ -69,6 +70,7 @@ module.exports = (async () => {
     process.env.API_KEY = process.env.API_KEY || 'test-api-key';
 
     const { __test } = require('../index');
+    platformRuntime = __test.platformRuntime;
 
     assert.strictEqual(fs.existsSync(path.dirname(lockFile)), false);
     const cleanupSelfOwned = await __test.acquireSingleInstanceLock();
@@ -126,6 +128,8 @@ module.exports = (async () => {
       MIZUKIBOT_MAIN_LOCK_FILE: raceLockFile,
       RACE_GATE_FILE: raceGateFile,
       DATA_DIR: path.join(tempRoot, 'race-data'),
+      PLATFORM_IDENTITY_DB_FILE: ':memory:',
+      PLATFORM_GROUP_CONTEXT_DB_FILE: ':memory:',
       API_KEY: process.env.API_KEY || 'test-api-key'
     };
     const racers = [0, 1].map(() => spawn(process.execPath, [raceScript], {
@@ -147,6 +151,7 @@ module.exports = (async () => {
     if (typeof originalConsoleError === 'function') {
       console.error = originalConsoleError;
     }
+    platformRuntime?.closeStores();
     require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     if (fakeMainBot && !fakeMainBot.killed) {
       fakeMainBot.kill();

@@ -1,6 +1,8 @@
 const assert = require('assert');
 
 const { createToolAuthorizationService } = require('../api/toolAuthorization');
+const { createDeliveryTarget } = require('../src/platforms/contracts');
+const { getDeliveryContext, runWithDeliveryContext } = require('../src/platforms/deliveryContext');
 const { createToolAuthorizationStore } = require('../utils/toolAuthorizationStore');
 const { validateToolCallArgs } = require('../api/runtimeV2/runtime/toolExecutionPrimitives');
 
@@ -35,8 +37,8 @@ function policy(confirmation, overrides = {}) {
   };
 }
 
-function actor(userId = 'user-1', chatType = 'group', groupId = 'group-1') {
-  return { userId, chatType, groupId };
+function actor(userId = 'user-1', chatType = 'group', groupId = 'group-1', platform = 'qq') {
+  return { userId, chatType, groupId, platform };
 }
 
 function createFixture() {
@@ -153,6 +155,100 @@ module.exports = (async () => {
   assert.strictEqual(confirmed.executed, true);
   assert.strictEqual(confirmed.result, 'write_tool:b');
   assert.strictEqual(fixture.calls.get('write_tool'), 1);
+
+  const weixinFixture = createFixture();
+  let executionDeliveryContext = null;
+  weixinFixture.executors.set('write_tool', async (args) => {
+    executionDeliveryContext = getDeliveryContext();
+    return `write_tool:${args.value}`;
+  });
+  const weixinOriginRoute = createDeliveryTarget({
+    platform: 'weixin',
+    containerId: 'bot-1',
+    conversationId: 'wx-user-1',
+    externalUserId: 'wx-user-1',
+    chatType: 'private'
+  });
+  const weixinInput = {
+    toolName: 'write_tool',
+    rawArgs: { value: 'from-weixin' },
+    normalizedArgs: { value: 'from-weixin' },
+    policy: weixinFixture.policies.get('write_tool'),
+    actor: actor('user-1', 'private', '', 'weixin'),
+    invocationKey: 'write-weixin',
+    originRoute: weixinOriginRoute,
+    toolContext: {},
+    executor: weixinFixture.executors.get('write_tool')
+  };
+  const weixinPending = await runWithDeliveryContext({
+    target: weixinOriginRoute,
+    personId: 'user-1'
+  }, () => weixinFixture.service.executeAuthorizedToolCall(weixinInput));
+  assert.deepStrictEqual(weixinPending.authorization.originRoute, weixinOriginRoute);
+
+  const forgedGroupRoute = createDeliveryTarget({
+    platform: 'weixin',
+    chatType: 'group',
+    containerId: 'bot-1',
+    conversationId: 'wx-group-1'
+  });
+  const forgedGroup = await runWithDeliveryContext({
+    target: forgedGroupRoute,
+    personId: 'user-1'
+  }, () => weixinFixture.service.executeAuthorizedToolCall({
+    ...weixinInput,
+    invocationKey: 'write-weixin-group',
+    originRoute: forgedGroupRoute
+  }));
+  assert.strictEqual(forgedGroup.status, 'denied');
+  assert.strictEqual(forgedGroup.reason, 'invalid_origin_route');
+
+  const otherWeixinRoute = createDeliveryTarget({
+    platform: 'weixin',
+    chatType: 'private',
+    containerId: 'bot-2',
+    conversationId: 'wx-user-2',
+    externalUserId: 'wx-user-2'
+  });
+  const crossAccount = await runWithDeliveryContext({
+    target: weixinOriginRoute,
+    personId: 'user-1'
+  }, () => weixinFixture.service.executeAuthorizedToolCall({
+    ...weixinInput,
+    invocationKey: 'write-weixin-cross-account',
+    originRoute: otherWeixinRoute
+  }));
+  assert.strictEqual(crossAccount.status, 'denied');
+  assert.strictEqual(crossAccount.reason, 'invalid_origin_route');
+
+  const malformedRoute = await runWithDeliveryContext({
+    target: weixinOriginRoute,
+    personId: 'user-1'
+  }, () => weixinFixture.service.executeAuthorizedToolCall({
+    ...weixinInput,
+    invocationKey: 'write-weixin-malformed',
+    originRoute: { platform: 'weixin', chatType: 'private', accountId: 'bot-1' }
+  }));
+  assert.strictEqual(malformedRoute.status, 'denied');
+  assert.strictEqual(malformedRoute.reason, 'invalid_origin_route');
+  const weixinConfirmation = await weixinFixture.service.confirm(
+    weixinPending.authorization.ticketId,
+    actor('user-1', 'private', '', 'weixin')
+  );
+  assert.strictEqual(weixinConfirmation.status, 'denied');
+  assert.strictEqual(weixinConfirmation.reason, 'platform_mismatch');
+  const qqConfirmation = await weixinFixture.service.confirm(
+    weixinPending.authorization.ticketId,
+    actor('user-1', 'private', '', 'qq')
+  );
+  assert.strictEqual(qqConfirmation.status, 'completed');
+  assert.strictEqual(qqConfirmation.result, 'write_tool:from-weixin');
+  assert.deepStrictEqual(executionDeliveryContext, {
+    target: weixinOriginRoute,
+    personId: 'user-1'
+  });
+  assert.deepStrictEqual(qqConfirmation.authorization.originRoute, weixinOriginRoute);
+  weixinFixture.store.close();
 
   const confirmedAgain = await fixture.service.confirm(pending.authorization.ticketId, actor());
   assert.strictEqual(confirmedAgain.status, 'denied');

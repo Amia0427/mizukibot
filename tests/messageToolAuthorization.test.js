@@ -37,7 +37,7 @@ module.exports = (async () => {
       return { status: 'cancelled' };
     }
   };
-  const context = { userId: 'user-1', chatType: 'group', groupId: 'group-1' };
+  const context = { platform: 'qq', userId: 'user-1', chatType: 'group', groupId: 'group-1' };
 
   const confirmed = await handleToolAuthorizationCommand('/tool-confirm TA-ABC-123', context, deps);
   assert.deepStrictEqual(confirmed, {
@@ -55,9 +55,32 @@ module.exports = (async () => {
 
   const objectResult = await handleToolAuthorizationCommand('/tool-confirm TA-OBJECT', context, {
     ...deps,
-    confirm: async () => ({ status: 'completed', result: { ok: true, id: 'job-1' } })
+    confirm: async () => ({
+      status: 'completed',
+      result: { ok: true, id: 'job-1' },
+      authorization: {
+        originRoute: {
+          platform: 'weixin',
+          containerId: 'bot-1',
+          conversationId: 'wx-user-1',
+          externalUserId: 'wx-user-1',
+          chatType: 'private',
+          threadId: '',
+          key: 'weixin:private:bot-1:wx-user-1:'
+        }
+      }
+    })
   });
   assert.strictEqual(objectResult.replyText, '工具已执行：{"ok":true,"id":"job-1"}');
+  assert.deepStrictEqual(objectResult.deliveryTarget, {
+    platform: 'weixin',
+    containerId: 'bot-1',
+    conversationId: 'wx-user-1',
+    externalUserId: 'wx-user-1',
+    chatType: 'private',
+    threadId: '',
+    key: 'weixin:private:bot-1:wx-user-1:'
+  });
 
   const cancelled = await handleToolAuthorizationCommand('/tool-cancel TA-ABC-123', context, deps);
   assert.strictEqual(cancelled.handled, true);

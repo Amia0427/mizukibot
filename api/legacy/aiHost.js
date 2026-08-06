@@ -895,6 +895,7 @@ function buildLegacyAuthorizationActor(context = {}) {
     routeMeta.chatType || routeMeta.chat_type || context.chatType || (groupId ? 'group' : 'private')
   ).trim().toLowerCase();
   return {
+    platform: String(routeMeta.platform || context.platform || 'qq').trim().toLowerCase() || 'qq',
     userId: String(context.userId || '').trim(),
     chatType,
     groupId: chatType === 'group' ? groupId : ''
@@ -949,12 +950,20 @@ async function runLegacyAuthorizedTool({
   const authorize = typeof context.executeAuthorizedToolCall === 'function'
     ? context.executeAuthorizedToolCall
     : executeAuthorizedToolCallDefault;
+  const actor = buildLegacyAuthorizationActor(context);
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object'
+    ? context.routeMeta
+    : {};
   return authorize({
     toolName,
     rawArgs,
     normalizedArgs,
     policy,
-    actor: buildLegacyAuthorizationActor(context),
+    actor,
+    approvalActor: actor.platform === 'weixin'
+      ? { platform: 'qq', userId: actor.userId, chatType: 'private', groupId: '' }
+      : actor,
+    originRoute: routeMeta.deliveryTarget || routeMeta.delivery_target || context.deliveryTarget || null,
     invocationKey: buildLegacyAuthorizationInvocationKey(toolName, context),
     toolContext: buildLegacyToolContext(context),
     executor

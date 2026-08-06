@@ -27,6 +27,7 @@ const {
 const { isAtBot, detectIntentHybrid } = require('./router');
 const { applyDeterministicToolRouting } = require('./router/toolRouting');
 const { shouldRunPassiveAwareness } = require('../src/platforms/accessPolicy');
+const { runWithDeliveryContext } = require('../src/platforms/deliveryContext');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
@@ -35,6 +36,7 @@ const { createForegroundConcurrencyController } = require('./foregroundConcurren
 const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
 const {
+  buildUntrustedAttachmentInput,
   createContinuousMessagePreprocessor,
   cheapParseMessageEntry,
   resolveContinuousEntryDetails
@@ -1523,13 +1525,13 @@ function createMessageHandler({
     }
     recordPrivateProactiveActivity(senderId, chatType);
 
-    const rawInboundFreshnessSessionKey = resolveShortTermSessionKey(
-      senderId,
-      shortTermRouteMeta
-    );
+    const rawInboundFreshnessSessionKey = platform !== 'qq' && conversationKey
+      ? `${platform}-${chatType}:${conversationKey}:user:${String(senderId || '').trim()}`
+      : resolveShortTermSessionKey(senderId, shortTermRouteMeta);
     const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
     const toolAuthorizationCommand = await handleToolAuthorizationCommand(rawMessageText, {
+      platform: String(msg?.platform || 'qq').trim().toLowerCase() || 'qq',
       userId: senderId,
       chatType,
       groupId: String(groupId || '').trim()
@@ -1547,20 +1549,27 @@ function createMessageHandler({
         decision: String(decisionEvent.decision || toolAuthorizationCommand.result?.status || '').trim(),
         reason: String(decisionEvent.reason || toolAuthorizationCommand.result?.reason || '').trim()
       });
-      const sent = await sendGroupReply({
-        chatType,
-        groupId,
-        userId: senderId,
-        senderId,
-        replyText: toolAuthorizationCommand.replyText,
-        atSender: false,
-        retries: 1,
-        waitMs: 300,
-        source: 'message_handler',
-        routePolicyKey: 'tool/authorization',
-        triggerReason: 'tool_authorization_command',
-        topRouteType: 'admin'
-      });
+      const authorizationOriginRoute = toolAuthorizationCommand.deliveryTarget;
+      const sendAuthorizationReply = () => sendGroupReply({
+          chatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: toolAuthorizationCommand.replyText,
+          atSender: false,
+          retries: 1,
+          waitMs: 300,
+          source: 'message_handler',
+          routePolicyKey: 'tool/authorization',
+          triggerReason: 'tool_authorization_command',
+          topRouteType: 'admin'
+        });
+      const sent = authorizationOriginRoute
+        ? await runWithDeliveryContext({
+          target: authorizationOriginRoute,
+          personId: senderId
+        }, sendAuthorizationReply)
+        : await sendAuthorizationReply();
       appendRequestCompleteTrace({
         routePolicyKey: 'tool/authorization',
         topRouteType: 'admin',
@@ -1904,8 +1913,10 @@ function createMessageHandler({
     const slashCommandTextForConcurrency = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
     const adminFastCommandForConcurrency = isAdminUser(senderId)
       && /^\s*\/check(?:\s|$)/i.test(String(slashCommandTextForConcurrency || '').trim());
-    const inboundSessionKey = rawInboundFreshnessSessionKey;
     const isPrivateInbound = isPrivateChatType(chatType);
+    const inboundSessionKey = isPrivateInbound
+      ? resolveShortTermSessionKey(senderId, shortTermRouteMeta)
+      : rawInboundFreshnessSessionKey;
     const concurrencyScope = isPrivateInbound ? 'private' : 'default';
     const concurrencyLane = isAdminUser(senderId) ? 'admin' : 'general';
     const selectedInboundConcurrency = isPrivateInbound ? privateInboundConcurrency : inboundConcurrency;
@@ -2827,7 +2838,16 @@ function createMessageHandler({
       cardOnly: inboundContext.cardOnly
     };
     route = applyDeterministicToolRouting(route);
-    if (visualContext) {
+    const attachmentPrompt = String(continuousMeta?.attachmentPrompt || '').trim();
+    if (attachmentPrompt) {
+      runtimeQuestionText = buildUntrustedAttachmentInput(
+        runtimeQuestionText,
+        attachmentPrompt
+      ).modelText;
+      inboundContext.effectiveIntentText = runtimeQuestionText;
+      inboundContext.runtimeQuestionText = runtimeQuestionText;
+    }
+    if (visualContext || attachmentPrompt) {
       route.meta.visualContext = visualContext;
       route.meta.imageUrls = effectiveVisualInputUrls;
       route.meta.persistUserText = persistUserText;

@@ -56,6 +56,7 @@ async function handleToolAuthorizationCommand(text = '', context = {}, deps = {}
   const command = parseToolAuthorizationCommand(text);
   if (!command) return { handled: false };
   const actor = {
+    platform: normalizeText(context.platform).toLowerCase() || 'qq',
     userId: normalizeText(context.userId || context.user_id),
     chatType: normalizeText(context.chatType || context.chat_type).toLowerCase(),
     groupId: normalizeText(context.groupId || context.group_id)
@@ -73,7 +74,12 @@ async function handleToolAuthorizationCommand(text = '', context = {}, deps = {}
     action: command.action,
     ticketId: command.ticketId,
     replyText,
-    result
+    result,
+    ...(
+      result.status !== 'denied' && result.authorization?.originRoute
+        ? { deliveryTarget: result.authorization.originRoute }
+        : {}
+    )
   };
 }
 

@@ -9,9 +9,16 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function createRegistryError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 function collectLegacyMessageParts(message) {
   const textParts = [];
   const images = [];
+  const files = [];
   const segments = Array.isArray(message) ? message : null;
   if (segments) {
     for (const segment of segments) {
@@ -20,6 +27,10 @@ function collectLegacyMessageParts(message) {
       if (type === 'image') {
         const image = normalizeText(segment?.data?.file || segment?.data?.url);
         if (image) images.push(image);
+      }
+      if (type === 'file') {
+        const file = normalizeText(segment?.data?.file || segment?.data?.path);
+        if (file) files.push(file);
       }
     }
   } else {
@@ -32,13 +43,18 @@ function collectLegacyMessageParts(message) {
       const image = normalizeText(match[1]);
       if (image) images.push(image);
     }
+    for (const match of raw.matchAll(/\[CQ:file,[^\]]*?(?:file|path)=([^,\]]+)/gi)) {
+      const file = normalizeText(match[1]).replace(/&amp;/g, '&');
+      if (file) files.push(file);
+    }
     textParts.push(raw
-      .replace(/\[CQ:(?:at|reply|image),[^\]]*\]/gi, ' ')
+      .replace(/\[CQ:(?:at|reply|image|file),[^\]]*\]/gi, ' ')
       .replace(/\[\[qq_(?:face|image|record|video):[\s\S]*?\]\]/gi, ' '));
   }
   return {
     text: textParts.join('').replace(/\s+/g, ' ').trim(),
-    images: [...new Set(images)]
+    images: [...new Set(images)],
+    files: [...new Set(files)]
   };
 }
 
@@ -55,6 +71,9 @@ function flattenForwardMessages(messages = []) {
 function createPlatformRegistry(options = {}) {
   const identityStore = options.identityStore;
   const groupContextStore = options.groupContextStore || null;
+  const resolvePreferredPrivateTarget = typeof options.resolvePreferredPrivateTarget === 'function'
+    ? options.resolvePreferredPrivateTarget
+    : null;
   if (!identityStore) throw new Error('identityStore is required');
   const adapters = new Map();
 
@@ -72,7 +91,15 @@ function createPlatformRegistry(options = {}) {
 
   function prepareInbound(message) {
     if (!isInboundMessage(message)) throw new Error('InboundMessage is required');
-    const identity = identityStore.resolveIdentity(message.platform, message.actor.externalId);
+    if (message.platform === 'weixin' && message.conversation.chatType !== 'private') {
+      throw createRegistryError('WEIXIN_GROUP_CHAT_DISABLED', 'Weixin group chat is disabled');
+    }
+    const identity = message.platform === 'weixin'
+      ? identityStore.resolveBoundQqPrincipal(message.platform, message.actor.externalId)
+      : identityStore.resolveIdentity(message.platform, message.actor.externalId);
+    if (!identity) {
+      throw createRegistryError('WEIXIN_IDENTITY_NOT_BOUND', 'Weixin identity is not bound to a QQ principal');
+    }
     message.actor.personId = identity.principalId;
     if (message.conversation.chatType === 'private') {
       identityStore.recordPrivateActivity(identity.principalId, message.deliveryTarget);
@@ -91,12 +118,27 @@ function createPlatformRegistry(options = {}) {
   }
 
   function resolveActionTarget(payload = {}) {
-    const context = getDeliveryContext();
-    if (context?.target) return { ...context.target, context };
     const params = payload.params || {};
-    const groupTarget = parseConversationKey(params.group_id);
-    if (groupTarget) return { ...groupTarget, context: null };
+    const groupId = normalizeText(params.group_id);
+    const context = getDeliveryContext();
+    if (groupId) {
+      const groupTarget = parseConversationKey(groupId);
+      if (groupTarget) {
+        const matchingContext = context?.target?.key === groupTarget.key ? context : null;
+        return { ...groupTarget, context: matchingContext };
+      }
+      return {
+        platform: 'qq',
+        chatType: 'group',
+        conversationId: groupId,
+        context: null
+      };
+    }
+    if (context?.target) return { ...context.target, context };
     const principalId = normalizeText(params.user_id);
+    const preferredTarget = principalId ? resolvePreferredPrivateTarget?.(principalId) : null;
+    if (preferredTarget) return { ...preferredTarget, context: null };
+    if (principalId && resolvePreferredPrivateTarget) return null;
     const privateTarget = principalId ? identityStore.getLastPrivateTarget(principalId) : null;
     return privateTarget ? { ...privateTarget, context: null } : null;
   }
@@ -115,6 +157,12 @@ function createPlatformRegistry(options = {}) {
         replyToMessageId: context?.messageId || ''
       }) !== false || sent;
     }
+    for (const file of parts.files) {
+      if (typeof adapter.sendFile !== 'function') continue;
+      sent = await adapter.sendFile(target, file, {
+        replyToMessageId: context?.messageId || ''
+      }) !== false || sent;
+    }
     return sent;
   }
 
@@ -122,8 +170,16 @@ function createPlatformRegistry(options = {}) {
     const action = normalizeText(payload.action);
     const target = resolveActionTarget(payload);
     if (!target || target.platform === 'qq') return { handled: false, result: false };
+    if (target.platform === 'weixin' && target.chatType !== 'private') {
+      return { handled: true, result: false };
+    }
     const adapter = get(target.platform);
     if (!adapter) return { handled: true, result: false };
+    if (target.platform === 'weixin') {
+      if (typeof adapter.validateTarget !== 'function' || !await adapter.validateTarget(target)) {
+        return { handled: true, result: false };
+      }
+    }
 
     if (action === 'send_group_msg' || action === 'send_private_msg') {
       return {

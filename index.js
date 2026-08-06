@@ -49,6 +49,8 @@ const { setPlatformIdentityAliasResolver } = require('./utils/platformIdentityAl
 const { createPlatformMessageProcessor } = require('./src/platforms/messageProcessor');
 const { mergeQqLegacyMessage } = require('./src/platforms/qqAdapter');
 const { createPlatformRuntime } = require('./src/platforms/runtime');
+const { createWeixinMainRuntime } = require('./src/platforms/weixin/main-runtime');
+const { ensureWeixinWorkerRunning } = require('./utils/weixinWorkerSupervisor');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -455,6 +457,14 @@ async function sendWithRetry(payload, retries = 1, waitMs = 500) {
   });
 }
 
+const weixinMainRuntime = createWeixinMainRuntime({
+  config,
+  store: platformRuntime.weixinStore,
+  sendWithRetry,
+  onBindingConfirmed: platformRuntime.bindWeixinIdentity,
+  onBindingRemoved: platformRuntime.unbindWeixinIdentity
+});
+
 const maimaiCommandHandler = createMaimaiCommandHandler({
   getRuntime: getMaimaiRuntime,
   isAdmin: (userId) => platformRuntime.identityStore.isAdminPrincipal(userId),
@@ -478,7 +488,7 @@ const { handleIncomingMessage } = createMessageHandler({
 });
 const platformMessageProcessor = createPlatformMessageProcessor({
   identityCommandHandler: createIdentityCommandHandler({ store: platformRuntime.identityStore }),
-  commandHandlers: [maimaiCommandHandler],
+  commandHandlers: [weixinMainRuntime?.commandHandler, maimaiCommandHandler].filter(Boolean),
   sendWithRetry
 });
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
@@ -499,6 +509,10 @@ async function acceptIncomingMessage(msg, source = '') {
 }
 
 async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = prepareNapCatEventPacket) {
+  if (maimaiCommandHandler.shouldHandle(msg?.raw_message)) {
+    await maimaiCommandHandler.handle(msg);
+    return false;
+  }
   if (preparePacket(msg)) return false;
   const qqAdapter = platformRuntime.registry.get('qq');
   const normalized = qqAdapter.normalize(msg);
@@ -756,6 +770,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
   },
   stopRuntimes: [
     { name: 'platform_adapters', run: () => platformRuntime.stop() },
+    { name: 'weixin_main_runtime', run: () => weixinMainRuntime?.close() },
     { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'pjsk_sync_scheduler', run: () => peekPjskRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'private_proactive', run: () => privateProactiveEngine.stop() },
@@ -870,6 +885,11 @@ async function startMainProcess() {
   scheduleMainProcessEmbeddingBackfill();
   startResourceSnapshots();
   startNapCatTransport();
+  ensureWeixinWorkerRunning({
+    enabled: config.WEIXIN_ENABLED,
+    supervisorEnabled: config.WEIXIN_WORKER_SUPERVISOR_ENABLED,
+    pidFile: config.WEIXIN_WORKER_PID_FILE
+  });
   await platformRuntime.start(acceptIncomingMessage);
   await Promise.all([
     waitForServerListening(webServer),

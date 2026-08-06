@@ -6,6 +6,9 @@ const { createPlatformIdentityStore } = require('./identityStore');
 const { createQqAdapter } = require('./qqAdapter');
 const { createPlatformRegistry } = require('./registry');
 const { createTelegramAdapter } = require('./telegramAdapter');
+const { createWeixinAdapter } = require('./weixin/adapter');
+const { createWeixinStore } = require('./weixin/store');
+const { getWeixinWorkerHealth } = require('../../utils/weixinWorkerSupervisor');
 
 function createPlatformActionClient(registry, qqActionClient) {
   if (!registry || !qqActionClient) throw new Error('platform registry and QQ action client are required');
@@ -53,18 +56,82 @@ function createPlatformRuntime(config, options = {}) {
     retentionMs: config.PLATFORM_GROUP_CONTEXT_RETENTION_MS,
     maxMessages: config.PLATFORM_GROUP_CONTEXT_MAX_MESSAGES
   });
+  const weixinStore = options.weixinStore || (config.WEIXIN_ENABLED === true
+    ? createWeixinStore({
+      databaseFile: config.WEIXIN_DB_FILE,
+      masterKey: config.WEIXIN_CREDENTIAL_MASTER_KEY
+    })
+    : null);
+
+  function bindWeixinIdentity(binding, previousBinding = null) {
+    if (!binding) return null;
+    if (
+      previousBinding
+      && previousBinding.ilinkUserId
+      && previousBinding.ilinkUserId !== binding.ilinkUserId
+    ) {
+      return identityStore.replaceExternalIdentityForQq({
+        platform: 'weixin',
+        externalUserId: binding.ilinkUserId,
+        previousExternalUserId: previousBinding.ilinkUserId,
+        qqUserId: binding.qqUserId
+      });
+    }
+    return identityStore.bindExternalIdentityToQq({
+      platform: 'weixin',
+      externalUserId: binding.ilinkUserId,
+      qqUserId: binding.qqUserId
+    });
+  }
+
+  function unbindWeixinIdentity(binding) {
+    if (!binding) return { ok: false, reason: 'identity_not_found' };
+    return identityStore.unlink({
+      platform: 'weixin',
+      externalUserId: binding.ilinkUserId,
+      confirm: true
+    });
+  }
+
+  for (const binding of weixinStore?.listActiveBindings() || []) bindWeixinIdentity(binding);
+
   let registry = null;
 
-  function resolvePrivateTarget(principalId) {
+  function isTargetOnline(target) {
+    if (!target || target.chatType !== 'private') return false;
+    const adapter = registry?.get(target.platform);
+    if (!adapter || adapter.enabled === false) return false;
+    return adapter.getHealth?.().status === 'online';
+  }
+
+  function resolvePreferredPrivateTarget(principalId) {
+    const qqIdentity = identityStore.listBindings(principalId)
+      .find((identity) => identity.platform === 'qq');
+    if (qqIdentity) {
+      const binding = weixinStore?.getBindingByQqUserId(qqIdentity.externalUserId);
+      const weixinTarget = binding?.status === 'active' && binding.notificationPlatform === 'weixin'
+        ? createDeliveryTarget({
+        platform: 'weixin',
+        chatType: 'private',
+        conversationId: binding.ilinkUserId,
+        containerId: binding.accountId,
+        externalUserId: binding.ilinkUserId
+        })
+        : null;
+      if (isTargetOnline(weixinTarget)) return weixinTarget;
+    }
+
     const recentTarget = identityStore.getLastPrivateTarget(principalId);
     if (!recentTarget) return null;
     const target = createDeliveryTarget(recentTarget);
-    const adapter = registry?.get(target.platform);
-    if (!adapter || adapter.enabled === false) return null;
-    return adapter.getHealth?.().status === 'online' ? target : null;
+    return isTargetOnline(target) ? target : null;
   }
 
-  registry = createPlatformRegistry({ identityStore, groupContextStore });
+  registry = createPlatformRegistry({
+    identityStore,
+    groupContextStore,
+    resolvePreferredPrivateTarget
+  });
   registry.register(createQqAdapter({
     getHealth() {
       const connection = qqActionClient.getConnectionState();
@@ -90,6 +157,15 @@ function createPlatformRuntime(config, options = {}) {
     bot: options.telegramBot,
     TelegramBot: options.TelegramBot
   }));
+  registry.register(createWeixinAdapter({
+    enabled: config.WEIXIN_ENABLED,
+    store: weixinStore,
+    pollIntervalMs: config.WEIXIN_INBOX_POLL_INTERVAL_MS,
+    getWorkerHealth: options.getWeixinWorkerHealth || (() => getWeixinWorkerHealth({
+      stateFile: config.WEIXIN_WORKER_STATE_FILE,
+      maxAgeMs: config.WEIXIN_WORKER_READINESS_MAX_AGE_MS
+    }))
+  }));
 
   const actionClient = createPlatformActionClient(registry, qqActionClient);
   let storesClosed = false;
@@ -99,6 +175,7 @@ function createPlatformRuntime(config, options = {}) {
     storesClosed = true;
     groupContextStore.close();
     identityStore.close();
+    weixinStore?.close();
   }
 
   async function close() {
@@ -117,13 +194,16 @@ function createPlatformRuntime(config, options = {}) {
 
   return {
     actionClient,
+    bindWeixinIdentity,
     close,
     closeStores,
     getReadinessSnapshot,
     groupContextStore,
     identityStore,
     registry,
-    resolvePrivateTarget,
+    resolvePrivateTarget: resolvePreferredPrivateTarget,
+    unbindWeixinIdentity,
+    weixinStore,
     start: (onMessage) => registry.startEnabled(onMessage),
     stop: () => registry.stopAll()
   };

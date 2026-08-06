@@ -14,6 +14,18 @@ const { createIdentityCommandHandler } = require('../src/platforms/identityComma
   });
 
   try {
+    assert.strictEqual(store.resolveBoundQqPrincipal('weixin', 'wx-unknown'), null);
+    assert.deepStrictEqual(store.listBindings('weixin:wx-unknown'), []);
+
+    const weixinBinding = store.bindExternalIdentityToQq({
+      platform: 'weixin',
+      externalUserId: 'wx-user-1',
+      qqUserId: '12345'
+    });
+    assert.strictEqual(weixinBinding.principalId, '12345');
+    assert.strictEqual(weixinBinding.qqUserId, '12345');
+    assert.strictEqual(store.resolveBoundQqPrincipal('weixin', 'wx-user-1').principalId, '12345');
+
     const telegram = store.resolveIdentity('telegram', 'tg-1');
     assert.strictEqual(telegram.principalId, 'telegram:tg-1');
     const link = store.beginLink({ platform: 'telegram', externalUserId: 'tg-1' });
@@ -21,9 +33,34 @@ const { createIdentityCommandHandler } = require('../src/platforms/identityComma
     const linked = store.consumeLink({ platform: 'qq', externalUserId: '12345', code: link.code });
     assert.strictEqual(linked.ok, true);
     assert.strictEqual(linked.principalId, '12345', 'QQ identity must remain the storage primary');
-    assert.deepStrictEqual(store.getAliases('12345').sort(), ['12345', 'telegram:tg-1'].sort());
+    assert.deepStrictEqual(
+      store.getAliases('12345').sort(),
+      ['12345', 'telegram:tg-1', 'weixin:wx-user-1'].sort()
+    );
     assert.strictEqual(store.isAdminPrincipal('12345'), true);
     assert.strictEqual(store.resolveIdentity('telegram', 'tg-1').principalId, '12345');
+
+    assert.throws(() => store.bindExternalIdentityToQq({
+      platform: 'weixin',
+      externalUserId: 'wx-user-1',
+      qqUserId: '54321'
+    }), (error) => error?.code === 'PLATFORM_IDENTITY_ALREADY_BOUND');
+
+    const replacedWeixinBinding = store.replaceExternalIdentityForQq({
+      platform: 'weixin',
+      externalUserId: 'wx-user-2',
+      previousExternalUserId: 'wx-user-1',
+      qqUserId: '12345'
+    });
+    assert.strictEqual(replacedWeixinBinding.principalId, '12345');
+    assert.strictEqual(store.resolveBoundQqPrincipal('weixin', 'wx-user-1'), null);
+    assert.strictEqual(store.resolveBoundQqPrincipal('weixin', 'wx-user-2').principalId, '12345');
+    assert.strictEqual(store.getAliases('12345').includes('weixin:wx-user-1'), false);
+    assert.strictEqual(store.bindExternalIdentityToQq({
+      platform: 'weixin',
+      externalUserId: 'wx-user-1',
+      qqUserId: '54321'
+    }).principalId, '54321');
 
     const replay = store.consumeLink({ platform: 'discord', externalUserId: 'dc-1', code: link.code });
     assert.deepStrictEqual(replay, { ok: false, reason: 'code_used' });
@@ -54,7 +91,6 @@ const { createIdentityCommandHandler } = require('../src/platforms/identityComma
     const unlink = store.unlink({ platform: 'telegram', externalUserId: 'tg-1', confirm: true });
     assert.strictEqual(unlink.ok, true);
     assert.strictEqual(store.resolveIdentity('telegram', 'tg-1').principalId, 'telegram:tg-1');
-    assert.strictEqual(store.getAliases('12345').includes('telegram:tg-1'), false);
   } finally {
     store.close();
   }

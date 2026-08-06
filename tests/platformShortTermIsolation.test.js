@@ -13,6 +13,14 @@ const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
     resolveShortTermSessionKey('10001', { platform: 'qq', chatType: 'private' }),
     'direct:10001'
   );
+  assert.strictEqual(
+    resolveShortTermSessionKey('10001', {
+      platform: 'weixin',
+      chatType: 'private',
+      conversationKey: 'weixin:private:bot-1:wx-user-1:'
+    }),
+    'direct:10001'
+  );
 
   const discordPrivate = resolveShortTermSessionKey('10001', {
     platform: 'discord',

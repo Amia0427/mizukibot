@@ -1,4 +1,4 @@
-const PLATFORM_NAMES = new Set(['qq', 'discord', 'telegram']);
+const PLATFORM_NAMES = new Set(['qq', 'discord', 'telegram', 'weixin']);
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -34,15 +34,15 @@ function createConversationKey(input = {}) {
 function createDeliveryTarget(input = {}) {
   const platform = normalizePlatform(input.platform);
   const chatType = normalizeText(input.chatType).toLowerCase() === 'private' ? 'private' : 'group';
-  const conversationId = normalizeText(input.conversationId);
+  const conversationId = normalizeText(input.conversationId || input.peerId);
   if (!conversationId) throw new Error('conversationId is required');
   const target = {
     platform,
     chatType,
     conversationId,
-    containerId: normalizeText(input.containerId),
+    containerId: normalizeText(input.containerId || input.accountId),
     threadId: normalizeText(input.threadId),
-    externalUserId: normalizeText(input.externalUserId)
+    externalUserId: normalizeText(input.externalUserId || input.peerId)
   };
   target.key = createConversationKey(target);
   return Object.freeze(target);
@@ -68,14 +68,21 @@ function parseConversationKey(value) {
 
 function normalizeAttachment(value = {}) {
   const url = normalizeText(value.url || value.file);
-  if (!url) return null;
-  return Object.freeze({
+  const buffer = Buffer.isBuffer(value.buffer) ? value.buffer : null;
+  if (!url && !buffer) return null;
+  const attachment = {
     kind: normalizeText(value.kind || value.type || 'file').toLowerCase() || 'file',
     url,
     name: normalizeText(value.name),
     mimeType: normalizeText(value.mimeType || value.contentType),
     size: Math.max(0, Number(value.size || 0) || 0)
-  });
+  };
+  if (buffer) attachment.buffer = buffer;
+  if (value.sha256) attachment.sha256 = normalizeText(value.sha256);
+  if (Object.prototype.hasOwnProperty.call(value, 'text')) attachment.text = String(value.text || '');
+  if (Object.prototype.hasOwnProperty.call(value, 'binary')) attachment.binary = value.binary === true;
+  if (Object.prototype.hasOwnProperty.call(value, 'truncated')) attachment.truncated = value.truncated === true;
+  return Object.freeze(attachment);
 }
 
 function normalizeReply(value) {
@@ -197,6 +204,7 @@ function toLegacyMessage(message) {
       card: message.actor.displayName
     },
     platform: message.platform,
+    attachments: [...message.attachments],
     delivery_target: message.deliveryTarget,
     platform_capabilities: message.capabilities,
     allow_passive_context: message.allowPassiveContext,

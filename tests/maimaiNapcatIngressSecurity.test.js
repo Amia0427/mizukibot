@@ -27,6 +27,7 @@ module.exports = (async () => {
   const originalConsoleError = console.error;
   let actionClient = null;
   let originalCallAction = null;
+  let platformRuntime = null;
 
   try {
     process.env.MIZUKIBOT_INDEX_TEST_MODE = '1';
@@ -49,6 +50,7 @@ module.exports = (async () => {
     console.error = (...args) => { consoleLines.push(args.map(String).join(' ')); };
 
     const { __test } = require('../index');
+    platformRuntime = __test.platformRuntime;
     const dispatched = [];
     __test.setMessageIngressDispatcherForTest({ enqueue: (message) => dispatched.push(message) });
     const accepted = await __test.acceptNapCatIncomingMessage({
@@ -80,6 +82,7 @@ module.exports = (async () => {
       if (!(key in envSnapshot)) delete process.env[key];
     }
     Object.assign(process.env, envSnapshot);
+    platformRuntime?.closeStores();
     require('../utils/sqliteRuntime').closeLoadedSqliteConnections();
     clearProjectCache(projectRoot);
     fs.rmSync(tempRoot, { recursive: true, force: true });

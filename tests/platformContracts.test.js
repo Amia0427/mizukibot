@@ -1,6 +1,7 @@
 const assert = require('assert');
 
 const {
+  PLATFORM_NAMES,
   createConversationKey,
   createInboundMessage,
   parseConversationKey,
@@ -47,6 +48,31 @@ const { normalizeQqMessage } = require('../src/platforms/qqAdapter');
   assert.ok(legacy.group_id.startsWith('telegram:group:'));
   assert.strictEqual(legacy.message.filter((item) => item.type === 'image').length, 1);
   assert.strictEqual(legacy.allow_long_term_group_memory, false);
+
+  const fileBuffer = Buffer.from('shared file content', 'utf8');
+  const weixin = createInboundMessage({
+    platform: 'weixin',
+    eventId: 'wx-1',
+    actor: { externalId: 'wx-user-1', personId: '12345' },
+    conversation: { chatType: 'private', conversationId: 'wx-user-1' },
+    attachments: [{
+      kind: 'file',
+      name: 'note.txt',
+      mimeType: 'text/plain',
+      size: fileBuffer.length,
+      sha256: 'digest-1',
+      buffer: fileBuffer,
+      text: 'shared file content',
+      binary: false,
+      truncated: false
+    }]
+  });
+  const weixinLegacy = toLegacyMessage(weixin);
+  assert.strictEqual(PLATFORM_NAMES.has('weixin'), true);
+  assert.strictEqual(weixinLegacy.attachments.length, 1);
+  assert.strictEqual(weixinLegacy.attachments[0].name, 'note.txt');
+  assert.strictEqual(weixinLegacy.attachments[0].text, 'shared file content');
+  assert.strictEqual(weixinLegacy.attachments[0].buffer, fileBuffer);
 
   const qq = normalizeQqMessage({
     post_type: 'message',
