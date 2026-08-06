@@ -1991,3 +1991,11 @@
 - 折叠链路：现有 `maybeSendReasoningForward -> sendReasoningForwardMessage` 继续只消费 `reasoningText`，因此拆出的前缀会作为 QQ 合并转发记录发送，正文只发送分隔符后的中文答复。`prompts/runtime/roleplay-inner-protocol.txt` 未修改，流式链路也未扩展；流式内容在分隔符出现前一旦外发无法撤回，本次真实路径不属于该场景。
 - Gemini 核验：真实 OpenAI-compatible 非流式探针向 `gemini-3-flash-preview-search` 发送 `reasoning_effort=high`，HTTP 200、`finish_reason=stop`；响应 `message` 仅含 `role/content`，`reasoning`、`reasoning_content`、`thinking` 均不存在。结论只能是第三方网关未回传独立思维链，不能据此证明 Gemini 内部没有推理；本次泄漏也不是该 Gemini 请求。
 - 验收：4 项核心回归先红后绿，8 项 reasoning/合并转发相邻回归通过；`npm run lint` 检查 812 个文件，`npm run typecheck`、`npm run check:prompts`、`git diff --check` 均退出 0，完整 `npm test` 165.8 秒退出 0。当前验收运行时为 Node 24.14.1，未找到项目声明的 Node 20，因此未宣称 Node 20 通过；`.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js` 未纳入，未重启服务，未推送远端。本小目标已完成。
+
+## 运行维护 2026-08-06 11:37 +08:00
+
+- 根因：微信功能关闭时主进程没有注册 `/微信 ...` 命令处理器，命令进入 `admin/unknown`；管理员路由虽已识别 `chatType=private`，装配时却注入群聊专用回复函数，最终向 NapCat 调用缺少 `group_id` 的 `send_group_msg`。
+- 修复：实现提交 `8598fbd` 增加关闭状态微信命令处理器，统一启用/停用状态的命令回复目标解析，并让管理员路由使用按会话类型分流的回复函数；统一信封缺少顶层兼容字段时从 `canonical_message` 回退读取用户与会话。
+- 验收：13 个微信/私聊定向测试、`npm run lint`（855 文件）、`npm run typecheck`、`git diff --check` 和 147.9 秒完整 `npm test` 均退出 0；SQLite `quick_check=ok`，共 8 张微信表。测试运行时为 Node 24.14.1。
+- 运行态：本地 `.env` 已启用微信并生成未输出、未提交的 32 字节主密钥；2026-08-06 11:30 +08:00 重启后主进程、QQ 接入和微信 worker 均在线，`/live`、`/ready` 返回 200，worker 持续写入 `heartbeat`。真实二维码获取、用户扫码确认、跨平台连续对话和解绑仍需用户参与，未宣称通过。
+- 小目标已完成：QQ 私聊命令漏接管和错误群发目标均已修复并部署；用户未提交的微信指南、`.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js` 未纳入，当前分支未推送远端。

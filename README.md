@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 微信 iLink 私聊命令修复 2026-08-06 11:37 +08:00
+
+- 修复 `WEIXIN_ENABLED=false` 时 `/微信 ...` 未被接管，以及管理员私聊回复被错误发送为 `send_group_msg` 的问题；关闭状态会直接提示功能未启用，通用管理员路由改为按 `chatType` 选择私聊或群聊目标。
+- 微信命令上下文可从统一 `canonical_message` 回退读取用户与会话字段，避免多平台信封缺少 QQ 顶层兼容字段时丢失回复目标。
+- 实现提交 `8598fbd`；13 个微信/私聊定向测试、855 文件 lint、typecheck、147.9 秒完整测试、SQLite `quick_check=ok` 均通过。2026-08-06 11:30 +08:00 本地主进程重启后 `/live`、`/ready` 返回 200，微信 worker 为 `online/heartbeat`。
+- 本地已启用微信并生成未提交的独立主密钥；真实二维码获取与扫码确认仍需绑定用户在 QQ 私聊重新发送 `/微信 绑定` 完成，未把该步骤记为已验收。本轮测试运行时为 Node 24.14.1。
+
 ## 微信 iLink 私聊适配 2026-08-06 10:47 +08:00
 
 - 机器人直接接入腾讯公开 iLink 协议，以独立 worker 维护账号长轮询，并通过 SQLite inbox/outbox 与主进程可靠通信；默认 `WEIXIN_ENABLED=false`，启用时必须配置 `WEIXIN_CREDENTIAL_MASTER_KEY`。
