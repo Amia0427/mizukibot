@@ -1,3 +1,11 @@
+## 运行维护 2026-08-06 09:37 +08:00
+
+- 多平台适配：提交 `492eab0` 建立统一 `InboundMessage`、`DeliveryTarget`、平台能力、SQLite 身份/绑定与群短期上下文；提交 `7d0e857` 将 QQ、Discord Gateway、Telegram long polling 接入现有路由、模型、工具、记忆和命令主管线。本轮补齐图片/引用/提及归一化、跨身份记忆聚合、平台会话隔离、群总结、定时投递、主动私聊和适配器故障隔离。
+- 兼容边界：QQ 继续保留 NapCat/OneBot/CQ、HTTP reverse、WebSocket、action、群历史和 QZone；旧任务默认 QQ。Discord/TG 群记录只在白名单写入 24 小时/500 条短期库，不进入长期群记忆或 post-reply 学习；`core/tgBot.js` 仅保留适配器兼容门面。
+- Node 20.19.5 验收：30 个多平台、QQ、调度和主动私聊聚焦测试通过；本轮额外复测 `messageIngressAsyncEntrypointSource`、`platformQqCompatibility`、`platformAdapters`、`napcatWsIngressSmoke` 全部通过。`npm run lint` 检查 855 个 JS 文件通过，`npm run typecheck`、`npm run check:secrets`、`git diff --check` 通过。
+- 完整 `npm test` 于 174.8 秒退出 1。多平台和 QQ 聚焦用例通过；当前并行工作区的 `messageToolAuthorizationIngress.test.js` 尚待工具授权附件接线，`messageHandlerModuleBoundary.test.js` 尚待同步其新增导入白名单。运行中发现并修复本任务的精简 QQ 事件兼容回退；微信入口夹具造成的并行失败未纳入本任务提交。不能把该次全量运行记为通过。
+- 环境与保护：系统 Node 为 24.14.1，正式测试使用隔离的 Node 20.19.5 和 ABI 115 `better-sqlite3`，未重建正在运行的 Node 24 模块；未修改 `prompts/admin.txt`，未纳入微信、工具授权、`.belt/`、`AGENT.md` 或并行未跟踪文件，未写入真实密钥，未推送远端。
+
 ## 运行维护 2026-08-05 11:10 +08:00
 
 - 新增 `docs/pjsk-rag-explained.md`，面向普通用户解释机器人不是背诵曲库，而是先从当前数据库检索证据、再由模型组织回答；文档包含从当前问题、SQL 候选、候选内向量重排到主模型回答和单谱分析的完整流程图。

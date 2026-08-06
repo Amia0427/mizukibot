@@ -26,6 +26,43 @@ function sanitizePromptMemoryText(text = '') {
   return filterPollutedTextLines(text, { allowBenignContext: true }).text;
 }
 
+function mergeProfileSurfaces(userIds = [], options = {}) {
+  const surfaces = userIds.map((userId) => buildStableProfileText(userId, options));
+  const active = surfaces.filter((surface) => surface && surface.disabled !== true && sanitizePromptMemoryText(surface.text));
+  if (active.length <= 1) return active[0] || surfaces[0] || buildStableProfileText(userIds[0] || '', options);
+  const textLines = [];
+  const seenLines = new Set();
+  for (const surface of active) {
+    for (const line of sanitizePromptMemoryText(surface.text).split('\n')) {
+      const normalized = normalizeText(line);
+      if (!normalized || seenLines.has(normalized)) continue;
+      seenLines.add(normalized);
+      textLines.push(normalized);
+    }
+  }
+  return {
+    ...active[0],
+    text: textLines.join('\n'),
+    source: 'platform_identity_aliases',
+    strictItems: active.reduce((merged, surface) => {
+      for (const [field, values] of Object.entries(surface.strictItems || {})) {
+        merged[field] = [...new Set([...(merged[field] || []), ...(Array.isArray(values) ? values : [])])];
+      }
+      return merged;
+    }, {}),
+    weakItems: active.reduce((merged, surface) => {
+      for (const [field, values] of Object.entries(surface.weakItems || {})) {
+        merged[field] = [...new Set([...(merged[field] || []), ...(Array.isArray(values) ? values : [])])];
+      }
+      return merged;
+    }, {}),
+    traceItems: active.flatMap((surface) => surface.traceItems || []),
+    conflicts: active.flatMap((surface) => surface.conflicts || []),
+    suppressed: active.flatMap((surface) => surface.suppressed || []),
+    expiresSoon: active.flatMap((surface) => surface.expiresSoon || [])
+  };
+}
+
 function getStrongSemanticThreshold(options = {}) {
   return Math.max(0.1, Number(options.strongSemanticMinScore || config.MEMORY_STRONG_SEMANTIC_MIN_SCORE || 0.82) || 0.82);
 }
@@ -70,6 +107,7 @@ function protectPromptEvidence(results = [], strictResults = [], options = {}) {
 
 function assembleMemoryPacket(result = {}, options = {}) {
   const userId = normalizeText(result.userId || options.userId);
+  const userIds = [...new Set([userId, ...(Array.isArray(options.userIds) ? options.userIds : [])].map(normalizeText).filter(Boolean))];
   const currentSessionKey = normalizeText(options.sessionKey || result.sessionKey);
   const profileProjection = loadProfileProjection();
   const profile = profileProjection.users?.[userId] || {};
@@ -89,7 +127,7 @@ function assembleMemoryPacket(result = {}, options = {}) {
   const task = results.filter((item) => item.source === 'task');
   const group = results.filter((item) => item.source === 'group');
   const style = results.filter((item) => item.source === 'style' || item.source === 'jargon');
-  const profileSurface = buildStableProfileText(userId, {
+  const profileSurface = mergeProfileSurfaces(userIds, {
     question: options.question || result.query || '',
     profileProjection,
     userNickname: options.userNickname || options.senderName || options.card || options.nickname || '',
@@ -127,5 +165,6 @@ function assembleMemoryPacket(result = {}, options = {}) {
 }
 
 module.exports = {
-  assembleMemoryPacket
+  assembleMemoryPacket,
+  mergeProfileSurfaces
 };

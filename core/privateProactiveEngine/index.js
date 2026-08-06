@@ -9,7 +9,11 @@ const {
   appendSessionTurn,
   updateSessionState
 } = require('../../utils/memory');
-const { applyPersonaContinuityDelta } = require('../../utils/shortTermMemory');
+const {
+  applyPersonaContinuityDelta,
+  resolveShortTermSessionKey
+} = require('../../utils/shortTermMemory');
+const { runWithDeliveryContext } = require('../../src/platforms/deliveryContext');
 const {
   findDueWindow,
   getLocalClock,
@@ -115,16 +119,26 @@ function createPrivateProactiveEngine(options = {}) {
   const stateStore = options.stateStore || createPrivateProactiveStateStore(privateConfig.stateFile, { now });
   const actionClient = options.actionClient || getNapCatActionClient();
   const napCatConnected = options.isNapCatConnected || (() => isActionClientConnected(actionClient));
+  const resolvePrivateTarget = typeof options.resolvePrivateTarget === 'function'
+    ? options.resolvePrivateTarget
+    : null;
   const requestDecision = options.requestDecision || createPrivateProactiveModelClient(runtimeConfig, options.modelClientOptions);
   const buildContext = options.buildContext || createPrivateProactiveContextProvider(options.contextOptions);
   const delay = options.delay || createAbortableDelay;
-  const sendMessage = options.sendPrivateMessage || ((userId, message) => sendPrivateMessage(userId, message, {
-    actionClient,
-    source: 'private_proactive',
-    triggerReason: 'private_proactive'
-  }));
-  const recordAssistantBubble = options.recordAssistantBubble || ((userId, message, source, timestamp) => {
-    const sessionKey = `direct:${userId}`;
+  const sendMessage = options.sendPrivateMessage || ((userId, message, target) => {
+    const task = () => sendPrivateMessage(userId, message, {
+      actionClient,
+      source: 'private_proactive',
+      triggerReason: 'private_proactive'
+    });
+    return target ? runWithDeliveryContext({ target, personId: userId }, task) : task();
+  });
+  const recordAssistantBubble = options.recordAssistantBubble || ((userId, message, source, timestamp, target) => {
+    const sessionKey = resolveShortTermSessionKey(userId, target ? {
+      platform: target.platform,
+      chatType: 'private',
+      conversationKey: target.key
+    } : {});
     appendSessionTurn(sessionKey, {
       role: 'assistant',
       content: message,
@@ -155,6 +169,14 @@ function createPrivateProactiveEngine(options = {}) {
   let running = false;
   let stopping = false;
   let scanPromise = null;
+
+  function getPrivateTarget(userId) {
+    return resolvePrivateTarget ? resolvePrivateTarget(userId) : null;
+  }
+
+  function canDeliver(userId, target = getPrivateTarget(userId)) {
+    return resolvePrivateTarget ? Boolean(target) : napCatConnected();
+  }
 
   function updateState(mutator, flushNow = false) {
     return stateStore.update((state) => {
@@ -229,7 +251,7 @@ function createPrivateProactiveEngine(options = {}) {
     const id = String(userId || '').trim();
     const initial = getUserSnapshot(id);
     if (!privateConfig.enabled || !initial || !initial.enabled || initial.firstNotice.status !== 'pending') return false;
-    if (!napCatConnected()) return false;
+    if (!canDeliver(id)) return false;
     const activityVersion = initial.activityVersion;
     const controller = new AbortController();
     activeControllers.set(id, controller);
@@ -246,7 +268,7 @@ function createPrivateProactiveEngine(options = {}) {
       if (reserveModelBudget(timestamp)) {
         try {
           const user = getUserSnapshot(id);
-          const context = await buildContext(id, user, timestamp);
+          const context = await buildContext(id, user, timestamp, getPrivateTarget(id));
           const decision = await requestDecision({
             kind: 'notice',
             userId: id,
@@ -260,12 +282,13 @@ function createPrivateProactiveEngine(options = {}) {
         }
       }
       const current = getUserSnapshot(id);
+      const target = getPrivateTarget(id);
       if (
         controller.signal.aborted
         || !current
         || !current.enabled
         || current.activityVersion !== activityVersion
-        || !napCatConnected()
+        || !canDeliver(id, target)
       ) {
         updateState((state) => {
           if (state.users[id]?.firstNotice.status === 'generating') state.users[id].firstNotice.status = 'pending';
@@ -275,7 +298,7 @@ function createPrivateProactiveEngine(options = {}) {
       updateState((state) => {
         if (state.users[id]) state.users[id].firstNotice.status = 'sending';
       }, true);
-      await sendMessage(id, message);
+      await sendMessage(id, message, target);
       const sentAt = now();
       updateState((state) => {
         const user = state.users[id];
@@ -283,7 +306,7 @@ function createPrivateProactiveEngine(options = {}) {
         user.firstNotice.status = 'sent';
         user.firstNotice.sentAt = sentAt;
       }, true);
-      recordAssistantBubble(id, message, 'private_proactive_first_notice', sentAt);
+      recordAssistantBubble(id, message, 'private_proactive_first_notice', sentAt, target);
       return true;
     } catch {
       updateState((state) => {
@@ -383,7 +406,7 @@ function createPrivateProactiveEngine(options = {}) {
     const id = String(userId || '').trim();
     let user = getUserSnapshot(id);
     if (!user) return { userId: id, status: 'skipped', reason: 'not_registered' };
-    if (!napCatConnected()) return { userId: id, windowKey: window.key, status: 'skipped', reason: 'napcat_offline' };
+    if (!canDeliver(id)) return { userId: id, windowKey: window.key, status: 'skipped', reason: 'private_target_unavailable' };
     if (timestamp - user.lastActivityAt < privateConfig.idleMs) {
       return { userId: id, windowKey: window.key, status: 'skipped', reason: 'not_idle' };
     }
@@ -415,7 +438,7 @@ function createPrivateProactiveEngine(options = {}) {
     let status = 'skipped';
     let reason = '';
     try {
-      const context = await buildContext(id, user, timestamp);
+      const context = await buildContext(id, user, timestamp, getPrivateTarget(id));
       if (!isAttemptCurrent(id, activityVersion) || controller.signal.aborted) {
         reason = 'activity_changed_during_context';
         return { userId: id, windowKey: window.key, status, reason };
@@ -460,8 +483,9 @@ function createPrivateProactiveEngine(options = {}) {
           reason = 'activity_changed_before_send';
           break;
         }
-        if (!napCatConnected()) {
-          reason = 'napcat_offline_before_send';
+        const target = getPrivateTarget(id);
+        if (!canDeliver(id, target)) {
+          reason = 'private_target_unavailable_before_send';
           break;
         }
         const message = decision.messages[index];
@@ -473,7 +497,7 @@ function createPrivateProactiveEngine(options = {}) {
           current.signatures = current.signatures.slice(-100);
         }, true);
         try {
-          await sendMessage(id, message);
+          await sendMessage(id, message, target);
         } catch (error) {
           reason = error?.message || 'private_send_failed';
           status = successfulMessages.length > 0 ? 'partial_failure' : 'send_failed';
@@ -481,7 +505,7 @@ function createPrivateProactiveEngine(options = {}) {
         }
         const sentAt = now();
         successfulMessages.push(message);
-        recordAssistantBubble(id, message, 'private_proactive', sentAt);
+        recordAssistantBubble(id, message, 'private_proactive', sentAt, target);
         updateState((state) => {
           const current = state.users[id];
           if (!current?.inFlight) return;

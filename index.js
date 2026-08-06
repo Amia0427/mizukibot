@@ -45,6 +45,7 @@ const { closeMaimaiRuntime, getMaimaiRuntime, peekMaimaiRuntime } = require('./s
 const { closePjskRuntime, getPjskRuntime, peekPjskRuntime } = require('./src/features/pjsk/runtime');
 const { createIdentityCommandHandler } = require('./src/platforms/identityCommands');
 const { setPlatformAdminResolver } = require('./src/platforms/admin');
+const { setPlatformIdentityAliasResolver } = require('./utils/platformIdentityAliases');
 const { createPlatformMessageProcessor } = require('./src/platforms/messageProcessor');
 const { mergeQqLegacyMessage } = require('./src/platforms/qqAdapter');
 const { createPlatformRuntime } = require('./src/platforms/runtime');
@@ -432,10 +433,12 @@ const napcatActionClient = getNapCatActionClient();
 const platformRuntime = createPlatformRuntime(config, { qqActionClient: napcatActionClient });
 const platformActionClient = platformRuntime.actionClient;
 setPlatformAdminResolver((userId) => platformRuntime.identityStore.isAdminPrincipal(userId));
+setPlatformIdentityAliasResolver((userId) => platformRuntime.identityStore.getAliases(userId));
 runtimeReadiness.setDetailsProvider(() => platformRuntime.getReadinessSnapshot());
 const privateProactiveEngine = createPrivateProactiveEngine({
   config,
-  actionClient: platformActionClient
+  actionClient: platformActionClient,
+  resolvePrivateTarget: platformRuntime.resolvePrivateTarget
 });
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
@@ -470,7 +473,8 @@ const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry,
   actionClient: platformActionClient,
-  privateProactiveEngine
+  privateProactiveEngine,
+  groupContextStore: platformRuntime.groupContextStore
 });
 const platformMessageProcessor = createPlatformMessageProcessor({
   identityCommandHandler: createIdentityCommandHandler({ store: platformRuntime.identityStore }),
@@ -523,9 +527,12 @@ const napcatLogFollower = createNapcatLogFollower({
 });
 
 const schedulerRuntime = getSchedulerRuntime({
-  sendGroupMessage: async (groupId, message, meta = {}) => {
+  sendGroupMessage: async (target, message, meta = {}) => {
+    const groupId = typeof target === 'object'
+      ? String(target?.key || target?.conversationId || '').trim()
+      : String(target || '').trim();
     await sendGroupMessage(groupId, message, {
-      actionClient: napcatActionClient,
+      actionClient: platformActionClient,
       ...meta
     });
     return true;

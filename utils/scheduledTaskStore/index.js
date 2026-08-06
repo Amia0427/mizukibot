@@ -103,6 +103,8 @@ function createScheduledTaskStore(options = {}) {
       id: makeTaskId(),
       ownerUserId: validated.ownerUserId,
       groupId: validated.groupId,
+      platform: validated.platform,
+      deliveryTarget: validated.deliveryTarget,
       kind: validated.kind,
       commandType: validated.commandType,
       status: 'active',

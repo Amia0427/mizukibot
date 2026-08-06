@@ -393,8 +393,8 @@ function composeDirectRoutePrompt({
   ].filter(Boolean).join('\n\n');
 }
 
-function markDirectSessionPresenceReplied({ groupId, senderId }) {
-  const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+function markDirectSessionPresenceReplied({ groupId, senderId, sessionKey: inputSessionKey = '' }) {
+  const sessionKey = inputSessionKey || resolveShortTermSessionKey(senderId, { groupId });
   const now = Date.now();
   updateShortTermPresence(sessionKey, shortTermMemory, {}, (current) => ({
     ...current,
@@ -426,8 +426,8 @@ function buildInboundSessionTiming({ continuousMeta = null, previousPresence = n
   };
 }
 
-function markDirectSessionHumanInbound({ groupId, senderId, sessionTiming = null }) {
-  const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+function markDirectSessionHumanInbound({ groupId, senderId, sessionKey: inputSessionKey = '', sessionTiming = null }) {
+  const sessionKey = inputSessionKey || resolveShortTermSessionKey(senderId, { groupId });
   const timing = sessionTiming && typeof sessionTiming === 'object' ? sessionTiming : {};
   const inboundAt = Number(timing.currentInboundAt || 0) || Date.now();
   updateShortTermPresence(sessionKey, shortTermMemory, {}, (current) => ({
@@ -656,7 +656,8 @@ function createMessageHandler({
   runVisionCaptionWorkerOverride = null,
   normalGroupMainReplyRateLimiterOverride = null,
   triggerRemoteRestartOverride = null,
-  smallTheaterRuntimeOverride = null
+  smallTheaterRuntimeOverride = null,
+  groupContextStore = null
 }) {
   const {
     createSmallTheaterRuntime,
@@ -1282,6 +1283,7 @@ function createMessageHandler({
     markThinkingEmojiBeforeLlm,
     buildSubagentContextSummary,
     normalGroupMainReplyRateLimiter,
+    groupContextStore,
     actionClient: globalNapCatActionClient
   });
 
@@ -1498,6 +1500,19 @@ function createMessageHandler({
     const senderId = msg.user_id;
     const groupId = msg.group_id;
     const chatType = String(msg.message_type || '').trim().toLowerCase() === 'private' ? 'private' : 'group';
+    const platform = String(msg?.platform || 'qq').trim().toLowerCase() || 'qq';
+    const conversationKey = String(
+      msg?.canonical_message?.conversation?.key
+      || msg?.delivery_target?.key
+      || groupId
+      || ''
+    ).trim();
+    const shortTermRouteMeta = {
+      platform,
+      chatType,
+      conversationKey,
+      ...(!isPrivateChatType(chatType) && groupId ? { groupId } : {})
+    };
     const privilegedPrivateChat = isPrivilegedPrivateChatUser({
       chatType,
       userId: senderId,
@@ -1510,7 +1525,7 @@ function createMessageHandler({
 
     const rawInboundFreshnessSessionKey = resolveShortTermSessionKey(
       senderId,
-      isPrivateChatType(chatType) ? {} : { groupId }
+      shortTermRouteMeta
     );
     const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
@@ -2496,7 +2511,7 @@ function createMessageHandler({
         });
       }
     }
-    const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+    const sessionKey = resolveShortTermSessionKey(senderId, shortTermRouteMeta);
     const stableThreadId = resolveThreadId({
       userId: senderId,
       routePolicyKey: '',
@@ -2526,6 +2541,7 @@ function createMessageHandler({
     markDirectSessionHumanInbound({
       groupId,
       senderId,
+      sessionKey,
       sessionTiming
     });
     const inboundContext = buildInboundMessageContext({
@@ -2799,6 +2815,9 @@ function createMessageHandler({
       userId: String(senderId || ''),
       groupId: isPrivateChatType(chatType) ? '' : String(groupId || ''),
       chatType,
+      platform: String(effectiveMsg?.platform || msg?.platform || 'qq').trim().toLowerCase() || 'qq',
+      deliveryTarget: effectiveMsg?.delivery_target || msg?.delivery_target || null,
+      conversationKey: isPrivateChatType(chatType) ? '' : String(groupId || ''),
       directedContext,
       directedContextSummary: routerContextSummary,
       effectiveIntentText: runtimeQuestionText,
@@ -3041,7 +3060,7 @@ function createMessageHandler({
               }
             );
             saveData();
-            markDirectSessionPresenceReplied({ groupId: fastGroupId, senderId });
+            markDirectSessionPresenceReplied({ groupId: fastGroupId, senderId, sessionKey });
             replyRuntime.recordBotReply({
               chatType,
               groupId: fastGroupId,
@@ -3532,7 +3551,7 @@ function createMessageHandler({
       });
       if (sent) {
         maybeRunDeferredPersist(replyEnvelope);
-        markDirectSessionPresenceReplied({ groupId, senderId });
+        markDirectSessionPresenceReplied({ groupId, senderId, sessionKey });
         replyRuntime.recordBotReply({
           chatType,
           groupId: isPrivateChatType(chatType) ? '' : groupId,

@@ -15,6 +15,9 @@ const {
 } = require('../memory-v3/journalRecallPolicy');
 const { queryLocalKnowledge } = require('../localKnowledge');
 const { isRecentRecallQuery } = require('../recallHeuristics');
+const { canonicalizeText } = require('../memory-v3/helpers');
+const { conflictWinnerRank } = require('../memory-v3/memoryConflictResolver');
+const { resolvePlatformIdentityAliases, selectLatestAffinityState } = require('../platformIdentityAliases');
 const {
   buildMemoryTrace,
   resolveDroppedReasons,
@@ -38,6 +41,93 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function aliasCandidateKey(item = {}) {
+  const conflictKey = String(item.conflictKey || item.payload?.conflictKey || '').trim().toLowerCase();
+  if (conflictKey) return `conflict:${conflictKey}`;
+  return [
+    item.source,
+    item.scopeType,
+    item.groupId,
+    item.semanticSlot || item.fieldKey || item.type,
+    item.canonicalKey || canonicalizeText(item.text)
+  ].map((value) => String(value || '').trim().toLowerCase()).join('|');
+}
+
+function mergeAliasQueryResults(results = [], primaryUserId = '', topK = 8) {
+  const list = normalizeArray(results).filter((result) => result && typeof result === 'object');
+  const byKey = new Map();
+  for (const item of list.flatMap((result) => normalizeArray(result.results))) {
+    const key = aliasCandidateKey(item);
+    const current = byKey.get(key);
+    const rank = conflictWinnerRank(item) + Number(item.score || 0) * 1000;
+    const currentRank = current ? conflictWinnerRank(current) + Number(current.score || 0) * 1000 : -Infinity;
+    if (!current || rank > currentRank) byKey.set(key, item);
+  }
+  const selected = [...byKey.values()]
+    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0)
+      || Number(right.updatedAt || 0) - Number(left.updatedAt || 0))
+    .slice(0, Math.max(1, Number(topK) || 8));
+  const strictIds = new Set(list.flatMap((result) => normalizeArray(result.strictResults)).map((item) => item.id));
+  const personaSource = list.slice().sort((left, right) => {
+    const leftUpdatedAt = Number(left.persona?.updatedAt || 0);
+    const rightUpdatedAt = Number(right.persona?.updatedAt || 0);
+    if (rightUpdatedAt !== leftUpdatedAt) return rightUpdatedAt - leftUpdatedAt;
+    return left.userId === primaryUserId ? -1 : 1;
+  })[0] || {};
+  const affinityState = selectLatestAffinityState(list.map((result) => result.affinityState));
+  const primary = list.find((result) => result.userId === primaryUserId) || list[0] || {};
+  return {
+    ...primary,
+    ok: true,
+    userId: primaryUserId,
+    userIds: list.map((result) => result.userId).filter(Boolean),
+    results: selected,
+    strictResults: selected.filter((item) => strictIds.has(item.id) || item.evidenceTier === 'strict'),
+    weakResults: selected.filter((item) => !strictIds.has(item.id) && item.evidenceTier !== 'strict'),
+    persona: personaSource.persona || {},
+    affinityState: affinityState || primary.affinityState || {},
+    digest: selected.map((item) => String(item.text || '').trim()).filter(Boolean).join('\n'),
+    stats: {
+      ...(primary.stats || {}),
+      candidates: list.reduce((total, result) => total + Number(result.stats?.candidates || 0), 0),
+      selected: selected.length,
+      aliasCount: list.length
+    },
+    diagnostics: {
+      ...(primary.diagnostics || {}),
+      identityAliases: list.map((result) => result.userId).filter(Boolean)
+    }
+  };
+}
+
+function mergeAliasJournalBundles(bundles = []) {
+  const list = normalizeArray(bundles).filter(Boolean);
+  const primary = list[0] || { text: '', items: [], byLayer: {}, continuity: {}, stats: {} };
+  if (list.length <= 1) return primary;
+  const byKey = new Map();
+  for (const item of list.flatMap((bundle) => normalizeArray(bundle.items))) {
+    const key = String(item.id || `${item.kind || item.level || ''}|${item.day || ''}|${item.text || ''}`).trim();
+    if (key && !byKey.has(key)) byKey.set(key, item);
+  }
+  const items = [...byKey.values()];
+  return {
+    ...primary,
+    text: [...new Set(list.flatMap((bundle) => String(bundle.text || '').split('\n')).map((line) => line.trim()).filter(Boolean))].join('\n'),
+    items,
+    byLayer: list.reduce((merged, bundle) => {
+      for (const [layer, layerItems] of Object.entries(bundle.byLayer || {})) {
+        merged[layer] = [...(merged[layer] || []), ...normalizeArray(layerItems)];
+      }
+      return merged;
+    }, {}),
+    continuity: {
+      sameSession: list.flatMap((bundle) => bundle.continuity?.sameSession || []),
+      sameTopic: list.flatMap((bundle) => bundle.continuity?.sameTopic || [])
+    },
+    stats: { ...(primary.stats || {}), aliasCount: list.length }
+  };
+}
+
 async function buildMemoryContextV3Payload(deps = {}) {
   const {
     userId,
@@ -46,6 +136,7 @@ async function buildMemoryContextV3Payload(deps = {}) {
     buildContextPayload,
     retrieveUnifiedMemoriesAsync
   } = deps;
+  const storageUserIds = resolvePlatformIdentityAliases(userId);
   const localKnowledge = await queryLocalKnowledge({
     userId,
     query: question || '',
@@ -64,35 +155,46 @@ async function buildMemoryContextV3Payload(deps = {}) {
   });
   const recapQuery = isRecentRecallQuery(question);
   const resolvedGroupIds = resolveReadableGroupIds(userId, baseOptions);
-  const queryResult = await queryMemory({
-    userId,
+  const topK = baseOptions.topK || config.MEMORY_RAG_TOP_K || 8;
+  const queryResults = await Promise.all(storageUserIds.map((storageUserId) => queryMemory({
+    userId: storageUserId,
     query: question || '',
-    topK: baseOptions.topK || config.MEMORY_RAG_TOP_K || 8,
+    topK,
     groupId: baseOptions.groupId,
     groupIds: resolvedGroupIds,
-    sessionId: baseOptions.sessionId,
-    sessionKey: baseOptions.sessionKey,
+    sessionId: storageUserId === userId ? baseOptions.sessionId : '',
+    sessionKey: storageUserId === userId ? baseOptions.sessionKey : '',
     routePolicyKey: baseOptions.routePolicyKey,
     topRouteType: baseOptions.topRouteType,
     taskType: baseOptions.taskType,
     agentName: baseOptions.agentName,
     toolName: baseOptions.toolName,
-    sharedShortTermSignature: baseOptions.sharedShortTermSignature
-  });
+    sharedShortTermSignature: storageUserId === userId ? baseOptions.sharedShortTermSignature : ''
+  })));
+  const queryResult = mergeAliasQueryResults(queryResults, userId, topK);
   if (!Array.isArray(queryResult.results) || queryResult.results.length === 0) {
     const normalizedOptions = {
       ...baseOptions,
       userId,
+      storageUserIds,
       resolvedGroupIds
     };
     const unifiedHits = await memoizeValue(
       normalizedOptions,
       buildMemoKey('unified-async-v3-fallback', userId, question || '', normalizedOptions),
-      () => retrieveUnifiedMemoriesAsync(userId, question || '', baseOptions.topK || config.MEMORY_RAG_TOP_K || 8, buildUnifiedRecallOptions({
-        ...normalizedOptions,
-        disableLegacyFactFallback: true,
-        question
-      }))
+      async () => (await Promise.all(storageUserIds.map((storageUserId) => retrieveUnifiedMemoriesAsync(
+        storageUserId,
+        question || '',
+        topK,
+        buildUnifiedRecallOptions({
+          ...normalizedOptions,
+          userId: storageUserId,
+          sessionId: storageUserId === userId ? normalizedOptions.sessionId : '',
+          sessionKey: storageUserId === userId ? normalizedOptions.sessionKey : '',
+          disableLegacyFactFallback: true,
+          question
+        })
+      )))).flat()
     );
     const fallbackDroppedReasons = [];
     const lancedbFallback = queryResult?.stats?.lancedb?.fallbackReason || queryResult?.diagnostics?.lancedb?.fallbackReason || '';
@@ -111,6 +213,7 @@ async function buildMemoryContextV3Payload(deps = {}) {
   }
   const packet = assembleMemoryPacket(queryResult, {
     userId,
+    userIds: storageUserIds,
     sessionKey: baseOptions.sessionKey,
     question,
     disableStableProfile: baseOptions.disableStableProfile,
@@ -129,7 +232,7 @@ async function buildMemoryContextV3Payload(deps = {}) {
   const activeRawBundle = baseOptions.includeActiveRaw
     || journalIntent.includeActiveRaw
     ? (() => {
-        const readBundle = () => getDailyJournalRetrievalBundle(userId, {
+        const readBundle = () => mergeAliasJournalBundles(storageUserIds.map((storageUserId) => getDailyJournalRetrievalBundle(storageUserId, {
           lookbackDays: baseOptions.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
           timestamp: resolveDailyJournalTimestamp(question, baseOptions),
           yearMonth: baseOptions.dailyJournalYearMonth,
@@ -140,7 +243,7 @@ async function buildMemoryContextV3Payload(deps = {}) {
           topic: question,
           includeActiveRaw: true,
           activeRawMaxEntries: baseOptions.activeRawMaxEntries || 8
-        });
+        })));
         const timing = baseOptions.__promptAssemblyTiming;
         if (timing && typeof timing.measureSync === 'function') {
           return timing.measureSync('daily_journal', readBundle, {
@@ -323,7 +426,7 @@ async function buildMemoryContextV3Payload(deps = {}) {
     promptDailyJournalText: dailyJournalText,
     dailyJournalItems: selectedJournalEvidence.items?.length ? selectedJournalEvidence.items : (activeRawBundle?.items?.length ? activeRawBundle.items : journalHits),
     dailyJournalBundle: activeRawBundle || { text: dailyJournalText, items: journalHits, byLayer: { daily: journalHits, fourDay: [], monthly: [] }, selectedPromptItems: selectedJournalEvidence.items || [] },
-    factText: getUserMemories(userId),
+    factText: [...new Set(storageUserIds.flatMap((storageUserId) => String(getUserMemories(storageUserId) || '').split('\n')).map((line) => line.trim()).filter(Boolean))].join('\n'),
     stats: {
       total: Number(queryResult?.stats?.selected || 0),
       byType: {},
@@ -373,5 +476,7 @@ async function buildMemoryContextV3Payload(deps = {}) {
 }
 
 module.exports = {
-  buildMemoryContextV3Payload
+  buildMemoryContextV3Payload,
+  mergeAliasJournalBundles,
+  mergeAliasQueryResults
 };

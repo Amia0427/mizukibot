@@ -54,6 +54,7 @@ const { createIdentityCommandHandler } = require('../src/platforms/identityComma
     const unlink = store.unlink({ platform: 'telegram', externalUserId: 'tg-1', confirm: true });
     assert.strictEqual(unlink.ok, true);
     assert.strictEqual(store.resolveIdentity('telegram', 'tg-1').principalId, 'telegram:tg-1');
+    assert.strictEqual(store.getAliases('12345').includes('telegram:tg-1'), false);
   } finally {
     store.close();
   }

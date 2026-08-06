@@ -49,7 +49,7 @@ function normalizeSummaryStyle(value = '') {
 }
 
 function messageToRawText(message = {}) {
-  const raw = message.raw_message ?? message.message ?? message.content ?? '';
+  const raw = message.raw_message ?? message.message ?? message.content ?? message.text ?? '';
   if (Array.isArray(raw)) {
     return raw.map((part) => {
       if (typeof part === 'string') return part;
@@ -93,15 +93,17 @@ function senderNameOf(message = {}) {
 }
 
 function normalizeHistoryMessage(message = {}, options = {}) {
-  const userId = normalizeText(message.user_id || message.sender?.user_id || message.sender?.userId);
+  const userId = normalizeText(message.user_id || message.senderId || message.sender?.user_id || message.sender?.userId);
   if (!userId || userId === normalizeText(options.botQQ)) return null;
-  const rawText = messageToRawText(message);
+  const imageUrls = Array.isArray(message.imageUrls) ? message.imageUrls.filter(Boolean) : [];
+  const rawText = [messageToRawText(message), ...imageUrls.map(() => '[CQ:image,url=platform]')].filter(Boolean).join(' ');
   const text = cleanMessageText(rawText);
   if (!text) return null;
-  const timestamp = Number(message.time || message.timestamp || 0) || 0;
+  const rawTimestamp = Number(message.time || message.timestamp || message.occurredAt || 0) || 0;
+  const timestamp = rawTimestamp > 10_000_000_000 ? Math.floor(rawTimestamp / 1000) : rawTimestamp;
   return {
     userId,
-    senderName: senderNameOf(message),
+    senderName: normalizeText(message.senderName) || senderNameOf(message),
     rawText,
     text,
     timestamp: timestamp > 0 ? timestamp : 0,
@@ -215,9 +217,11 @@ function buildSummaryPrompt({
   limit = 0,
   stats = {},
   messagesText = '',
-  style = 'daily'
+  style = 'daily',
+  platform = 'qq'
 } = {}) {
   const normalizedStyle = normalizeSummaryStyle(style);
+  const platformName = normalizeText(platform).toLowerCase() || 'qq';
   const styleInstruction = normalizedStyle === 'brief'
     ? '风格：短总结。每个栏目尽量 1-2 行，优先保留事实密度。'
     : normalizedStyle === 'ops'
@@ -227,8 +231,8 @@ function buildSummaryPrompt({
     {
       role: 'system',
       content: [
-        '你是 QQ 群聊总结助手。只基于用户提供的聊天记录写中文群总结，不补不存在的信息。',
-        '输出纯文本，适合直接发回 QQ 群。不要 markdown 表格，不要 JSON，不要解释你的方法。',
+        `你是 ${platformName} 群聊总结助手。只基于用户提供的聊天记录写中文群总结，不补不存在的信息。`,
+        `输出纯文本，适合直接发回 ${platformName} 群聊。不要 markdown 表格，不要 JSON，不要解释你的方法。`,
         styleInstruction,
         '优先写具体事件、问题、决定和有信息量的发言，不要写空泛套话。',
         '禁止使用没有事实支撑的空话，例如“大家积极参与讨论”“群内气氛活跃”“内容丰富多样”。',
@@ -284,17 +288,22 @@ async function generateGroupSummary(input = {}, deps = {}) {
   if (!groupId) return { ok: false, text: '这个要在群里才接得住啦。', reason: 'group_required' };
 
   const limit = parseGroupSummaryLimit(input.command || {}, runtimeConfig);
-  const historyReader = deps.getGroupMessageHistoryCached || getGroupMessageHistoryCached;
+  const platform = normalizeText(input.platform).toLowerCase() || 'qq';
   let rawMessages = [];
   try {
-    rawMessages = await historyReader(groupId, {
-      count: limit,
-      actionClient: deps.actionClient
-    });
+    if (platform === 'qq') {
+      const historyReader = deps.getGroupMessageHistoryCached || getGroupMessageHistoryCached;
+      rawMessages = await historyReader(groupId, {
+        count: limit,
+        actionClient: deps.actionClient
+      });
+    } else {
+      rawMessages = deps.groupContextStore?.list(input.conversationKey || groupId, { limit }) || [];
+    }
   } catch (error) {
     return {
       ok: false,
-      text: `群总结获取历史消息失败：${error?.message || 'NapCat 历史接口不可用'}`,
+      text: `群总结获取历史消息失败：${error?.message || '历史记录不可用'}`,
       reason: 'history_failed',
       error
     };
@@ -328,7 +337,8 @@ async function generateGroupSummary(input = {}, deps = {}) {
       limit,
       stats,
       messagesText,
-      style
+      style,
+      platform
     }), {
       userId: input.userId,
       topRouteType: 'admin',

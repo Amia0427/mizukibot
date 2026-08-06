@@ -135,8 +135,15 @@ function createTelegramAdapter(options = {}) {
     botInfo = await bot.getMe();
     await bot.setMyCommands(NATIVE_COMMANDS);
     bot.on('message', async (message) => {
-      const inbound = await normalizeTelegramMessage(bot, message, { botInfo, passiveChatIds });
-      if (inbound) await runtime.onMessage(inbound, 'telegram_polling');
+      try {
+        const inbound = await normalizeTelegramMessage(bot, message, { botInfo, passiveChatIds });
+        if (inbound) await runtime.onMessage(inbound, 'telegram_polling');
+      } catch (error) {
+        console.error('[platform:telegram] message dispatch failed', {
+          messageId: normalizeText(message?.message_id),
+          error: normalizeText(error?.message || error)
+        });
+      }
     });
     bot.on('polling_error', (error) => {
       status = 'degraded';

@@ -1,5 +1,13 @@
 # MizukiBot
 
+## Discord / Telegram 多平台适配 2026-08-06 09:37 +08:00
+
+- QQ、Discord Gateway 与 Telegram long polling 已统一接入现有消息、路由、模型、工具、记忆和命令管线；任一适配器掉线只标记该平台 degraded，`/ready` 会返回各平台健康状态。
+- 外部身份使用 `discord:<id>`、`telegram:<id>`，可在私聊通过一次性 `/bind` 码与 QQ 身份绑定；长期记忆按全部身份别名逻辑聚合，新数据只写统一人物主键，短期对话仍按平台、频道和 thread/topic 隔离。
+- Discord/TG 的被动群感知仅对显式白名单开启，保留 24 小时且每会话最多 500 条，只用于被动回复和群总结；QZone、QQ 动态及其自动发布继续为 QQ 专属。
+- 配置、平台前置条件、绑定流程和上线检查见 [Discord / Telegram 多平台部署](docs/multi-platform-deployment.md)，代码边界见 [架构地图](docs/development/02-architecture-map.md)。
+- Node 20.19.5 下多平台与 QQ 聚焦回归、lint、typecheck、暂存密钥扫描和 diff check 通过；完整测试的并行工具授权/微信工作区阻断详见 [维护日志](docs/maintenance-log.md)，未写入真实 token，未推送远端。
+
 ## PJSK 曲库与谱面 RAG 2026-08-05 11:10 +08:00
 
 - 功能提交 `77e1b1c` 新增独立 `src/features/pjsk/`，以日服 master DB 为事实库、简中和英文标题为别名；SQLite 负责精确筛选，LanceDB 只在 SQL 候选内重排，向量不可用时明确降级为 `sql_only`。

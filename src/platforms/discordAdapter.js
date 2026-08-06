@@ -183,45 +183,60 @@ function createDiscordAdapter(options = {}) {
     }
     status = 'connecting';
     client.on('messageCreate', async (message) => {
-      const inbound = await normalizeDiscordMessage(message, {
-        botUserId: client.user?.id,
-        passiveChannelIds
-      });
-      if (inbound) await runtime.onMessage(inbound, 'discord_gateway');
+      try {
+        const inbound = await normalizeDiscordMessage(message, {
+          botUserId: client.user?.id,
+          passiveChannelIds
+        });
+        if (inbound) await runtime.onMessage(inbound, 'discord_gateway');
+      } catch (error) {
+        console.error('[platform:discord] message dispatch failed', {
+          messageId: normalizeText(message?.id),
+          error: normalizeText(error?.message || error)
+        });
+      }
     });
     client.on('interactionCreate', async (interaction) => {
-      if (!interaction.isChatInputCommand?.()) return;
-      if (interaction.commandName === 'help') {
-        await interaction.reply({ content: '可用命令：/bind、/bindings、/unbind、/mai、/pjsk、/create、/small_theater、/group_summary、/status', ephemeral: true });
-        return;
+      try {
+        if (!interaction.isChatInputCommand?.()) return;
+        if (interaction.commandName === 'help') {
+          await interaction.reply({ content: '可用命令：/bind、/bindings、/unbind、/mai、/pjsk、/create、/small_theater、/group_summary、/status', ephemeral: true });
+          return;
+        }
+        await interaction.deferReply();
+        pendingInteractions.set(interaction.id, interaction);
+        const isPrivate = !interaction.guildId;
+        const channelIsThread = interaction.channel?.isThread?.() === true;
+        const inbound = createInboundMessage({
+          platform: 'discord',
+          eventId: interaction.id,
+          occurredAt: Number(interaction.createdTimestamp || Date.now()),
+          actor: {
+            externalId: interaction.user.id,
+            displayName: interaction.member?.displayName || interaction.user.displayName || interaction.user.username
+          },
+          conversation: {
+            chatType: isPrivate ? 'private' : 'group',
+            containerId: normalizeText(interaction.guildId),
+            conversationId: channelIsThread ? normalizeText(interaction.channel?.parentId || interaction.channelId) : normalizeText(interaction.channelId),
+            threadId: channelIsThread ? normalizeText(interaction.channelId) : '',
+            displayName: normalizeText(interaction.channel?.name)
+          },
+          text: interactionToCommandText(interaction),
+          mentionsBot: !isPrivate,
+          botExternalId: normalizeText(client.user?.id),
+          allowPassiveContext: false,
+          allowLongTermGroupMemory: false,
+          capabilities: CAPABILITIES
+        });
+        await runtime.onMessage(inbound, 'discord_command');
+      } catch (error) {
+        pendingInteractions.delete(normalizeText(interaction?.id));
+        console.error('[platform:discord] command dispatch failed', {
+          interactionId: normalizeText(interaction?.id),
+          error: normalizeText(error?.message || error)
+        });
       }
-      await interaction.deferReply();
-      pendingInteractions.set(interaction.id, interaction);
-      const isPrivate = !interaction.guildId;
-      const channelIsThread = interaction.channel?.isThread?.() === true;
-      const inbound = createInboundMessage({
-        platform: 'discord',
-        eventId: interaction.id,
-        occurredAt: Number(interaction.createdTimestamp || Date.now()),
-        actor: {
-          externalId: interaction.user.id,
-          displayName: interaction.member?.displayName || interaction.user.displayName || interaction.user.username
-        },
-        conversation: {
-          chatType: isPrivate ? 'private' : 'group',
-          containerId: normalizeText(interaction.guildId),
-          conversationId: channelIsThread ? normalizeText(interaction.channel?.parentId || interaction.channelId) : normalizeText(interaction.channelId),
-          threadId: channelIsThread ? normalizeText(interaction.channelId) : '',
-          displayName: normalizeText(interaction.channel?.name)
-        },
-        text: interactionToCommandText(interaction),
-        mentionsBot: !isPrivate,
-        botExternalId: normalizeText(client.user?.id),
-        allowPassiveContext: false,
-        allowLongTermGroupMemory: false,
-        capabilities: CAPABILITIES
-      });
-      await runtime.onMessage(inbound, 'discord_command');
     });
     client.on('error', (error) => {
       status = 'degraded';

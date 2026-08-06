@@ -61,10 +61,12 @@ function normalizeQqMessage(rawMessage = {}, options = {}) {
   const chatType = String(rawMessage.message_type || '').toLowerCase() === 'private' ? 'private' : 'group';
   const externalUserId = String(rawMessage.user_id || '').trim();
   const conversationId = chatType === 'private' ? externalUserId : String(rawMessage.group_id || '').trim();
+  const eventId = String(rawMessage.message_id || '').trim();
+  if (!eventId || !externalUserId || !conversationId) return null;
   const replyId = findReplyId(rawMessage);
   return createInboundMessage({
     platform: 'qq',
-    eventId: String(rawMessage.message_id || '').trim(),
+    eventId,
     occurredAt: Number(rawMessage.time || 0) > 0 ? Number(rawMessage.time) * 1000 : Date.now(),
     actor: {
       externalId: externalUserId,

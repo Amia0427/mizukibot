@@ -99,9 +99,16 @@ function requireGroupContext(context = {}) {
   if (!groupId) {
     throw new Error('group context required');
   }
+  const deliveryTarget = context.deliveryTarget
+    || routeMeta.deliveryTarget
+    || routeMeta.delivery_target
+    || getDeliveryContext()?.target
+    || null;
   return {
     groupId,
-    userId: normalizeText(context.userId)
+    userId: normalizeText(context.userId),
+    platform: normalizeText(routeMeta.platform || deliveryTarget?.platform || 'qq').toLowerCase() || 'qq',
+    deliveryTarget
   };
 }
 
@@ -449,12 +456,14 @@ function createTaskResponse(task = {}, normalizedWhen = {}) {
 
 function createScheduledTask(input = {}, context = {}, options = {}) {
   const store = options.store || getScheduledTaskStore();
-  const { groupId, userId } = requireGroupContext(context);
+  const { groupId, userId, platform, deliveryTarget } = requireGroupContext(context);
   const when = normalizeText(input.when);
   const normalizedWhen = normalizeWhenExpression(when);
   const created = store.createTask({
     ownerUserId: userId,
     groupId,
+    platform,
+    deliveryTarget,
     kind: input.kind,
     commandType: input.commandType,
     when,

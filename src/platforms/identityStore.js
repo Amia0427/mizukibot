@@ -103,6 +103,9 @@ function createPlatformIdentityStore(options = {}) {
       INSERT OR IGNORE INTO platform_principal_aliases(principal_id, storage_user_id, created_at)
       VALUES (?, ?, ?)
     `),
+    deleteAlias: db.prepare(`
+      DELETE FROM platform_principal_aliases WHERE principal_id = ? AND storage_user_id = ?
+    `),
     listAliases: db.prepare('SELECT storage_user_id FROM platform_principal_aliases WHERE principal_id = ? ORDER BY created_at, storage_user_id'),
     listIdentities: db.prepare(`
       SELECT platform, external_user_id, created_at, last_seen_at
@@ -310,6 +313,7 @@ function createPlatformIdentityStore(options = {}) {
     db.prepare('UPDATE platform_principals SET merged_into = NULL WHERE id = ?').run(detachedPrincipalId);
     db.prepare('UPDATE platform_identities SET principal_id = ? WHERE platform = ? AND external_user_id = ?')
       .run(detachedPrincipalId, platform, externalUserId);
+    statements.deleteAlias.run(principalId, detachedPrincipalId);
     statements.insertAlias.run(detachedPrincipalId, detachedPrincipalId, timestamp);
     statements.audit.run('identity_unlinked', principalId, platform, externalUserId, JSON.stringify({ detachedPrincipalId }), timestamp);
     return { ok: true, principalId, detachedPrincipalId };

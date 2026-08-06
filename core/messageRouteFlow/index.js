@@ -172,6 +172,7 @@ function createMessageRouteFlow(deps = {}) {
     normalGroupMainReplyRateLimiter,
     sendGroupPoke,
     generateGroupSummary = generateGroupSummaryDefault,
+    groupContextStore = null,
     actionClient = null
   } = deps;
   const {
@@ -836,8 +837,10 @@ function createMessageRouteFlow(deps = {}) {
           groupId,
           userId: senderId,
           botQQ: config.BOT_QQ,
+          platform: route?.meta?.platform || 'qq',
+          conversationKey: route?.meta?.conversationKey || groupId,
           command: route?.meta?.command || {}
-        });
+        }, { groupContextStore, actionClient });
         adminReply = String(summaryResult?.text || '').trim() || '群总结这次没生成稳。等一下再试一次吧。';
       }
     } else if (cmd === 'qzone_post') {

@@ -407,6 +407,7 @@ function buildMergedMessagePayload(entries = [], options = {}) {
 
 async function enrichEntryFromReply(entry, options = {}) {
   if (!config.CONTINUOUS_MESSAGE_REPLY_EXPANSION_ENABLED) return entry;
+  if (entry.replyContext) return entry;
   const replyMessageId = normalizeText(entry.replyMessageId);
   if (!replyMessageId) return entry;
   if (!canUseNapCatActionClient(options)) {
@@ -557,8 +558,48 @@ async function parseMessageEntry(msg = {}, options = {}) {
   return entry;
 }
 
+function canonicalMessageContent(msg = {}) {
+  const canonical = msg?.canonical_message;
+  if (!canonical || typeof canonical !== 'object') return null;
+  const attachments = Array.isArray(canonical.attachments) ? canonical.attachments : [];
+  const imageUrls = attachments
+    .filter((attachment) => normalizeText(attachment?.kind || attachment?.type).toLowerCase() === 'image')
+    .map((attachment) => normalizeText(attachment?.url || attachment?.file))
+    .filter(Boolean);
+  const reply = canonical.replyTo && typeof canonical.replyTo === 'object'
+    ? canonical.replyTo
+    : null;
+  const replyImageUrls = (Array.isArray(reply?.imageUrls) ? reply.imageUrls : [])
+    .map((url) => normalizeText(url))
+    .filter(Boolean);
+  const replyMessageId = normalizeText(reply?.messageId || reply?.id);
+  const replyText = normalizeText(reply?.text);
+
+  return {
+    messageId: normalizeText(canonical.eventId || msg?.message_id),
+    timestamp: Number(canonical.occurredAt || 0) || 0,
+    text: String(canonical.text || '').trim(),
+    imageUrls,
+    replyMessageId,
+    replyContext: reply && (replyMessageId || replyText || replyImageUrls.length)
+      ? {
+          messageId: replyMessageId,
+          senderId: normalizeText(reply.senderId),
+          senderName: normalizeText(reply.senderName),
+          origin: `${normalizeText(canonical.platform || msg?.platform) || 'platform'}_reply_quote`,
+          hasImage: replyImageUrls.length > 0,
+          text: replyText,
+          imageUrls: replyImageUrls,
+          imageRefMap: {}
+        }
+      : null,
+    mentionedBot: canonical.mentionsBot === true
+  };
+}
+
 function cheapParseMessageEntry(msg = {}, options = {}) {
   const rawText = String(msg?.raw_message || '');
+  const canonical = canonicalMessageContent(msg);
   const qqCardLinksEnabled = options.qqCardLinksEnabled ?? config.CONTINUOUS_MESSAGE_QQ_CARD_LINKS_ENABLED;
   const extracted = collectMessageContent(msg?.message || [], {
     ...options,
@@ -571,23 +612,27 @@ function cheapParseMessageEntry(msg = {}, options = {}) {
       ...extractCardContextsFromRawJsonSegments(rawText)
     ])
     : [];
-  const plainText = extracted.text || fallbackText;
+  const plainText = canonical ? canonical.text : (extracted.text || fallbackText);
+  const replyMessageId = canonical
+    ? canonical.replyMessageId
+    : (extracted.replyMessageId || parseRawReplyId(rawText));
   const entry = {
-    messageId: normalizeText(msg?.message_id),
-    timestamp: Number(msg?.time || 0) > 0 ? Number(msg.time) * 1000 : Date.now(),
+    messageId: canonical?.messageId || normalizeText(msg?.message_id),
+    timestamp: canonical?.timestamp || (Number(msg?.time || 0) > 0 ? Number(msg.time) * 1000 : Date.now()),
     text: plainText,
-    imageUrls: [
-      ...extracted.imageUrls,
-      ...parseRawImageUrls(rawText)
-    ],
+    imageUrls: canonical
+      ? canonical.imageUrls
+      : [...extracted.imageUrls, ...parseRawImageUrls(rawText)],
     imageRefMap: {},
-    replyMessageId: extracted.replyMessageId || parseRawReplyId(rawText),
-    replyContext: null,
+    replyMessageId,
+    replyContext: canonical?.replyContext || null,
     forwardIds: extracted.forwardIds.length ? extracted.forwardIds : parseRawForwardIds(rawText),
     forwardSummaryText: '',
     forwardImageUrls: [],
     forwardImageRefMap: {},
-    mentionedBot: Boolean(options.effectiveBotQQ) && String(rawText).includes(`[CQ:at,qq=${options.effectiveBotQQ}]`),
+    mentionedBot: canonical
+      ? canonical.mentionedBot
+      : Boolean(options.effectiveBotQQ) && String(rawText).includes(`[CQ:at,qq=${options.effectiveBotQQ}]`),
     qqCardUrls: qqCardLinksEnabled
       ? uniqueStrings([
         ...(Array.isArray(extracted.qqCardUrls) ? extracted.qqCardUrls : []),
@@ -597,11 +642,11 @@ function cheapParseMessageEntry(msg = {}, options = {}) {
     cardContexts,
     cardOnly: cardContexts.length > 0
       && !normalizeText(plainText)
-      && extracted.imageUrls.length === 0
+      && (canonical ? canonical.imageUrls.length === 0 : extracted.imageUrls.length === 0)
       && extracted.forwardIds.length === 0
-      && !extracted.replyMessageId,
+      && !replyMessageId,
     expansionState: {
-      reply: extracted.replyMessageId || parseRawReplyId(rawText) ? 'pending' : 'skipped',
+      reply: canonical?.replyContext ? 'resolved' : (replyMessageId ? 'pending' : 'skipped'),
       forward: (extracted.forwardIds.length ? extracted.forwardIds : parseRawForwardIds(rawText)).length ? 'pending' : 'skipped',
       card: qqCardLinksEnabled ? 'pending' : 'skipped'
     }
@@ -798,6 +843,14 @@ function createContinuousMessagePreprocessor(options = {}) {
   const sessionActivityVersion = new Map();
 
   function buildSessionKey(msg = {}) {
+    const platform = normalizeText(msg?.platform || msg?.canonical_message?.platform || 'qq').toLowerCase() || 'qq';
+    const conversationKey = normalizeText(
+      msg?.canonical_message?.conversation?.key
+      || msg?.delivery_target?.key
+    );
+    if (platform !== 'qq' && conversationKey) {
+      return `${conversationKey}:user:${normalizeText(msg?.user_id)}`;
+    }
     return `${normalizeText(msg?.group_id)}:${normalizeText(msg?.user_id)}`;
   }
 

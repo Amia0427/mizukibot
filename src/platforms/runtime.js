@@ -1,4 +1,5 @@
 const { createDiscordAdapter } = require('./discordAdapter');
+const { createDeliveryTarget } = require('./contracts');
 const { getDeliveryContext } = require('./deliveryContext');
 const { createPlatformGroupContextStore } = require('./groupContextStore');
 const { createPlatformIdentityStore } = require('./identityStore');
@@ -52,7 +53,18 @@ function createPlatformRuntime(config, options = {}) {
     retentionMs: config.PLATFORM_GROUP_CONTEXT_RETENTION_MS,
     maxMessages: config.PLATFORM_GROUP_CONTEXT_MAX_MESSAGES
   });
-  const registry = createPlatformRegistry({ identityStore, groupContextStore });
+  let registry = null;
+
+  function resolvePrivateTarget(principalId) {
+    const recentTarget = identityStore.getLastPrivateTarget(principalId);
+    if (!recentTarget) return null;
+    const target = createDeliveryTarget(recentTarget);
+    const adapter = registry?.get(target.platform);
+    if (!adapter || adapter.enabled === false) return null;
+    return adapter.getHealth?.().status === 'online' ? target : null;
+  }
+
+  registry = createPlatformRegistry({ identityStore, groupContextStore });
   registry.register(createQqAdapter({
     getHealth() {
       const connection = qqActionClient.getConnectionState();
@@ -111,6 +123,7 @@ function createPlatformRuntime(config, options = {}) {
     groupContextStore,
     identityStore,
     registry,
+    resolvePrivateTarget,
     start: (onMessage) => registry.startEnabled(onMessage),
     stop: () => registry.stopAll()
   };
