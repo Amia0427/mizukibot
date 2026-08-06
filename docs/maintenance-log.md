@@ -4,6 +4,7 @@
 - 私聊安全边界已覆盖：微信群、群事件、非绑定者、非 USER 消息和目标 bot 不匹配均在媒体下载、上下文令牌、会话、模型、记忆和工具前丢弃；审计不记录正文，代码未提供微信群开关、入群或群发送接口。
 - Node 20.20.2、ABI 115 验收：39 个微信/平台/授权定向测试文件通过；`TEST_CONCURRENCY=4 npm test` 用时 110.6 秒并退出 0；隔离微信 SQLite 探针返回 `quick_check={"ok":true,"messages":["ok"]}`。系统 Node 24.14.1 下 `npm run lint` 检查 855 个文件、`npm run typecheck` 和 `git diff --check` 均退出 0。
 - 当前没有真实 iLink 测试账号，未执行真实二维码扫码、QQ/微信连续对话、微信主动通知和真实解绑；没有伪造验收结果。未纳入 `.belt/`、`AGENT.md`、`tests/maimaiAgentIntegration.test.js`，未推送远端。
+- 提交后记录（2026-08-06 10:53 +08:00）：微信 iLink 私聊适配功能提交 `d79ce00` 已完成，本小目标已完成；当前分支未推送远端。
 
 ## 运行维护 2026-08-06 10:05 +08:00
 
