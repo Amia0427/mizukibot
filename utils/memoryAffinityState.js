@@ -47,6 +47,13 @@ function getV3OnlyAffinityState(userId, options = {}) {
 }
 
 function getUserAffinityState(userId, options = {}) {
+  if (config.CONVERSATION_VARIABLES_ENABLED !== false && config.CONVERSATION_VARIABLES_PRIMARY_READ !== false) {
+    const key = resolveAffinityKey(userId, options);
+    const variables = require('./conversationVariables');
+    if (variables.hasState(key)) {
+      return variables.toLegacyAffinityState(variables.getSnapshot({ userId: key }), key);
+    }
+  }
   if (config.MEMORY_STORAGE_MODE === 'v3_only') {
     return getV3OnlyAffinityState(userId, options);
   }

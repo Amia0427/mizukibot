@@ -280,11 +280,22 @@ function updateFavor(userId, text, groupId) {
 
 function getUserAffinityState(userId, options = {}) {
   const key = resolveAffinityKey(userId, options);
+  if (config.CONVERSATION_VARIABLES_ENABLED !== false && config.CONVERSATION_VARIABLES_PRIMARY_READ !== false && key) {
+    const variables = require('../conversationVariables');
+    if (variables.hasState(key)) return variables.toLegacyAffinityState(variables.getSnapshot({ userId: key }), key);
+  }
   if (!key) return defaultFavorite();
   return ensureUserFavorite(key);
 }
 
 function applyAffinityProposal(userId, proposal = {}, options = {}) {
+  if (config.CONVERSATION_VARIABLES_ENABLED !== false) {
+    return require('../conversationVariables').applyLegacyAffinityProposal(userId, proposal, {
+      ...options,
+      userText: options.userText,
+      assistantText: options.assistantText
+    });
+  }
   const key = resolveAffinityKey(userId, options);
   if (!key) return { applied: false, reason: 'missing_user_id', state: defaultFavorite(), proposal: normalizeAffinityProposal(proposal) };
 

@@ -1,6 +1,8 @@
 # 记忆与提示词
 
-本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-08-04 12:05 +08:00。
+本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-08-08 14:17 +08:00。
+
+关系阶段、边界、态度和角色短期状态不属于 Memory V3 事实召回，统一由 [`../../utils/conversationVariables/index.js`](../../utils/conversationVariables/index.js) 从 SQLite 快照提供。完整变量定义、提案门槛、迁移和控制台接口见 [`../conversation-variables.md`](../conversation-variables.md)。
 
 最重要的原则是：Memory V3 事件日志是长期记忆业务真值，Profile Journal 是可重建结构化读模型，LanceDB 是在线向量索引。短期会话、Daily Journal、图片索引和 LangGraph 状态仍有独立职责；任意一层成功都不能替代端到端召回与注入验收。
 
@@ -71,7 +73,7 @@
 
 ### 兼容 Profile 与 affinity
 
-`utils/memory` 仍维护 favorites 和 legacy memory/profile。它负责好感/关系状态、facts、summary、impression 和兼容 API；写入有缓存、dirty set、原子落盘与退出 flush。
+`utils/memory` 仍维护 favorites 和 legacy memory/profile。它负责 facts、summary、impression 和兼容 API；关系读取优先走 conversation variables，旧 affinity 仅在迁移前或新库不可用时回退。写入有缓存、dirty set、原子落盘与退出 flush。
 
 这是兼容层，不等于 Memory V3 的事件真值。新长期事实优先经过受控写入或 V3 事件；只有明确维护兼容调用者时才直接扩展 legacy shape。管理员 affinity 还有保护逻辑，不能通过普通提取覆盖。
 

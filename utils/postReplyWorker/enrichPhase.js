@@ -377,8 +377,24 @@ async function runEnrichPhase(job = {}, meta = {}) {
   };
 
   if (enrichment?.affinity && typeof enrichment.affinity === 'object') {
-    const affinity = enrichment.affinity;
-    const affinityText = [affinity.relationship, affinity.attitude, affinity.reason].map((item) => normalizeText(item)).filter(Boolean).join(' ');
+    const affinity = enrichment.relationship && typeof enrichment.relationship === 'object'
+      ? {
+          relationship: enrichment.relationship,
+          character: enrichment.character,
+          negativeImpact: enrichment.negativeImpact,
+          reason: enrichment.reason,
+          confidence: enrichment.confidence,
+          favor_delta: enrichment.relationship.affectionDelta,
+          trust_delta: enrichment.relationship.trustDelta,
+          attitude: enrichment.relationship.attitude
+        }
+      : enrichment.affinity;
+    const affinityText = [
+      typeof affinity.relationship === 'string' ? affinity.relationship : '',
+      affinity.attitude,
+      affinity.reason,
+      affinity.relationship?.attitude
+    ].map((item) => normalizeText(item)).filter(Boolean).join(' ');
     const gateResult = assessWrite({
       fieldKey: 'affinity',
       text: affinityText,
@@ -387,6 +403,9 @@ async function runEnrichPhase(job = {}, meta = {}) {
       requiresUser: true
     });
     if (gateResult.allow) applyAffinityProposal(job.userId, affinity, {
+      eventKey: meta.turnId || meta.jobId,
+      turnId: meta.turnId,
+      actorId: 'post_reply_worker',
       userText: latest.question,
       assistantText: latest.finalReply,
       routePolicyKey: meta.routePolicyKey,

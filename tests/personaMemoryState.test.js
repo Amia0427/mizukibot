@@ -124,7 +124,10 @@ module.exports = (async () => {
   assert.ok(String(state.expressionState.replyPosture.value || '').trim());
   assert.strictEqual(state.expressionState.jargon.value, 'group_only');
   assert.strictEqual(state.expressionState.jargon.source, 'surface_policy');
-  assert.ok(renderPersonaMemoryPrompt(state, 'direct_chat').systemMessages.some((item) => item.content.includes('reply_posture=')));
+  const directPromptText = renderPersonaMemoryPrompt(state, 'direct_chat').systemMessages.map((item) => item.content).join('\n');
+  assert.ok(directPromptText.includes('reply_posture='));
+  assert.ok(directPromptText.includes('我们目前是'));
+  assert.ok(!directPromptText.includes('relationship_stage='));
 
   const privatePolicyText = renderPersonaMemoryPrompt(state, 'private_chat').systemMessages.map((item) => item.content).join('\n');
   assert.ok(privatePolicyText.includes('surface=private_chat'));

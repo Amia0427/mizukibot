@@ -4,6 +4,7 @@ const { getAntiAIRules } = require('./antiAIRules');
 const { getCurrentActivity } = require('./currentActivity');
 const { getRelationshipBoundaryWithSource } = require('./relationshipBoundary');
 const { getRecentContextSummaryWithSource } = require('./recentContext');
+const conversationVariables = require('../conversationVariables');
 
 const LIVE_STATE_TOKEN_LIMIT = 800;
 
@@ -71,6 +72,12 @@ function buildLiveStateContext(input = {}) {
     parts.push(activity.activity);
     if (activity.mood) parts.push(`情绪状态：${activity.mood}`);
     if (activity.constraints) parts.push(`注意：${activity.constraints}`);
+    parts.push('');
+  }
+
+  if (input.characterStateText) {
+    parts.push('【瑞希当前状态】');
+    parts.push(String(input.characterStateText).trim());
     parts.push('');
   }
 
@@ -183,11 +190,16 @@ async function buildLiveStateForState(state = {}, options = {}) {
   ]);
   const relationship = normalizeObject(relationshipResult.boundary);
   const recentContext = recentContextResult.summary;
+  const variableSnapshot = conversationVariables.isEnabled()
+    ? conversationVariables.getSnapshot({ userId: input.userId, now: options.now instanceof Date ? options.now.getTime() : Date.now() })
+    : null;
+  const characterStateText = variableSnapshot ? conversationVariables.formatCharacterState(variableSnapshot) : '';
 
   const rawContext = buildLiveStateContext({
     relationship,
     activity,
     recentContext,
+    characterStateText,
     antiAIRules,
     currentTime: options.now instanceof Date ? options.now : new Date(),
     timezone: options.timezone
@@ -199,6 +211,8 @@ async function buildLiveStateForState(state = {}, options = {}) {
     context,
     rawContext,
     relationship,
+    characterState: variableSnapshot?.character || null,
+    characterStateText,
     activity,
     recentContext,
     antiAIRules,

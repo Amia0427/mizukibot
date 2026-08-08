@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 对话变量系统 2026-08-08 14:17 +08:00
+
+- 新增 SQLite 真值的 `conversationVariables` 领域模块，统一关系、记忆画像关联态度和全局角色短期状态；关系按用户隔离，阶段由程序推导，模型只提交受限增量。
+- 主回复、生活状态、`/关系` 和自然关系问题共用快照；群聊不公开个人关系细节。管理员覆盖、锁定、解锁和审计事件通过控制台 API 完成，旧 `favorites.json` 仅用于迁移、备份和故障回退。
+- 验收：变量领域、迁移、提示词、查询、live state、Persona、Memory 注入、post-reply worker、消息处理边界和主动私聊回归通过；`npm run lint`、`npm run typecheck`、SQLite `quick_check` 通过。控制台隔离数据库完成查询/覆盖/移除验收，真实迁移 dry-run/apply 均为 97 条并生成双 JSON 备份；完整 `npm test` 仅有已过期天气夹具失败，详细记录见 [对话变量系统](docs/conversation-variables.md)。
+
 ## NapCat 消息发送超时修复 2026-08-06 23:41 +08:00
 
 - 根因：NapCat 对 `send_group_msg` 使用 `timeout.baseTimeout=10000` 等待 QQ 内部 `NodeIKernelMsgService/sendMsg` 的成功回调；本次群总结首段发送耗时 `10014ms`，因此在回调到达前被 NapCat 判定超时。机器人原有策略不会重试送达结果不确定的发送，避免重复消息。

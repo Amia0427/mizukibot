@@ -94,6 +94,17 @@ function timeout(ms, fallback) {
 }
 
 async function queryRelationshipProjection(userId, deps = {}) {
+  const variables = deps.conversationVariables || require('../conversationVariables');
+  if (variables.isEnabled() && variables.hasState(userId)) {
+    const snapshot = variables.getSnapshot({ userId });
+    return {
+      relationType: snapshot.relationship.stage,
+      relationship: snapshot.relationship.stageLabel,
+      closeness: snapshot.relationship.affection,
+      intimacy: snapshot.relationship.trust,
+      tags: [snapshot.relationship.boundaryMode]
+    };
+  }
   const memoryV3 = deps.memoryV3 || (() => {
     try {
       return require('../memory-v3');

@@ -45,6 +45,7 @@ const {
   renderMemoryV3NocturnePanel
 } = require('../memoryV3NocturneAdmin');
 const { registerMemoryV3NocturneRoutes } = require('../memoryV3NocturneRoute');
+const { registerConversationVariablesRoutes } = require('../conversationVariablesRoute');
 const {
   getCurrentSettings,
   getSettingsEndpointError,
@@ -237,6 +238,7 @@ function createWebApp(options = {}) {
 
   registerMainReplyContextPreviewRoute(app);
   registerMemoryV3NocturneRoutes(app);
+  registerConversationVariablesRoutes(app);
 
   app.get('/api/settings', (req, res) => {
     return res.json({ ok: true, settings: getCurrentSettings() });
@@ -549,6 +551,29 @@ function createWebApp(options = {}) {
   ${renderMainReplyContextPreviewPanel()}
 
   ${renderMemoryV3NocturnePanel()}
+
+  <div class="card">
+    <h3>对话变量</h3>
+    <div class="hint">查看关系快照、最近审计事件，并通过带原因的覆盖操作调整变量。</div>
+    <div class="actions">
+      <input id="cv_user_id" placeholder="用户ID" />
+      <button type="button" id="btn-cv-load">刷新变量</button>
+      <span id="cv-status"></span>
+    </div>
+    <pre id="cv-state" class="mono" style="white-space:pre-wrap;background:#fff9fb;padding:10px;border-radius:10px;min-height:80px">请输入用户ID后刷新</pre>
+    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>时间</th><th>来源</th><th>状态</th><th>原因</th><th>变更</th></tr></thead><tbody id="cv-events-body"></tbody></table></div>
+    <form id="cv-override-form" style="margin-top:14px">
+      <div class="grid">
+        <div class="field"><label>作用域</label><select id="cv_scope_type"><option value="user">user</option><option value="global">global</option></select></div>
+        <div class="field"><label>作用域ID</label><input id="cv_scope_id" placeholder="用户ID或 mizuki" /></div>
+        <div class="field"><label>变量键</label><input id="cv_key" placeholder="affection / trust / mood" /></div>
+        <div class="field"><label>值</label><input id="cv_value" placeholder="例如 80" /></div>
+        <div class="field" style="grid-column:1 / -1"><label>原因（必填）</label><input id="cv_reason" required placeholder="说明这次人工调整的原因" /></div>
+        <div class="field"><label>锁定</label><div class="inline-field"><input id="cv_locked" type="checkbox" checked /><span>锁定后模型提案只记录不覆盖</span></div></div>
+      </div>
+      <div class="actions"><button type="submit">保存覆盖</button><button type="button" id="btn-cv-remove">移除覆盖</button></div>
+    </form>
+  </div>
 
   <div class="card">
     <h3>长期记忆治理（压缩 + 纯洁）</h3>
@@ -1043,6 +1068,59 @@ ${renderMemoryV3NocturneClientScript()}
     document.getElementById('btn-ml-load').addEventListener('click', loadMemoryItems);
     document.getElementById('btn-mg-snapshots').addEventListener('click', loadSnapshots);
     document.getElementById('btn-mg-rollback').addEventListener('click', rollbackBySnapshot);
+
+    function conversationVariableScope() {
+      return {
+        scope_type: document.getElementById('cv_scope_type').value,
+        scope_id: document.getElementById('cv_scope_id').value.trim(),
+        key: document.getElementById('cv_key').value.trim(),
+        value: document.getElementById('cv_value').value,
+        reason: document.getElementById('cv_reason').value.trim(),
+        locked: document.getElementById('cv_locked').checked
+      };
+    }
+
+    async function loadConversationVariables() {
+      const userId = document.getElementById('cv_user_id').value.trim();
+      if (!userId) return;
+      const stateResponse = await authedFetch('/api/conversation-variables/state?user_id=' + encodeURIComponent(userId));
+      const stateData = await stateResponse.json();
+      if (!stateResponse.ok || !stateData.ok) throw new Error(stateData.error || '变量状态加载失败');
+      document.getElementById('cv-state').textContent = JSON.stringify(stateData.snapshot, null, 2);
+      document.getElementById('cv_scope_id').value = userId;
+      const eventsResponse = await authedFetch('/api/conversation-variables/events?scope_type=user&scope_id=' + encodeURIComponent(userId) + '&limit=30');
+      const eventsData = await eventsResponse.json();
+      if (!eventsResponse.ok || !eventsData.ok) throw new Error(eventsData.error || '变量事件加载失败');
+      document.getElementById('cv-events-body').innerHTML = (eventsData.events || []).map(function (event) {
+        const applied = event.applied && event.applied.changedKeys ? event.applied.changedKeys.map(function (item) { return item.key + '=' + item.value; }).join(', ') : '';
+        return '<tr><td>' + escapeCell(new Date(event.createdAt).toLocaleString()) + '</td><td>' + escapeCell(event.source) + '</td><td>' + escapeCell(event.status) + '</td><td>' + escapeCell(event.reason) + '</td><td>' + escapeCell(applied || '-') + '</td></tr>';
+      }).join('');
+    }
+
+    async function saveConversationVariableOverride(remove) {
+      const payload = conversationVariableScope();
+      if (!payload.scope_id || !payload.key || !payload.reason) throw new Error('作用域ID、变量键和原因不能为空');
+      const response = await authedFetch('/api/conversation-variables/override' + (remove ? '/remove' : ''), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || '变量覆盖操作失败');
+      await loadConversationVariables();
+      document.getElementById('cv-status').textContent = remove ? '覆盖已移除' : '覆盖已保存';
+    }
+
+    document.getElementById('btn-cv-load').addEventListener('click', function () {
+      loadConversationVariables().catch(function (error) { document.getElementById('cv-status').textContent = error.message; });
+    });
+    document.getElementById('cv-override-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      saveConversationVariableOverride(false).catch(function (error) { document.getElementById('cv-status').textContent = error.message; });
+    });
+    document.getElementById('btn-cv-remove').addEventListener('click', function () {
+      saveConversationVariableOverride(true).catch(function (error) { document.getElementById('cv-status').textContent = error.message; });
+    });
 
     document.getElementById('ml-body').addEventListener('click', async function (ev) {
       const target = ev.target;

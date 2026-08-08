@@ -17,40 +17,73 @@ const {
   parsePersonaPreference,
   uniqueBy
 } = require('./helpers');
+const { formatCharacterState } = require('../conversationVariables');
 
-function buildExpressionState({ surface, relationshipState, styleProfile, socialContext, memoryContext }) {
+function deriveCharacterExpressionState(character = {}) {
+  const mood = Number(character.mood || 0);
+  const energy = Number(character.energy || 0);
+  const stress = Number(character.stress || 0);
+  const socialWillingness = Number(character.socialWillingness || 0);
+  return {
+    warmth: mood <= -30 || stress >= 65
+      ? 'low'
+      : (mood >= 30 && socialWillingness >= 60 ? 'high' : ''),
+    initiative: energy <= 35 || socialWillingness <= 35 || stress >= 70
+      ? 'reply'
+      : (energy >= 70 && socialWillingness >= 70 && stress < 50 ? 'proactive' : ''),
+    guardedness: stress >= 70 || socialWillingness <= 35
+      ? 'guarded'
+      : (mood >= 20 && socialWillingness >= 70 ? 'soft_open' : '')
+  };
+}
+
+function buildExpressionState({ surface, relationshipState, styleProfile, socialContext, memoryContext, variableSnapshot }) {
   const persona = normalizeObject(memoryContext.persona, {});
   const relationshipStyle = normalizeText(persona.relationshipStyle || persona.userAdaptationPersona, 320);
   const botBasePersona = normalizeText(persona.botBasePersona, 320);
-  const warmth = parsePersonaPreference(relationshipStyle, 'relationship_tone')
-    || parsePersonaPreference(botBasePersona, 'bot_persona_tone')
+  const relationshipWarmth = parsePersonaPreference(relationshipStyle, 'relationship_tone');
+  const personaWarmth = parsePersonaPreference(botBasePersona, 'bot_persona_tone');
+  const personaInitiative = parsePersonaPreference(botBasePersona, 'bot_persona_initiative');
+  const relationshipInitiative = parsePersonaPreference(relationshipStyle, 'relationship_engagement');
+  const relationshipGuardedness = parsePersonaPreference(relationshipStyle, 'relationship_distance');
+  const personaGuardedness = parsePersonaPreference(botBasePersona, 'bot_persona_guardedness');
+  const characterExpression = variableSnapshot?.character
+    ? deriveCharacterExpressionState(variableSnapshot.character)
+    : {};
+  const warmth = characterExpression.warmth
+    || relationshipWarmth
+    || personaWarmth
     || inferWarmth(relationshipState.relationship, relationshipState.attitude, surface);
   const playfulness = parsePersonaPreference(botBasePersona, 'bot_persona_playfulness')
     || inferPlayfulness(styleProfile, socialContext, surface);
-  const initiative = parsePersonaPreference(botBasePersona, 'bot_persona_initiative')
-    || parsePersonaPreference(relationshipStyle, 'relationship_engagement')
+  const initiative = characterExpression.initiative
+    || personaInitiative
+    || relationshipInitiative
     || inferInitiative(surface);
-  const guardedness = parsePersonaPreference(relationshipStyle, 'relationship_distance')
-    || parsePersonaPreference(botBasePersona, 'bot_persona_guardedness')
+  const guardedness = characterExpression.guardedness
+    || relationshipGuardedness
+    || personaGuardedness
     || inferGuardedness(surface, relationshipState.relationship);
   const verbosity = parsePersonaPreference(botBasePersona, 'bot_persona_verbosity')
     || inferVerbosity(surface, styleProfile);
   return {
-    warmth: buildExpressionValue(warmth, parsePersonaPreference(relationshipStyle, 'relationship_tone') ? 'relationship_memory' : (parsePersonaPreference(botBasePersona, 'bot_persona_tone') ? 'persona_memory' : 'runtime_inference')),
+    warmth: buildExpressionValue(warmth, characterExpression.warmth ? 'conversation_variables' : (relationshipWarmth ? 'relationship_memory' : (personaWarmth ? 'persona_memory' : 'runtime_inference'))),
     playfulness: buildExpressionValue(playfulness, parsePersonaPreference(botBasePersona, 'bot_persona_playfulness') ? 'persona_memory' : 'runtime_inference'),
     tease: buildExpressionValue(inferTease(styleProfile, socialContext, surface), 'runtime_inference'),
-    initiative: buildExpressionValue(initiative, parsePersonaPreference(botBasePersona, 'bot_persona_initiative') ? 'persona_memory' : (parsePersonaPreference(relationshipStyle, 'relationship_engagement') ? 'relationship_memory' : 'surface_policy')),
+    initiative: buildExpressionValue(initiative, characterExpression.initiative ? 'conversation_variables' : (personaInitiative ? 'persona_memory' : (relationshipInitiative ? 'relationship_memory' : 'surface_policy'))),
     jargon: buildExpressionValue(inferJargon(surface, relationshipState.groupId, memoryContext?.styleSignalText), 'surface_policy'),
     verbosity: buildExpressionValue(verbosity, parsePersonaPreference(botBasePersona, 'bot_persona_verbosity') ? 'persona_memory' : 'runtime_inference'),
-    guardedness: buildExpressionValue(guardedness, parsePersonaPreference(relationshipStyle, 'relationship_distance') ? 'relationship_memory' : (parsePersonaPreference(botBasePersona, 'bot_persona_guardedness') ? 'persona_memory' : 'surface_policy'))
+    guardedness: buildExpressionValue(guardedness, characterExpression.guardedness ? 'conversation_variables' : (relationshipGuardedness ? 'relationship_memory' : (personaGuardedness ? 'persona_memory' : 'surface_policy'))),
+    characterState: variableSnapshot?.character ? formatCharacterState(variableSnapshot) : ''
   };
 }
 
-function buildRelationshipState({ userId, groupId, memoryContext, affinityState, profile }) {
+function buildRelationshipState({ userId, groupId, memoryContext, affinityState, profile, variableSnapshot }) {
   const persona = normalizeObject(memoryContext.persona, {});
   const relationshipStyle = normalizeText(persona.relationshipStyle || persona.userAdaptationPersona, 320);
   const relation = normalizeText(
-    profile?.relation_stage
+    variableSnapshot?.relationship?.stageLabel
+    || profile?.relation_stage
     || memoryContext?.profile?.relation_stage
     || affinityState?.relationship
     || affinityState?.level
@@ -58,12 +91,14 @@ function buildRelationshipState({ userId, groupId, memoryContext, affinityState,
     48
   ) || '陌生人';
   const attitude = normalizeText(
-    affinityState?.attitude
+    variableSnapshot?.relationship?.attitude
+    || affinityState?.attitude
     || memoryContext?.impressionText
     || '中立、保持距离',
     160
   ) || '中立、保持距离';
-  const inferredDistance = relation === '亲密伙伴' ? 'close' : (relation === '普通朋友' ? 'friendly' : 'reserved');
+  const inferredDistance = variableSnapshot?.relationship?.boundaryMode
+    || (relation === '亲密伙伴' ? 'close' : (relation === '普通朋友' ? 'friendly' : 'reserved'));
   return {
     userId: normalizeText(userId),
     groupId: normalizeText(groupId),
@@ -192,5 +227,6 @@ module.exports = {
   buildExpressionState,
   buildRelationshipState,
   buildMemoryDigest,
+  deriveCharacterExpressionState,
   resolveContinuitySlots
 };

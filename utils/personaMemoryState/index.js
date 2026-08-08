@@ -14,6 +14,7 @@ const { loadBridgeStore } = require('../shortTermBridgeMemory');
 const { getRecentSessionContextSummaries } = require('../sessionContextSummaryStore');
 const { getDailyJournalRetrievalBundle } = require('../dailyJournal');
 const { getUserAffinityState, getUserProfile } = require('../memory');
+const conversationVariables = require('../conversationVariables');
 const {
   CONTINUITY_PRIORITY,
   DEFAULT_SURFACE,
@@ -167,13 +168,17 @@ async function composePersonaMemoryState(request = {}, options = {}) {
   const affinityState = normalizeObject(memoryContext.affinityState) && Object.keys(normalizeObject(memoryContext.affinityState)).length
     ? memoryContext.affinityState
     : getUserAffinityState(userId);
+  const variableSnapshot = conversationVariables.isEnabled()
+    ? conversationVariables.getSnapshot({ userId })
+    : null;
   const profile = getUserProfile(userId) || {};
   const relationshipState = buildRelationshipState({
     userId,
     groupId,
     memoryContext,
     affinityState,
-    profile
+    profile,
+    variableSnapshot
   });
   const continuityCandidates = buildContinuityCandidates({
     sessionProjection,
@@ -216,7 +221,8 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     relationshipState,
     styleProfile,
     socialContext,
-    memoryContext
+    memoryContext,
+    variableSnapshot
   });
   const inheritedReplyPosture = normalizeReplyPosture(
     shortTermState.expression?.replyPosture
@@ -338,7 +344,8 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     },
     styleProfile,
     socialContext,
-    affinityState
+    affinityState,
+    variableSnapshot
   };
 
   return {
@@ -349,6 +356,9 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     userId,
     groupId,
     personaCore,
+    variablePromptContext: variableSnapshot
+      ? conversationVariables.buildVariablePromptContext(variableSnapshot)
+      : '',
     relationshipState,
     continuityState,
     expressionState,

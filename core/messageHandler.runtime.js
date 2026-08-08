@@ -2300,6 +2300,31 @@ function createMessageHandler({
     }
     const effectiveRawText = getCachedRouteValue(`effectiveRawText:${String(effectiveMsg?.raw_message || rawText || '')}`, () => String(effectiveMsg?.raw_message || rawText || ''));
     const effectiveCleanText = getCachedRouteValue(`effectiveCleanText:${effectiveRawText}:${effectiveBotQQ}`, () => stripLeadingCqControlSegments(effectiveRawText, effectiveBotQQ));
+    const conversationVariables = require('../utils/conversationVariables');
+    const variableQueryKind = conversationVariables.classifyVariableQuery(effectiveCleanText);
+    const explicitVariableCommand = /^\s*\/关系(?:\s|$)/i.test(String(effectiveCleanText || '').trim());
+    if (variableQueryKind && (isPrivateChatType(chatType) || mentioned || explicitVariableCommand)) {
+      const variableQuery = conversationVariables.resolveVariableQueryReply({
+        text: effectiveCleanText,
+        privateChat: isPrivateChatType(chatType),
+        snapshot: conversationVariables.getSnapshot({ userId: senderId })
+      });
+      await sendGroupReply({
+        chatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText: variableQuery.replyText,
+        atSender: !isPrivateChatType(chatType),
+        retries: 1,
+        waitMs: 300,
+        source: 'conversation_variables_query',
+        routePolicyKey: `chat/${variableQuery.kind}`,
+        topRouteType: 'direct_chat'
+      });
+      logMemoryWriteSkip('conversation_variables_query', { kind: variableQuery.kind });
+      return;
+    }
     const directedContext = await resolveMessageDirectedContext({
       msg,
       effectiveMsg,

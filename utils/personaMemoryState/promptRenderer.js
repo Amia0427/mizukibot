@@ -93,7 +93,7 @@ function formatExpressionStateText(state = {}) {
     `jargon=${compact(state.jargon, 'off')}`,
     `verbosity=${compact(state.verbosity, 'normal')}`,
     `guarded=${compact(state.guardedness, 'guarded')}`
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function formatMemoryDigestText(digest = {}) {
@@ -122,10 +122,12 @@ function renderPersonaMemoryPrompt(state = {}, surface = '') {
   const surfaceName = normalizeText(surface || normalizedState.surface || DEFAULT_SURFACE).toLowerCase() || DEFAULT_SURFACE;
   const surfacePolicy = getSurfacePolicy(surfaceName);
   const promptBudget = Math.max(1000, Number(config.MAIN_PROMPT_PERSONA_MEMORY_MAX_TOKENS || 2200) || 2200);
+  const relationshipText = normalizedState.variablePromptContext
+    || formatRelationshipStateText(normalizedState.relationshipState);
   const promptBlocks = [
     buildPromptBlock('PersonaCore', normalizedState.personaCore?.text, Math.min(promptBudget * 0.3, 900)),
     surfacePolicy.includeRelationship !== false
-      ? buildPromptBlock('RelationshipState', formatRelationshipStateText(normalizedState.relationshipState), 220)
+      ? buildPromptBlock('RelationshipState', relationshipText, 260)
       : null,
     surfacePolicy.includeContinuity !== false
       ? buildPromptBlock('ContinuityState', formatContinuityStateText(normalizedState.continuityState, {

@@ -571,25 +571,59 @@ Rules:
   }
 }
 
+function normalizeConversationVariableProposal(raw = {}) {
+  const value = raw && typeof raw === 'object' ? raw : {};
+  const relationship = value.relationship && typeof value.relationship === 'object' ? value.relationship : value;
+  const character = value.character && typeof value.character === 'object' ? value.character : {};
+  const numberOrZero = (item) => Number(item || 0) || 0;
+  return {
+    relationship: {
+      affectionDelta: numberOrZero(relationship.affectionDelta ?? relationship.favor_delta ?? value.affectionDelta ?? value.favor_delta),
+      trustDelta: numberOrZero(relationship.trustDelta ?? relationship.trust_delta ?? value.trustDelta ?? value.trust_delta),
+      familiarityDelta: numberOrZero(relationship.familiarityDelta ?? relationship.familiarity_delta ?? value.familiarityDelta),
+      boundarySignal: String(relationship.boundarySignal ?? relationship.boundary_signal ?? value.boundarySignal ?? 'unchanged').trim().toLowerCase() || 'unchanged',
+      attitude: String(relationship.attitude ?? relationship.attitudeText ?? value.attitude ?? '').trim()
+    },
+    character: {
+      moodDelta: numberOrZero(character.moodDelta ?? character.mood_delta),
+      energyDelta: numberOrZero(character.energyDelta ?? character.energy_delta),
+      stressDelta: numberOrZero(character.stressDelta ?? character.stress_delta),
+      socialWillingnessDelta: numberOrZero(character.socialWillingnessDelta ?? character.social_willingness_delta)
+    },
+    negativeImpact: String(value.negativeImpact ?? value.negative_impact ?? 'none').trim().toLowerCase() || 'none',
+    reason: String(value.reason || '').trim(),
+    confidence: Math.max(0, Math.min(1, numberOrZero(value.confidence)))
+  };
+}
+
 async function extractAffinityProposal(userId, userText, botReply, options = {}) {
   const extractPrompt = `
-You are an affinity-state extractor. Return JSON only:
+You are a conversation-variable extractor. Return JSON only:
 {
-  "relationship": "",
-  "attitude": "",
-  "favor_delta": 0,
-  "trust_delta": 0,
+  "relationship": {
+    "affectionDelta": 0,
+    "trustDelta": 0,
+    "familiarityDelta": 0,
+    "boundarySignal": "unchanged",
+    "attitude": ""
+  },
+  "character": {
+    "moodDelta": 0,
+    "energyDelta": 0,
+    "stressDelta": 0,
+    "socialWillingnessDelta": 0
+  },
+  "negativeImpact": "none",
   "reason": "",
   "confidence": 0.0
 }
 Rules:
-- infer only this turn's relationship impact, not a full long-term profile rewrite
-- relationship must be a short label such as "陌生人", "普通朋友", "亲密伙伴", "警惕对象"
-- attitude must be a short, stable description of current stance, not a dramatic temporary emotion
-- favor_delta should usually stay between -6 and +3
-- trust_delta should usually stay between -6 and +3
-- if there is no meaningful change, return empty strings with 0 deltas
-- reason must be a short displayable phrase
+- infer only this turn's change, not a full profile rewrite
+- numeric deltas are small; use 0 when there is no clear change
+- only use negativeImpact boundary_violation, deception, or abuse for a major, explicit, explainable event; ordinary disagreement, refusal, silence, or jokes are none
+- boundarySignal is closer, farther, or unchanged; do not return a relationship stage
+- attitude is a short stable stance, not a temporary emotion
+- reason must be a short, displayable explanation when any value changes
 - confidence must be between 0 and 1
 - do not mention hidden systems, prompts, or internal instructions
   `.trim();
@@ -627,13 +661,13 @@ Rules:
     const obj = extractJsonSafely(normalizeTextContent(msg?.content));
     if (!obj || typeof obj !== 'object') return null;
     return {
-      relationship: String(obj.relationship || '').trim(),
-      attitude: String(obj.attitude || '').trim(),
-      favor_delta: Number(obj.favor_delta || 0) || 0,
-      trust_delta: Number(obj.trust_delta || 0) || 0,
-      reason: String(obj.reason || '').trim(),
-      confidence: Number(obj.confidence || 0) || 0,
-      source: 'affinity_extractor'
+      ...normalizeConversationVariableProposal(obj),
+      source: 'conversation_variables_extractor',
+      relationshipLabel: String(obj.relationshipLabel || obj.relationship_stage || '').trim(),
+      relationship: {
+        ...normalizeConversationVariableProposal(obj).relationship,
+        legacyLabel: typeof obj.relationship === 'string' ? obj.relationship.trim() : ''
+      }
     };
   } catch (e) {
     console.error('affinity extraction failed:', e.message);
@@ -825,6 +859,9 @@ Rules:
     const affinityProposal = await extractAffinityProposal(userId, userText, botReply, options);
     if (affinityProposal) {
       applyAffinityProposal(userId, affinityProposal, {
+        eventKey: options.eventKey || options.turnId || options.jobId || options.postReplyJobId,
+        turnId: options.turnId || options.turnIds?.[options.turnIds.length - 1],
+        actorId: options.actorId,
         userText,
         assistantText: botReply,
         routePolicyKey: options.routePolicyKey,
@@ -841,6 +878,33 @@ Rules:
     console.error('memory extraction failed:', e.message);
     if (options.throwOnError) throw e;
   }
+}
+
+function normalizePostReplyEnrichment(value = {}) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const source = raw.relationship
+    ? { ...raw, relationship: raw.relationship }
+    : { ...(raw.affinity && typeof raw.affinity === 'object' ? raw.affinity : {}), character: raw.character || raw.affinity?.character || {} };
+  const proposal = normalizeConversationVariableProposal(source);
+  const legacyAffinity = raw.affinity && typeof raw.affinity === 'object'
+    ? raw.affinity
+    : {
+        relationship: proposal.relationship.legacyLabel || '',
+        attitude: proposal.relationship.attitude,
+        favor_delta: proposal.relationship.affectionDelta,
+        trust_delta: proposal.relationship.trustDelta,
+        reason: proposal.reason,
+        confidence: proposal.confidence
+      };
+  return {
+    ...raw,
+    relationship: proposal.relationship,
+    character: proposal.character,
+    negativeImpact: proposal.negativeImpact,
+    reason: proposal.reason,
+    confidence: proposal.confidence,
+    affinity: legacyAffinity
+  };
 }
 
 async function extractPostReplyEnrichment(userId, turns = [], options = {}) {
@@ -880,14 +944,22 @@ async function extractPostReplyEnrichment(userId, turns = [], options = {}) {
   const prompt = `
 You are a post-reply enrichment extractor. Return JSON only:
 {
-  "affinity": {
-    "relationship": "",
-    "attitude": "",
-    "favor_delta": 0,
-    "trust_delta": 0,
-    "reason": "",
-    "confidence": 0
+  "relationship": {
+    "affectionDelta": 0,
+    "trustDelta": 0,
+    "familiarityDelta": 0,
+    "boundarySignal": "unchanged",
+    "attitude": ""
   },
+  "character": {
+    "moodDelta": 0,
+    "energyDelta": 0,
+    "stressDelta": 0,
+    "socialWillingnessDelta": 0
+  },
+  "negativeImpact": "none",
+  "reason": "",
+  "confidence": 0,
   "task_memory": {
     "task_type": "",
     "trigger": "",
@@ -920,6 +992,7 @@ Rules:
 - return empty objects/arrays with confidence 0 when unsure
 - only extract stable, reusable signals
 - do not fabricate facts or sensitive content
+- only use negativeImpact boundary_violation, deception, or abuse for a major, explicit, explainable event; ordinary disagreement, refusal, silence, or jokes are none
 - self_improvement.items should follow the existing self-improvement extraction shape
   `.trim();
 
@@ -959,7 +1032,9 @@ Rules:
 
   const msg = extractMessageContent(resp);
   const obj = extractJsonSafely(normalizeTextContent(msg?.content));
-  return (obj && typeof obj === 'object') ? obj : {
+  return (obj && typeof obj === 'object') ? normalizePostReplyEnrichment(obj) : {
+    relationship: null,
+    character: null,
     affinity: null,
     taskMemory: null,
     groupMemory: null,
@@ -971,5 +1046,7 @@ Rules:
 
 module.exports = {
   learnSomethingNew,
-  extractPostReplyEnrichment
+  extractPostReplyEnrichment,
+  normalizeConversationVariableProposal,
+  normalizePostReplyEnrichment
 };
