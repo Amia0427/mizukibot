@@ -23,6 +23,14 @@
 - 验收：`node scripts/run-tests.js tests/napcatActionClientConnectionState.test.js tests/napcatActionRetry.test.js tests/groupSummaryAdminRoute.test.js tests/privateChatAdminRouting.test.js`、目标 ESLint、`npm run typecheck` 和 `git diff --check` 通过；重启主进程后 `/live`、`/ready` 返回 200，NapCat `get_status` 为 `online=true/good=true`；实际发送群消息并用 `get_msg` 回读成功，`message_id=1940400047`、`post_type=message_sent`，未在 10 秒处超时。
 - 提交后记录：代码与文档提交 `86cae39` 已完成；未推送远端。未修改 `prompts/admin.txt`，未纳入 `.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js`。
 
+## 运行维护 2026-08-06 23:28 +08:00
+
+- 天气数据源替换功能实现提交已完成：`skill_weather` 使用高德地理编码、天气实况和最多 4 日预报，`skill_weather_cloud` 使用国家卫星气象中心 FY-4B 中国区域或全圆盘云图；本小目标已完成。
+- 已从本地 `C:\Users\Administrator\Downloads\aamp.txt` 写入 `.env` 的 `AMAP_KEY`；`.env` 受 Git 忽略，密钥未写入 README、维护日志、工具证据、命令输出或提交。
+- 高德真实只读验收：地理编码、天气实况、天气预报、POI 文本搜索、逆地理编码和 IP 定位均返回 `status=1`、`infocode=10000`；机器人生产适配器成功返回上海实况与 2026-08-06 至 2026-08-09 的 4 日预报。
+- FY-4B 真实只读验收：中国真彩图为 JPEG 1719x1080、688434 字节，全圆盘真彩经内存缩放后为 JPEG 1890x2048、466651 字节；两次均使用内存伪客户端，没有向真实 QQ 会话发送图片。
+- 自动验收：环境数据、路由、原生技能、Planner 与工具契约定向测试通过；`npm run check:prompts`、`npm run lint`、`npm run typecheck`、`git diff --check` 通过，完整 `npm test` 用时 184.7 秒并退出 0；当前分支未推送远端。
+
 ## 运行维护 2026-08-06 10:58 +08:00
 
 - 新增 `docs/weixin-ilink-user-guide.md`，以瑞希口吻提供可直接发布的微信 iLink 长版更新公告，并详细说明首次绑定、身份与数据共享、媒体边界、通知平台、换绑、解绑、QQ 专属操作审批、私聊禁群、安全说明和常见问题。
