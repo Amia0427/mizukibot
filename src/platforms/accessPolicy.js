@@ -16,7 +16,7 @@ function filterToolsForPlatform(toolNames = [], platform = 'qq') {
 }
 
 function isQqOnlyCommand(text = '') {
-  return /^\/(?:qzone_post)(?:\s|$)/i.test(String(text || '').trim());
+  return /^\/(?:qzone_post|邮件问候)(?:\s|$)/i.test(String(text || '').trim());
 }
 
 function shouldRunPassiveAwareness(message = {}) {

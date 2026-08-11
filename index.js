@@ -53,6 +53,8 @@ const { createWeixinMainRuntime } = require('./src/platforms/weixin/main-runtime
 const { ensureWeixinWorkerRunning } = require('./utils/weixinWorkerSupervisor');
 const { createWeatherAlertCommandHandler } = require('./src/features/weather-alerts/commands');
 const { initializeWeatherAlertRuntime } = require('./src/features/weather-alerts/runtime');
+const { createEmailGreetingCommandHandler } = require('./src/features/email-greetings/commands');
+const { initializeEmailGreetingRuntime } = require('./src/features/email-greetings/runtime');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -455,6 +457,8 @@ function askAIByGraph(...args) {
   return require('./api/agentGraph').askAIByGraph(...args);
 }
 
+const emailGreetingRuntime = initializeEmailGreetingRuntime({ config, askAIByGraph });
+
 async function sendWithRetry(payload, retries = 1, waitMs = 500) {
   return sendNapCatActionWithRetry({
     actionClient: platformActionClient,
@@ -499,6 +503,19 @@ const weatherAlertCommandHandler = createWeatherAlertCommandHandler({
   }
 });
 
+const emailGreetingCommandHandler = createEmailGreetingCommandHandler({
+  getRuntime: () => emailGreetingRuntime,
+  sendReply: async (msg, replyText) => {
+    const isPrivate = String(msg?.message_type || '').trim().toLowerCase() === 'private';
+    await sendWithRetry({
+      action: isPrivate ? 'send_private_msg' : 'send_group_msg',
+      params: isPrivate
+        ? { user_id: String(msg?.user_id || '').trim(), message: replyText }
+        : { group_id: String(msg?.group_id || '').trim(), message: replyText }
+    }, 1, 300);
+  }
+});
+
 const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry,
@@ -508,7 +525,7 @@ const { handleIncomingMessage } = createMessageHandler({
 });
 const platformMessageProcessor = createPlatformMessageProcessor({
   identityCommandHandler: createIdentityCommandHandler({ store: platformRuntime.identityStore }),
-  commandHandlers: [weatherAlertCommandHandler, weixinMainRuntime?.commandHandler, maimaiCommandHandler].filter(Boolean),
+  commandHandlers: [weatherAlertCommandHandler, emailGreetingCommandHandler, weixinMainRuntime?.commandHandler, maimaiCommandHandler].filter(Boolean),
   sendWithRetry
 });
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
@@ -790,6 +807,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
   },
   stopRuntimes: [
     { name: 'weather_alert', run: () => weatherAlertRuntime.engine.stop() },
+    { name: 'email_greeting', run: () => emailGreetingRuntime.engine.stop() },
     { name: 'platform_adapters', run: () => platformRuntime.stop() },
     { name: 'weixin_main_runtime', run: () => weixinMainRuntime?.close() },
     { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
@@ -913,6 +931,7 @@ async function startMainProcess() {
   });
   await platformRuntime.start(acceptIncomingMessage);
   weatherAlertRuntime.engine.start();
+  emailGreetingRuntime.engine.start();
   await Promise.all([
     waitForServerListening(webServer),
     waitForServerListening(httpReverseServer)

@@ -2,7 +2,17 @@
 
 这组文档面向第一次接触 MizukiBot、准备阅读源码或提交改动的开发者。它回答三个问题：进程如何运行，一条消息如何穿过 Agent 系统，以及修改某类能力时应从哪里开始、如何证明没有破坏其他链路。
 
-最后核验：2026-08-08 14:17 +08:00。
+最后核验：2026-08-11 +08:00。
+
+## 邮件问候模块
+
+邮件问候属于独立的主动外发功能，代码位于 [`../../src/features/email-greetings/`](../../src/features/email-greetings/)。组合根在 [`../../index.js`](../../index.js)，状态由 `createJsonHotStore` 持久化；QQ 私聊命令先完成邮箱验证码确认，调度器再按 `TIMEZONE` 和 `EMAIL_GREETING_SEND_TIME` 生成并投递邮件。
+
+修改该功能时重点检查四条边界：QQ 私聊限制、验证码状态迁移、同一用户同一天的投递幂等，以及模型文案只能经过固定 HTML 模板渲染。SMTP 使用假的 transport 做测试，真实验收需在本地 `.env` 配置并明确启用 `EMAIL_GREETING_ENABLED`。
+
+2026-08-11 验收：5 个邮件问候定向测试、供应链策略、`npm run lint`、`npm run typecheck` 和 `MIZUKIBOT_INDEX_TEST_MODE=1` 主进程加载检查通过；完整测试仅保留既有 `weatherAlertProvider.test.js` 失败，未使用真实 SMTP。
+
+本小目标已完成；未推送远端。
 
 ## 先选阅读路线
 
