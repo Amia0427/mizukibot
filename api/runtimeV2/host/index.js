@@ -170,6 +170,35 @@ function buildV2CanonicalSegments(state, input = {}) {
   });
 }
 
+function cloneStatusBarContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return String(content || '');
+  return content.map((part) => {
+    if (typeof part === 'string') return part;
+    return part && typeof part === 'object' ? { ...part } : String(part || '');
+  });
+}
+
+function captureStatusBarContext(out = {}, options = {}) {
+  const memory = normalizeObject(out.memory, {});
+  const prepared = normalizeObject(memory.preparedMainConversationContext, {});
+  options.statusBarSystemMessages = normalizeArray(prepared.messages)
+    .filter((message) => message && (message.role === 'system' || message.role === 'developer'))
+    .map((message) => ({
+      role: message.role,
+      content: cloneStatusBarContent(message.content)
+    }))
+    .filter((message) => String(message.content || '').trim() || Array.isArray(message.content));
+  const snapshot = normalizeObject(memory.affinity?.variableSnapshot, null);
+  options.statusBarVariableSnapshot = snapshot
+    ? {
+      ...snapshot,
+        relationship: { ...normalizeObject(snapshot.relationship, {}) },
+        character: { ...normalizeObject(snapshot.character, {}) }
+      }
+    : null;
+}
+
 function applyRuntimeReplyOutput(out = {}, options = {}, sanitize = sanitizeUserFacingText) {
   const output = normalizeObject(out.output, {});
   const stream = normalizeObject(output.stream, {});
@@ -180,6 +209,7 @@ function applyRuntimeReplyOutput(out = {}, options = {}, sanitize = sanitizeUser
   options.displayReplyText = String(output.displayReply || '').trim();
   options.reasoningText = String(output.reasoningText || '').trim();
   options.reasoningForwardText = String(output.reasoningForwardText || '').trim();
+  captureStatusBarContext(out, options);
 
   const rawReply = output.displayReply || output.finalReply || output.draftReply || '';
   const sanitized = sanitize(rawReply, { returnMeta: true });

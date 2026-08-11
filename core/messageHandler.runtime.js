@@ -659,14 +659,20 @@ function createMessageHandler({
   normalGroupMainReplyRateLimiterOverride = null,
   triggerRemoteRestartOverride = null,
   smallTheaterRuntimeOverride = null,
+  privateStatusBarRuntimeOverride = null,
   groupContextStore = null
 }) {
   const {
     createSmallTheaterRuntime,
     matchesSmallTheaterCommand
   } = require('./smallTheater');
+  const { createPrivateStatusBarRuntime } = require('./privateStatusBar');
   const globalNapCatActionClient = actionClient;
   const smallTheaterRuntime = smallTheaterRuntimeOverride || createSmallTheaterRuntime({
+    config,
+    actionClient: globalNapCatActionClient
+  });
+  const privateStatusBarRuntime = privateStatusBarRuntimeOverride || createPrivateStatusBarRuntime({
     config,
     actionClient: globalNapCatActionClient
   });
@@ -1035,6 +1041,34 @@ function createMessageHandler({
       });
     }
     return luckinCommandService;
+  }
+
+  function schedulePrivateStatusBar({
+    replyEnvelope,
+    replyOptions,
+    routeExecutionPlan,
+    chatType,
+    senderId,
+    userText,
+    replyText,
+    mainReplySent,
+    freshnessGuard
+  } = {}) {
+    if (!privateStatusBarRuntime || typeof privateStatusBarRuntime.handle !== 'function') return;
+    void privateStatusBarRuntime.handle({
+      replyEnvelope,
+      replyOptions,
+      routeExecutionPlan,
+      topRouteType: routeExecutionPlan?.topRouteType,
+      chatType,
+      userId: senderId,
+      userText,
+      replyText,
+      mainReplySent,
+      allowTools: routeExecutionPlan?.allowTools === true,
+      allowedTools: routeExecutionPlan?.allowedTools,
+      shouldSend: freshnessGuard?.shouldSend
+    }).catch(() => {});
   }
 
   async function askAIDispatch(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
@@ -3596,6 +3630,17 @@ function createMessageHandler({
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       if (sent) {
+        schedulePrivateStatusBar({
+          replyEnvelope,
+          replyOptions,
+          routeExecutionPlan,
+          chatType,
+          senderId,
+          userText: runtimeQuestionText || cleanText,
+          replyText: persistedReplyText || reply,
+          mainReplySent: true,
+          freshnessGuard
+        });
         maybeRunDeferredPersist(replyEnvelope);
         markDirectSessionPresenceReplied({ groupId, senderId, sessionKey });
         replyRuntime.recordBotReply({
@@ -3693,6 +3738,22 @@ function createMessageHandler({
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       maybeRunDeferredPersist(replyEnvelope);
+      if (
+        replyOptions?.streamCompleted === true
+        && Number(replyOptions?.streamSendStats?.sentSegments || 0) > 0
+      ) {
+        schedulePrivateStatusBar({
+          replyEnvelope,
+          replyOptions,
+          routeExecutionPlan,
+          chatType,
+          senderId,
+          userText: runtimeQuestionText || cleanText,
+          replyText: persistedReplyText || reply,
+          mainReplySent: true,
+          freshnessGuard
+        });
+      }
       if (
         isPrivateChatType(chatType)
         && Number(replyOptions?.streamSendStats?.sentSegments || 0) > 0
