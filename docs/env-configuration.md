@@ -8,6 +8,14 @@
 - `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`：`send_msg`、`send_private_msg` 和 `send_group_msg` 传给 NapCat 的内部发送等待上限。该值应小于 `NAPCAT_ACTION_TIMEOUT_MS`，预留 HTTP 响应余量；调用方显式传入 `params.timeout` 时保留调用方值。
 - NapCat `onebot11` 配置的 `timeout.baseTimeout` 过低时，QQ 内部 `NodeIKernelMsgService/sendMsg` 可能在消息实际回调前超时。机器人现在对消息 action 显式传递该等待值，不改变“响应不确定时不自动重发”的重复消息保护策略。
 
+## QQ 私聊状态栏
+
+- `PRIVATE_STATUS_BAR_ENABLED=false`：QQ 私聊普通主回复成功后是否异步补发固定状态栏 PNG；默认关闭。
+- `PRIVATE_STATUS_BAR_API_BASE_URL`、`PRIVATE_STATUS_BAR_API_KEY`、`PRIVATE_STATUS_BAR_MODEL`：状态栏独立模型的 OpenAI 兼容 Chat Completions 端点、凭据和模型。缺任一项时静默跳过，不回退主模型。
+- `PRIVATE_STATUS_BAR_TIMEOUT_MS=8000`：独立模型单次请求超时；工具始终关闭。
+- 状态栏还依赖 `VISUAL_RENDER_ENABLED=true` 与本机 HTML 渲染端点。触发范围固定为 QQ 私聊 `direct_chat` 无工具正常回复，群聊、命令、工具、拒绝、限流、故障和过期回合不发送。
+- 2026-08-11 22:17 +08:00：实现提交 `4c68f374`；状态栏定向测试、lint、typecheck、暂存密钥扫描和真实 `800×260` PNG 渲染验收通过。全量测试仍有既有 `weatherAlertProvider.test.js` 夹具失败，未调用真实状态栏模型或 QQ 发送。
+
 ## 主回复输出预算
 
 - 2026-08-04 23:34 +08:00：`AI_MAX_TOKENS` 与代码默认值由 `8192` 提高到 `50000`，为包含隐藏推理的主回复保留足够输出预算；管理员预算保持 `50000`，其他模型链路不变。
