@@ -181,6 +181,7 @@ function cloneStatusBarContent(content) {
 
 function captureStatusBarContext(out = {}, options = {}) {
   const memory = normalizeObject(out.memory, {});
+  const execution = normalizeObject(out.execution, {});
   const prepared = normalizeObject(memory.preparedMainConversationContext, {});
   options.statusBarSystemMessages = normalizeArray(prepared.messages)
     .filter((message) => message && (message.role === 'system' || message.role === 'developer'))
@@ -197,6 +198,8 @@ function captureStatusBarContext(out = {}, options = {}) {
         character: { ...normalizeObject(snapshot.character, {}) }
       }
     : null;
+  options.statusBarUsedTools = normalizeArray(execution.toolCalls).length > 0
+    || normalizeArray(execution.toolResults).length > 0;
 }
 
 function applyRuntimeReplyOutput(out = {}, options = {}, sanitize = sanitizeUserFacingText) {

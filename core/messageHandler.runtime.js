@@ -1065,10 +1065,23 @@ function createMessageHandler({
       userText,
       replyText,
       mainReplySent,
-      allowTools: routeExecutionPlan?.allowTools === true,
-      allowedTools: routeExecutionPlan?.allowedTools,
+      usedTools: replyOptions?.statusBarUsedTools === true,
       shouldSend: freshnessGuard?.shouldSend
-    }).catch(() => {});
+    }).then((result) => {
+      console.log('[private-status-bar] completed', {
+        userId: String(senderId || '').trim(),
+        ok: result?.ok === true,
+        code: String(result?.code || 'unknown'),
+        stage: String(result?.stage || '')
+      });
+    }).catch(() => {
+      console.warn('[private-status-bar] completed', {
+        userId: String(senderId || '').trim(),
+        ok: false,
+        code: 'unhandled_error',
+        stage: ''
+      });
+    });
   }
 
   async function askAIDispatch(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {

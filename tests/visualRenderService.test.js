@@ -43,6 +43,7 @@ module.exports = (async () => {
     ['svg', '<svg viewBox="0 0 10 10"><image href="https://example.com/a.png"/></svg>'],
     ['svg', '<svg viewBox="0 0 10 10"><rect onclick="alert(1)"/></svg>'],
     ['html', '<svg><foreignObject><div>unsafe</div></foreignObject></svg>'],
+    ['html', '<img src="https://example.com/a.png">'],
     ['html', '<div style="background:url(https://example.com/a.png)">unsafe</div>'],
     ['html', '<iframe src="file:///tmp/a"></iframe>']
   ];
@@ -58,9 +59,10 @@ module.exports = (async () => {
   const httpCalls = [];
   const htmlResult = await renderVisual({
     renderer: 'html',
-    markup: '<section style="padding:20px"><h1>安全卡片</h1></section>',
+    markup: '<section style="padding:20px"><div data-render-image="portrait"></div><h1>安全卡片</h1></section>',
     width: 400,
-    max_height: 300
+    max_height: 300,
+    trusted_images: { portrait: 'https://img.example/mizuki.png' }
   }, {
     config: enabledConfig,
     httpClient: {
@@ -83,7 +85,38 @@ module.exports = (async () => {
   });
   assert.match(httpCalls[0].body.html, /Content-Security-Policy/);
   assert.match(httpCalls[0].body.html, /id="render-root"/);
+  assert.match(httpCalls[0].body.html, /img-src https:\/\/img\.example/);
+  assert.match(httpCalls[0].body.html, /src="https:\/\/img\.example\/mizuki\.png"/);
+  assert.strictEqual(httpCalls[0].body.pageGotoParams.waitUntil, 'networkidle0');
   assert.strictEqual(httpCalls[0].options.timeout, 2500);
+
+  await assert.rejects(
+    renderVisual({
+      renderer: 'html',
+      markup: '<div data-render-image="portrait"></div>',
+      trusted_images: { portrait: 'javascript:alert(1)' }
+    }, { config: enabledConfig }),
+    (error) => error?.code === 'invalid_trusted_image'
+  );
+
+  const dataImageCalls = [];
+  await renderVisual({
+    renderer: 'html',
+    markup: '<div data-render-image="portrait"></div>',
+    width: 400,
+    max_height: 300,
+    trusted_images: { portrait: 'data:image/jpeg;base64,anBlZw==' }
+  }, {
+    config: enabledConfig,
+    httpClient: {
+      async post(url, body) {
+        dataImageCalls.push({ url, body });
+        return { data: { code: 0, data: htmlPng.toString('base64') } };
+      }
+    }
+  });
+  assert.match(dataImageCalls[0].body.html, /img-src data:/);
+  assert.match(dataImageCalls[0].body.html, /src="data:image\/jpeg;base64,anBlZw=="/);
 
   await assert.rejects(
     renderVisual({

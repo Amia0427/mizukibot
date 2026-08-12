@@ -4,8 +4,15 @@ const {
   createPrivateStatusBarModelClient,
   ensureModelRequestUrl,
   innerThoughtSchema,
+  statusBarTextSchema,
   normalizeContent
 } = require('./model');
+const {
+  optimizePortraitImageSource,
+  parsePortraitImages,
+  resolvePortraitImageSource,
+  selectPortraitImage
+} = require('./portrait');
 const {
   buildPrivateStatusBarHtml,
   escapeHtml,
@@ -33,5 +40,10 @@ module.exports = {
   isPrivateStatusBarEligible,
   moodLabel,
   normalizeContent,
-  normalizeStatusBarData
+  normalizeStatusBarData,
+  optimizePortraitImageSource,
+  parsePortraitImages,
+  resolvePortraitImageSource,
+  selectPortraitImage,
+  statusBarTextSchema
 };

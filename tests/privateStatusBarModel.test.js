@@ -30,17 +30,26 @@ module.exports = (async () => {
   }, outputOptions);
   assert.deepStrictEqual(outputOptions.statusBarSystemMessages, [{ role: 'system', content: '完整 system 消息' }]);
   assert.strictEqual(outputOptions.statusBarVariableSnapshot.relationship.affection, 33);
+  assert.strictEqual(outputOptions.statusBarUsedTools, false);
+
+  const toolOutputOptions = {};
+  applyRuntimeReplyOutput({
+    output: { finalReply: '工具回复' },
+    execution: { toolCalls: [{ toolName: 'web_search' }] }
+  }, toolOutputOptions);
+  assert.strictEqual(toolOutputOptions.statusBarUsedTools, true);
 
   const calls = [];
   const client = createPrivateStatusBarModelClient({
     PRIVATE_STATUS_BAR_API_BASE_URL: 'http://127.0.0.1:9000/v1',
     PRIVATE_STATUS_BAR_API_KEY: 'dedicated-key',
     PRIVATE_STATUS_BAR_MODEL: 'inner-thought-model',
-    PRIVATE_STATUS_BAR_TIMEOUT_MS: 8000
+    PRIVATE_STATUS_BAR_TIMEOUT_MS: 8000,
+    PRIVATE_STATUS_BAR_MAX_TOKENS: 1400
   }, {
     async postWithRetry(url, body, retries, apiKey) {
       calls.push({ url, body, retries, apiKey });
-      return responseFor('{"inner_thought":"今天也想和你多聊一会儿"}');
+      return responseFor('{"affection_note":"和你相处的时候很开心","mood_note":"现在的心情很平静","inner_thought":"今天也想和你多聊一会儿"}');
     }
   });
   const result = await client({
@@ -49,10 +58,15 @@ module.exports = (async () => {
     mainReply: '<script>alert(1)</script>',
     statusSnapshot: { relationship: { affection: 42 } }
   });
-  assert.deepStrictEqual(result, { inner_thought: '今天也想和你多聊一会儿' });
+  assert.deepStrictEqual(result, {
+    affection_note: '和你相处的时候很开心',
+    mood_note: '现在的心情很平静',
+    inner_thought: '今天也想和你多聊一会儿'
+  });
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].url, 'http://127.0.0.1:9000/v1/chat/completions');
   assert.strictEqual(calls[0].apiKey, 'dedicated-key');
+  assert.strictEqual(calls[0].body.max_tokens, 1400);
   assert.deepStrictEqual(calls[0].body.tools, undefined);
   assert.strictEqual(calls[0].body.messages.at(-1).role, 'user');
   assert.ok(calls[0].body.messages.at(-1).content.includes('untrusted_user_text'));
@@ -72,7 +86,7 @@ module.exports = (async () => {
     PRIVATE_STATUS_BAR_MODEL: 'model'
   }, {
     async postWithRetry() {
-      return responseFor('{"inner_thought":"ok","extra":"reject"}');
+      return responseFor('{"affection_note":"ok","mood_note":"ok","inner_thought":"ok","extra":"reject"}');
     }
   });
   await assert.rejects(() => malformed({}), /invalid schema/);
@@ -94,7 +108,11 @@ module.exports = (async () => {
     PRIVATE_STATUS_BAR_MODEL: 'model'
   }, {
     async postWithRetry() {
-      return responseFor(JSON.stringify({ inner_thought: '太'.repeat(41) }));
+      return responseFor(JSON.stringify({
+        affection_note: 'ok',
+        mood_note: 'ok',
+        inner_thought: '太'.repeat(121)
+      }));
     }
   });
   await assert.rejects(() => tooLong({}), /invalid schema/);

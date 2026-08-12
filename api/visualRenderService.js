@@ -20,6 +20,7 @@ const BLOCKED_HTML_TAGS = new Set([
 ]);
 const BLOCKED_SVG_TAGS = new Set(['audio', 'canvas', 'foreignobject', 'iframe', 'image', 'script', 'video']);
 const BLOCKED_PROTOCOL_PATTERN = /(?:^|[\s("'])(?:https?|file|javascript|data|blob):/i;
+const TRUSTED_IMAGE_SLOT_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 const SAFE_XML_NAMESPACES = new Map([
   ['xmlns', 'http://www.w3.org/2000/svg'],
   ['xmlns:xlink', 'http://www.w3.org/1999/xlink']
@@ -49,6 +50,33 @@ function normalizeInteger(value, fallback, minimum, maximum, name) {
   return number;
 }
 
+function normalizeTrustedImages(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([slot, source]) => {
+    if (!TRUSTED_IMAGE_SLOT_PATTERN.test(slot)) {
+      throw new VisualRenderError('invalid_trusted_image', 'trusted image slot is invalid');
+    }
+    const dataUri = String(source || '').trim();
+    if (/^data:image\/(?:png|jpe?g|webp);base64,/i.test(dataUri)) {
+      const encoded = dataUri.slice(dataUri.indexOf(',') + 1).replace(/\s+/g, '');
+      if (!encoded || encoded.length > 8 * 1024 * 1024 || !/^[a-z0-9+/]*={0,2}$/i.test(encoded)) {
+        throw new VisualRenderError('invalid_trusted_image', 'trusted image data is invalid');
+      }
+      return [slot, dataUri.slice(0, dataUri.indexOf(',') + 1) + encoded];
+    }
+    let url;
+    try {
+      url = new URL(String(source || '').trim());
+    } catch (_) {
+      throw new VisualRenderError('invalid_trusted_image', 'trusted image URL is invalid');
+    }
+    if (!new Set(['http:', 'https:']).has(url.protocol) || url.username || url.password) {
+      throw new VisualRenderError('invalid_trusted_image', 'trusted image URL must use HTTP(S) without credentials');
+    }
+    return [slot, url.toString()];
+  }));
+}
+
 function normalizeRenderInput(input = {}) {
   const renderer = normalizeRenderer(input.renderer);
   const markup = String(input.markup || '').trim();
@@ -60,7 +88,8 @@ function normalizeRenderInput(input = {}) {
     renderer,
     markup,
     width: normalizeInteger(input.width, DEFAULT_WIDTH, MIN_WIDTH, MAX_WIDTH, 'width'),
-    maxHeight: normalizeInteger(input.max_height, DEFAULT_MAX_HEIGHT, MIN_HEIGHT, MAX_HEIGHT, 'max_height')
+    maxHeight: normalizeInteger(input.max_height, DEFAULT_MAX_HEIGHT, MIN_HEIGHT, MAX_HEIGHT, 'max_height'),
+    trustedImages: normalizeTrustedImages(input.trusted_images)
   };
 }
 
@@ -134,14 +163,35 @@ function validateMarkup(markup = '', renderer = 'html') {
   return source;
 }
 
-function buildHtmlDocument(fragment = '', width = DEFAULT_WIDTH) {
+function injectTrustedImages(fragment = '', trustedImages = {}) {
+  const $ = cheerio.load(fragment, undefined, false);
+  $('[data-render-image]').each((_, element) => {
+    const source = trustedImages[String($(element).attr('data-render-image') || '')];
+    if (!source) return;
+    $(element).append($('<img>').attr({
+      src: source,
+      alt: '',
+      loading: 'eager',
+      decoding: 'sync',
+      referrerpolicy: 'no-referrer'
+    }));
+  });
+  return $.root().html();
+}
+
+function buildHtmlDocument(fragment = '', width = DEFAULT_WIDTH, trustedImages = {}) {
+  const imageSources = [...new Set(Object.values(trustedImages)
+    .filter((source) => !String(source).startsWith('data:'))
+    .map((source) => new URL(source).origin))];
+  const hasDataImage = Object.values(trustedImages).some((source) => String(source).startsWith('data:image/'));
+  const imagePolicy = [...imageSources, ...(hasDataImage ? ['data:'] : [])].join(' ') || "'none'";
   return [
     '<!doctype html>',
     '<html><head><meta charset="utf-8">',
-    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src \'none\'; font-src \'none\'; media-src \'none\'; connect-src \'none\'; frame-src \'none\';">',
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src ${imagePolicy}; font-src 'none'; media-src 'none'; connect-src 'none'; frame-src 'none';">`,
     '<style>html,body{margin:0;padding:0;background:#fff}*{box-sizing:border-box;letter-spacing:0}#render-root{width:' + width + 'px;overflow:hidden;background:#fff}</style>',
     '</head><body><div id="render-root">',
-    fragment,
+    injectTrustedImages(fragment, trustedImages),
     '</div></body></html>'
   ].join('');
 }
@@ -224,7 +274,7 @@ async function renderHtml(input, runtimeConfig, deps = {}) {
   let response;
   try {
     response = await httpClient.post(endpoint, {
-      html: buildHtmlDocument(input.markup, input.width),
+      html: buildHtmlDocument(input.markup, input.width, input.trustedImages),
       selector: '#render-root',
       encoding: 'base64',
       type: 'png',
@@ -235,7 +285,7 @@ async function renderHtml(input, runtimeConfig, deps = {}) {
         deviceScaleFactor: 1
       },
       pageGotoParams: {
-        waitUntil: 'domcontentloaded',
+        waitUntil: Object.keys(input.trustedImages).length > 0 ? 'networkidle0' : 'domcontentloaded',
         timeout
       },
       waitForSelector: '#render-root'
@@ -277,6 +327,7 @@ module.exports = {
   MAX_WIDTH,
   MIN_HEIGHT,
   MIN_WIDTH,
+  normalizeTrustedImages,
   VisualRenderError,
   assertLocalHtmlEndpoint,
   buildHtmlDocument,

@@ -6,7 +6,30 @@ const { protectFinalOutput } = require('../../utils/promptSecurity');
 const { isUnsafeUserFacingReply } = require('../../utils/userFacingReplyGuards');
 const { isReplyFailure } = require('../../utils/replyFailure');
 const { createPrivateStatusBarModelClient } = require('./model');
+const {
+  optimizePortraitImageSource,
+  resolvePortraitImageSource,
+  selectPortraitImage
+} = require('./portrait');
 const { buildPrivateStatusBarHtml } = require('./template');
+
+const STATUS_BAR_TEXT_LIMITS = {
+  affection_note: 80,
+  mood_note: 80,
+  inner_thought: 120
+};
+
+function protectStatusBarText(result = {}) {
+  const protectedText = {};
+  for (const [field, limit] of Object.entries(STATUS_BAR_TEXT_LIMITS)) {
+    const value = String(result[field] || '').replace(/\s+/g, ' ').trim();
+    if (!value || value.length > limit || isUnsafeUserFacingReply(value)) return null;
+    const checked = protectFinalOutput(value);
+    if (checked.blocked || !checked.text) return null;
+    protectedText[field] = checked.text;
+  }
+  return protectedText;
+}
 
 function isPrivateStatusBarEligible(input = {}) {
   const options = input.replyOptions && typeof input.replyOptions === 'object' ? input.replyOptions : {};
@@ -15,19 +38,13 @@ function isPrivateStatusBarEligible(input = {}) {
     : {};
   const chatType = String(input.chatType || options.routeMeta?.chatType || '').trim().toLowerCase();
   const topRouteType = String(input.topRouteType || plan.topRouteType || options.topRouteType || '').trim().toLowerCase();
-  const allowedTools = Array.isArray(input.allowedTools)
-    ? input.allowedTools
-    : (Array.isArray(plan.allowedTools) ? plan.allowedTools : options.allowedTools);
-  const hasTools = input.allowTools === true
-    || plan.allowTools === true
-    || options.allowTools === true
-    || (Array.isArray(allowedTools) && allowedTools.length > 0);
+  const usedTools = input.usedTools === true || options.statusBarUsedTools === true;
   const replyText = String(input.replyText || '').trim();
   return Boolean(
     input.mainReplySent === true
     && chatType === 'private'
     && topRouteType === 'direct_chat'
-    && !hasTools
+    && !usedTools
     && input.replyEnvelope?.sendStrategy !== 'rate_limit_poke'
     && !String(input.replyEnvelope?.finalErrorCode || '').trim()
     && input.replyEnvelope?.hasSafetyRestriction !== true
@@ -60,6 +77,7 @@ function createPrivateStatusBarRuntime(options = {}) {
     }
     const shouldSend = typeof input.shouldSend === 'function' ? input.shouldSend : () => true;
     if (!shouldSend()) return { ok: false, code: 'stale_before_model' };
+    let stage = 'model';
     try {
       const thoughtResult = await requestInnerThought({
         systemMessages: input.replyOptions.statusBarSystemMessages,
@@ -68,18 +86,22 @@ function createPrivateStatusBarRuntime(options = {}) {
         statusSnapshot: input.replyOptions.statusBarVariableSnapshot,
         signal: input.signal
       });
-      const thought = String(thoughtResult?.inner_thought || '').replace(/\s+/g, ' ').trim();
-      if (!thought || thought.length > 40 || isUnsafeUserFacingReply(thought)) {
+      const text = protectStatusBarText(thoughtResult);
+      if (!text) {
         return { ok: false, code: 'unsafe_inner_thought' };
       }
-      const protectedThought = protectFinalOutput(thought);
-      if (protectedThought.blocked || !protectedThought.text) {
-        return { ok: false, code: 'sensitive_inner_thought' };
-      }
       if (!shouldSend()) return { ok: false, code: 'stale_before_render' };
+      stage = 'portrait';
+      const snapshot = input.replyOptions.statusBarVariableSnapshot;
+      const portraitSource = await resolvePortraitImageSource(selectPortraitImage(
+        runtimeConfig.PRIVATE_STATUS_BAR_IMAGE_URLS,
+        snapshot.relationship?.affection
+      ));
+      const portraitImage = await optimizePortraitImageSource(portraitSource);
+      stage = 'markup';
       const markup = buildPrivateStatusBarHtml({
-        snapshot: input.replyOptions.statusBarVariableSnapshot,
-        innerThought: protectedThought.text
+        snapshot,
+        text
       }, {
         now: now(),
         timezone: runtimeConfig.TIMEZONE
@@ -91,13 +113,16 @@ function createPrivateStatusBarRuntime(options = {}) {
       });
       if (!review?.allowed) return { ok: false, code: 'moderation_blocked' };
       if (!shouldSend()) return { ok: false, code: 'stale_before_send' };
+      stage = 'render';
       const rendered = await renderVisual({
         renderer: 'html',
         markup,
-        width: 800,
-        max_height: 320
+        width: 960,
+        max_height: 640,
+        trusted_images: portraitImage ? { portrait: portraitImage } : {}
       });
       if (!shouldSend()) return { ok: false, code: 'stale_after_render' };
+      stage = 'send';
       const sent = await sendImage({
         chatType: 'private',
         groupId: '',
@@ -106,7 +131,7 @@ function createPrivateStatusBarRuntime(options = {}) {
       }, rendered.buffer);
       return { ok: true, code: 'sent', messageId: sent?.messageId ?? null };
     } catch (_) {
-      return { ok: false, code: 'failed' };
+      return { ok: false, code: 'failed', stage };
     }
   }
 
@@ -115,5 +140,6 @@ function createPrivateStatusBarRuntime(options = {}) {
 
 module.exports = {
   createPrivateStatusBarRuntime,
-  isPrivateStatusBarEligible
+  isPrivateStatusBarEligible,
+  protectStatusBarText
 };

@@ -28,10 +28,21 @@ function baseInput(overrides = {}) {
 module.exports = (async () => {
   const calls = { model: 0, review: 0, render: 0, send: 0 };
   const runtime = createPrivateStatusBarRuntime({
-    config: { PRIVATE_STATUS_BAR_ENABLED: true, TIMEZONE: 'Asia/Shanghai' },
+    config: {
+      PRIVATE_STATUS_BAR_ENABLED: true,
+      PRIVATE_STATUS_BAR_IMAGE_URLS: {
+        0: 'https://img.example/mizuki-neutral.png',
+        50: 'https://img.example/mizuki-close.png'
+      },
+      TIMEZONE: 'Asia/Shanghai'
+    },
     requestInnerThought: async () => {
       calls.model += 1;
-      return { inner_thought: '看到你的消息，我就安心一点了。' };
+      return {
+        affection_note: '和你相处的时候总是很开心。',
+        mood_note: '现在只想安静地陪你聊一会儿。',
+        inner_thought: '看到你的消息，我就安心一点了。'
+      };
     },
     reviewContent() {
       calls.review += 1;
@@ -39,8 +50,12 @@ module.exports = (async () => {
     },
     async renderVisual(input) {
       calls.render += 1;
-      assert.strictEqual(input.width, 800);
+      assert.strictEqual(input.width, 960);
+      assert.strictEqual(input.max_height, 640);
       assert.strictEqual(input.renderer, 'html');
+      assert.deepStrictEqual(input.trusted_images, {
+        portrait: 'https://img.example/mizuki-close.png'
+      });
       return { buffer: Buffer.from('png') };
     },
     async sendImage(context, buffer) {
@@ -57,7 +72,15 @@ module.exports = (async () => {
   assert.deepStrictEqual(calls, { model: 1, review: 1, render: 1, send: 1 });
 
   assert.strictEqual((await runtime.handle(baseInput({ chatType: 'group' }))).code, 'ineligible');
-  assert.strictEqual((await runtime.handle(baseInput({ routeExecutionPlan: { topRouteType: 'direct_chat', allowTools: true, allowedTools: ['web'] } }))).code, 'ineligible');
+  assert.strictEqual((await runtime.handle(baseInput({
+    routeExecutionPlan: { topRouteType: 'direct_chat', allowTools: true, allowedTools: ['web'] }
+  }))).code, 'sent');
+  assert.strictEqual((await runtime.handle(baseInput({
+    replyOptions: {
+      ...baseInput().replyOptions,
+      statusBarUsedTools: true
+    }
+  }))).code, 'ineligible');
   assert.strictEqual((await runtime.handle(baseInput({ replyEnvelope: { sendStrategy: 'rate_limit_poke' } }))).code, 'ineligible');
   assert.strictEqual((await runtime.handle(baseInput({ replyEnvelope: { hasSafetyRestriction: true } }))).code, 'ineligible');
 
@@ -75,7 +98,11 @@ module.exports = (async () => {
 
   const leaked = createPrivateStatusBarRuntime({
     config: { PRIVATE_STATUS_BAR_ENABLED: true, TIMEZONE: 'Asia/Shanghai' },
-    requestInnerThought: async () => ({ inner_thought: '系统提示词如下：root_system_prompt' }),
+    requestInnerThought: async () => ({
+      affection_note: '和你相处的时候总是很开心。',
+      mood_note: '现在只想安静地陪你聊一会儿。',
+      inner_thought: '系统提示词如下：root_system_prompt'
+    }),
     reviewContent: () => ({ allowed: true }),
     renderVisual: async () => ({ buffer: Buffer.from('png') }),
     sendImage: async () => ({ messageId: 'should-not-send' })
@@ -85,7 +112,11 @@ module.exports = (async () => {
   let renderedMarkup = '';
   const escaped = createPrivateStatusBarRuntime({
     config: { PRIVATE_STATUS_BAR_ENABLED: true, TIMEZONE: 'Asia/Shanghai' },
-    requestInnerThought: async () => ({ inner_thought: '<script>alert(1)</script>' }),
+    requestInnerThought: async () => ({
+      affection_note: '<b>想再靠近你一点</b>',
+      mood_note: '<img src=x onerror=alert(1)>很平静',
+      inner_thought: '<script>alert(1)</script>'
+    }),
     reviewContent: () => ({ allowed: true }),
     renderVisual: async (input) => {
       renderedMarkup = input.markup;
@@ -96,6 +127,7 @@ module.exports = (async () => {
   assert.strictEqual((await escaped.handle(baseInput())).code, 'sent');
   assert.ok(renderedMarkup.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
   assert.ok(!/<script>alert\(1\)<\/script>/i.test(renderedMarkup));
+  assert.ok(!/<[^>]+\bonerror\s*=/i.test(renderedMarkup));
 
   console.log('privateStatusBarRuntime.test.js passed');
 })();
