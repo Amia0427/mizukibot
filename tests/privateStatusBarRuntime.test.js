@@ -1,5 +1,8 @@
 const assert = require('assert');
-const { createPrivateStatusBarRuntime } = require('../core/privateStatusBar');
+const {
+  createPrivateStatusBarRuntime,
+  getPrivateStatusBarIneligibilityReason
+} = require('../core/privateStatusBar');
 
 function baseInput(overrides = {}) {
   return {
@@ -72,6 +75,13 @@ module.exports = (async () => {
   assert.deepStrictEqual(calls, { model: 1, review: 1, render: 1, send: 1 });
 
   assert.strictEqual((await runtime.handle(baseInput({ chatType: 'group' }))).code, 'ineligible');
+  assert.strictEqual(getPrivateStatusBarIneligibilityReason(baseInput({ chatType: 'group' })), 'not_private_chat');
+  assert.strictEqual(getPrivateStatusBarIneligibilityReason(baseInput({
+    replyOptions: {
+      ...baseInput().replyOptions,
+      statusBarVariableSnapshot: null
+    }
+  })), 'missing_variable_snapshot');
   assert.strictEqual((await runtime.handle(baseInput({
     routeExecutionPlan: { topRouteType: 'direct_chat', allowTools: true, allowedTools: ['web'] }
   }))).code, 'sent');

@@ -211,6 +211,7 @@ async function buildLiveStateForState(state = {}, options = {}) {
     context,
     rawContext,
     relationship,
+    variableSnapshot,
     characterState: variableSnapshot?.character || null,
     characterStateText,
     activity,

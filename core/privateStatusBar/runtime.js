@@ -31,7 +31,7 @@ function protectStatusBarText(result = {}) {
   return protectedText;
 }
 
-function isPrivateStatusBarEligible(input = {}) {
+function getPrivateStatusBarIneligibilityReason(input = {}) {
   const options = input.replyOptions && typeof input.replyOptions === 'object' ? input.replyOptions : {};
   const plan = input.routeExecutionPlan && typeof input.routeExecutionPlan === 'object'
     ? input.routeExecutionPlan
@@ -40,22 +40,26 @@ function isPrivateStatusBarEligible(input = {}) {
   const topRouteType = String(input.topRouteType || plan.topRouteType || options.topRouteType || '').trim().toLowerCase();
   const usedTools = input.usedTools === true || options.statusBarUsedTools === true;
   const replyText = String(input.replyText || '').trim();
-  return Boolean(
-    input.mainReplySent === true
-    && chatType === 'private'
-    && topRouteType === 'direct_chat'
-    && !usedTools
-    && input.replyEnvelope?.sendStrategy !== 'rate_limit_poke'
-    && !String(input.replyEnvelope?.finalErrorCode || '').trim()
-    && input.replyEnvelope?.hasSafetyRestriction !== true
-    && options.__dispatchFailed !== true
-    && replyText
-    && !isReplyFailure(replyText, { emptyIsFailure: true })
-    && Array.isArray(options.statusBarSystemMessages)
-    && options.statusBarSystemMessages.length > 0
-    && options.statusBarVariableSnapshot
-    && typeof options.statusBarVariableSnapshot === 'object'
-  );
+  if (input.mainReplySent !== true) return 'main_reply_not_sent';
+  if (chatType !== 'private') return 'not_private_chat';
+  if (topRouteType !== 'direct_chat') return 'not_direct_chat';
+  if (usedTools) return 'tools_used';
+  if (input.replyEnvelope?.sendStrategy === 'rate_limit_poke') return 'rate_limited';
+  if (String(input.replyEnvelope?.finalErrorCode || '').trim()) return 'reply_error';
+  if (input.replyEnvelope?.hasSafetyRestriction === true) return 'safety_restriction';
+  if (options.__dispatchFailed === true) return 'dispatch_failed';
+  if (!replyText || isReplyFailure(replyText, { emptyIsFailure: true })) return 'reply_failure';
+  if (!Array.isArray(options.statusBarSystemMessages) || options.statusBarSystemMessages.length === 0) {
+    return 'missing_system_messages';
+  }
+  if (!options.statusBarVariableSnapshot || typeof options.statusBarVariableSnapshot !== 'object') {
+    return 'missing_variable_snapshot';
+  }
+  return '';
+}
+
+function isPrivateStatusBarEligible(input = {}) {
+  return getPrivateStatusBarIneligibilityReason(input) === '';
 }
 
 function createPrivateStatusBarRuntime(options = {}) {
@@ -72,8 +76,11 @@ function createPrivateStatusBarRuntime(options = {}) {
   const now = options.now || (() => new Date());
 
   async function handle(input = {}) {
-    if (runtimeConfig.PRIVATE_STATUS_BAR_ENABLED !== true || !isPrivateStatusBarEligible(input)) {
-      return { ok: false, code: 'ineligible' };
+    const ineligibilityReason = runtimeConfig.PRIVATE_STATUS_BAR_ENABLED === true
+      ? getPrivateStatusBarIneligibilityReason(input)
+      : 'disabled';
+    if (ineligibilityReason) {
+      return { ok: false, code: 'ineligible', reason: ineligibilityReason };
     }
     const shouldSend = typeof input.shouldSend === 'function' ? input.shouldSend : () => true;
     if (!shouldSend()) return { ok: false, code: 'stale_before_model' };
@@ -140,6 +147,7 @@ function createPrivateStatusBarRuntime(options = {}) {
 
 module.exports = {
   createPrivateStatusBarRuntime,
+  getPrivateStatusBarIneligibilityReason,
   isPrivateStatusBarEligible,
   protectStatusBarText
 };

@@ -1072,6 +1072,7 @@ function createMessageHandler({
         userId: String(senderId || '').trim(),
         ok: result?.ok === true,
         code: String(result?.code || 'unknown'),
+        reason: String(result?.reason || ''),
         stage: String(result?.stage || '')
       });
     }).catch(() => {

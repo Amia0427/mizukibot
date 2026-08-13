@@ -1218,6 +1218,7 @@ function createPrepareNode(deps = {}) {
         liveStateContext,
         liveStateInjected: Boolean(liveStateContext),
         liveStateMeta: requestForPromptBuild.liveStateMeta || null,
+        statusBarVariableSnapshot: liveStateBuild?.variableSnapshot || null,
         preparedMainConversationContext: preparedMainConversationContext || null,
         mainConversationMessages: normalizeArray(preparedMainConversationContext?.messages),
         assistantOnlyContextMessagesPrepared: normalizeArray(preparedMainConversationContext?.assistantOnlyContextMessages),

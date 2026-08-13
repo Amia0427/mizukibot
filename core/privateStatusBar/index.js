@@ -23,6 +23,7 @@ const {
 } = require('./template');
 const {
   createPrivateStatusBarRuntime,
+  getPrivateStatusBarIneligibilityReason,
   isPrivateStatusBarEligible
 } = require('./runtime');
 
@@ -36,6 +37,7 @@ module.exports = {
   escapeHtml,
   formatAffection,
   formatTime,
+  getPrivateStatusBarIneligibilityReason,
   innerThoughtSchema,
   isPrivateStatusBarEligible,
   moodLabel,

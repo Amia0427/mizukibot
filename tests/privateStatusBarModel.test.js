@@ -20,11 +20,10 @@ module.exports = (async () => {
           { role: 'user', content: '不应传入的用户消息' }
         ]
       },
-      affinity: {
-        variableSnapshot: {
-          relationship: { affection: 33 },
-          character: { mood: 30 }
-        }
+      affinity: { budgetTier: 'normal' },
+      statusBarVariableSnapshot: {
+        relationship: { affection: 33 },
+        character: { mood: 30 }
       }
     }
   }, outputOptions);

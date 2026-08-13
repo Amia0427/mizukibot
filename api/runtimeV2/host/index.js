@@ -190,7 +190,7 @@ function captureStatusBarContext(out = {}, options = {}) {
       content: cloneStatusBarContent(message.content)
     }))
     .filter((message) => String(message.content || '').trim() || Array.isArray(message.content));
-  const snapshot = normalizeObject(memory.affinity?.variableSnapshot, null);
+  const snapshot = normalizeObject(memory.statusBarVariableSnapshot, null);
   options.statusBarVariableSnapshot = snapshot
     ? {
       ...snapshot,

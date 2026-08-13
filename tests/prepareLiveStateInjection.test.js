@@ -2,10 +2,15 @@ const assert = require('assert');
 const { createPrepareNode } = require('../api/runtimeV2/nodes/prepare');
 
 (async () => {
+  const variableSnapshot = {
+    relationship: { affection: 33, stage: 'friend' },
+    character: { mood: 12 }
+  };
   let capturedPromptOptions = null;
   const buildLiveStateForState = async () => ({
     context: '【生活状态补充】\n【与这个用户的关系】\n未建立明确关系；保持礼貌距离，不假设亲密度，根据当前对话逐步建立信任。',
     relationship: { level: 'stranger' },
+    variableSnapshot,
     tokens: 42,
     durationMs: 3,
     truncated: false
@@ -110,6 +115,7 @@ const { createPrepareNode } = require('../api/runtimeV2/nodes/prepare');
   assert.strictEqual(capturedPromptOptions.request.liveStateMeta.tokens, 42);
   assert.ok(out.request.liveStateContext.includes('保持礼貌距离'));
   assert.strictEqual(out.memory.liveStateInjected, true);
+  assert.deepStrictEqual(out.memory.statusBarVariableSnapshot, variableSnapshot);
 
   const fastPathNode = createPrepareNode({
     normalizeObject: (value, fallback = {}) => (value && typeof value === 'object' && !Array.isArray(value) ? value : fallback),
@@ -171,6 +177,7 @@ const { createPrepareNode } = require('../api/runtimeV2/nodes/prepare');
   });
   assert.ok(fastOut.memory.dynamicContextBlocks.some((item) => item.id === 'live_state_dynamic'));
   assert.ok(fastOut.memory.dynamicPrompt.includes('【生活状态补充】'));
+  assert.deepStrictEqual(fastOut.memory.statusBarVariableSnapshot, variableSnapshot);
 
   console.log('prepareLiveStateInjection.test.js passed');
 })();

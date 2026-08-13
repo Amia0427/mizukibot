@@ -52,6 +52,10 @@ const { snapshotState } = require('../api/runtimeV2/state');
       },
       contextStats: { usageRatio: 0.5, compactionLevel: 'tight' },
       mainConversationSnapshotSignature: 'sig1',
+      statusBarVariableSnapshot: {
+        relationship: { affection: 33 },
+        character: { mood: 12 }
+      },
       context: { retrieved: true },
       continuityState: {
         payload: { active_topic: 'topic' },
@@ -112,6 +116,7 @@ const { snapshotState } = require('../api/runtimeV2/state');
   assert.strictEqual(snapshot.memory.compactionPlanPrepared, undefined);
   assert.strictEqual(snapshot.memory.mainConversationSnapshot, undefined);
   assert.strictEqual(snapshot.memory.mainConversationSnapshotSignature, undefined);
+  assert.strictEqual(snapshot.memory.statusBarVariableSnapshot, undefined);
   assert.strictEqual(snapshot.memory.promptSnapshot.assembledBlocks, undefined);
   assert.strictEqual(snapshot.memory.promptSnapshot.renderedSystemMessages, undefined);
   assert.strictEqual(snapshot.memory.promptSnapshot.budgetReport, undefined);
