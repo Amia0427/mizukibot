@@ -1,6 +1,6 @@
 # 消息与 Agent 运行时
 
-本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-12 16:40 +08:00。
+本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-13 23:57 +08:00。
 
 读完后应能回答：一条 OneBot 消息在哪里被接收、在哪些位置可能提前返回、何时进入 Runtime V2、工具如何受策略约束、回复如何防重复与过期，以及回复后的持久化为何不应阻塞用户可见结果。
 
@@ -21,11 +21,13 @@
 
 ## QQ 私聊状态栏旁路
 
-QQ 私聊 `direct_chat` 的无工具主回复在文字发送成功后，由 [`../../core/privateStatusBar/runtime.js`](../../core/privateStatusBar/runtime.js) 非阻塞补发固定 PNG。状态栏不是 post-reply 任务：主回复的 Runtime Host 只把本轮实际使用的 system/developer 消息和 `affinity.variableSnapshot` 通过 `replyOptions` 临时交给状态栏运行时，不写 checkpoint、数据库、请求追踪或正文日志。
+QQ 私聊 `direct_chat` 的无工具主回复在文字发送成功后，由 [`../../core/privateStatusBar/runtime.js`](../../core/privateStatusBar/runtime.js) 非阻塞补发固定 PNG。状态栏不是 post-reply 任务：主回复的 Runtime Host 只把本轮实际使用的 system/developer 消息和 `memory.statusBarVariableSnapshot` 通过 `replyOptions` 临时交给状态栏运行时，不写 checkpoint、数据库、请求追踪或正文日志。`affinity` 只负责上下文预算，不应承载会话变量。
 
 普通发送分支和完成的流式发送分支都调用同一个 freshness guard；新消息到达后，旧回合在独立模型、渲染和发送前都会被丢弃。Runtime Host 根据 `execution.toolCalls/toolResults` 记录本轮是否真实使用工具，不能用路由暴露的工具列表代替；拒绝、限流和故障标记仍由状态栏运行时复核。
 
 状态栏独立模型只接受严格 `{"affection_note":"...","mood_note":"...","inner_thought":"..."}`，不接收工具；固定模板负责所有标签、CSS、属性和尺寸，动态值只进入实体转义后的文本节点。左侧图片按好感度从 `PRIVATE_STATUS_BAR_IMAGE_URLS` 阈值表选择，由渲染器在 markup 校验后注入，模型不能控制 URL。模型失败、输出守卫、敏感词审查、渲染或 QQ 发送失败均静默降级，不应添加用户可见兜底。
+
+2026-08-13 23:57 +08:00 验收：实现提交 `e754e356` 修复变量快照取值路径，普通快路径和完整路径均覆盖；资格失败日志新增具体原因。9 项聚焦与相邻测试、lint、typecheck、密钥和差异检查通过；真实变量、独立模型、本地立绘和 HTML 渲染生成 `960×640` 非空 PNG，重启 readiness 通过，小目标已完成。完整测试仅保留既有天气过期夹具失败。
 
 ## 推荐阅读顺序
 

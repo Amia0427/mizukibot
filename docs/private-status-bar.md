@@ -1,12 +1,12 @@
 # QQ 私聊状态栏
 
-更新时间：2026-08-12 16:40 +08:00
+更新时间：2026-08-13 23:57 +08:00
 
 ## 行为边界
 
 状态栏只在 QQ 私聊、`direct_chat`、无工具的正常主模型回复发送成功后触发。普通回复和已完成的流式回复都走同一个运行时；群聊、命令、工具、拒绝/安全限制、限流、故障回复和 freshness 过期回合不会发送。任务以非阻塞方式启动，不进入 post-reply 队列，也不改变主回复结果。
 
-主模型完成后，Runtime Host 从本轮实际使用的 `preparedMainConversationContext.messages` 复制 `system/developer` 消息，并从 `affinity.variableSnapshot` 复制关系和角色快照，临时放在 `replyOptions.statusBarSystemMessages` 与 `replyOptions.statusBarVariableSnapshot`。这些字段只在内存中流转，不写数据库、请求追踪、正文日志或持久化任务。
+主模型完成后，Runtime Host 从本轮实际使用的 `preparedMainConversationContext.messages` 复制 `system/developer` 消息，并从 `memory.statusBarVariableSnapshot` 复制关系和角色快照，临时放在 `replyOptions.statusBarSystemMessages` 与 `replyOptions.statusBarVariableSnapshot`。变量快照由 prepare 阶段本轮已经读取的生活状态结果提供，不再混入只负责上下文预算的 `affinity`；这些字段只在内存中流转，不写 checkpoint、数据库、请求追踪、正文日志或持久化任务。
 
 ## 配置
 
@@ -33,6 +33,8 @@ PRIVATE_STATUS_BAR_IMAGE_URLS={"0":"D:/waifu/zhungtailan.jpg"}
 
 ## 验收记录
 
+- 2026-08-13 23:57 +08:00：实现提交 `e754e356`。9 项状态栏及 Runtime V2 相邻测试、887 文件 lint、typecheck、暂存密钥扫描和差异检查通过；完整 `npm test` 运行 187.1 秒，唯一失败为既有 `weatherAlertProvider.test.js:65` 过期时间夹具，单独复跑相同。本机仅有 Node 24.14.1，未宣称 Node 20 验收。
+- 2026-08-13 23:57 +08:00：真实用户 `1960901788` 的会话变量经 Runtime Host 捕获后包含关系、角色和 system 消息，资格原因为空；真实独立模型、本地立绘和本机 HTML 渲染生成 `960×640`、245,878 字节非空 PNG，发送器替换为内存检查，未向 QQ 发送验收消息。重启后主进程 PID `33088`、post-reply worker PID `35792`，`/live` 与 `/ready` 均返回 200。小目标已完成。
 - 2026-08-12 16:30 +08:00：实现提交 `eecd43b8`；四项聚焦测试、887 文件 lint、typecheck、暂存密钥扫描、`git diff --check` 通过。全量 `npm test` 196.7 秒退出 1，仅 `weatherAlertProvider.test.js` 的过期预警时间夹具失败，单独复跑结果相同，与状态栏无关。
 - 2026-08-12 16:26 +08:00：真实本地立绘和本机 HTML 端点生成 `artifacts/private-status-bar/runtime-verification.png`，PNG 为 `960×640`、245,005 字节，像素检查非空；视觉复检确认四块布局完整、文字无重叠，小贴士第三行裁切已修复。
 - 2026-08-12 16:30 +08:00：旧模型别名 `deepseek-v4-flash-free` 复现 HTTP 429 `FreeUsageLimitError`；端点模型列表中的正式 ID `deepseek-ai/DeepSeek-V4-Flash` 在 `max_tokens=25000` 下成功返回严格三字段 JSON。读取用户 `1960901788` 上次会话和真实变量快照执行完整链路，QQ 消息 ID `2130555069`，`get_msg` 回读为私聊单一图片段。
