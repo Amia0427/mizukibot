@@ -43,6 +43,22 @@ module.exports = (async () => {
   assert.ok(html.includes('height:640px'));
   assert.doesNotThrow(() => validateMarkup(html, 'html'));
 
+  const maximumLengthHtml = buildPrivateStatusBarHtml({
+    snapshot: {
+      relationship: { attitude: '稳'.repeat(120) }
+    },
+    text: {
+      affection_note: '好'.repeat(80),
+      mood_note: '心'.repeat(80),
+      inner_thought: '话'.repeat(120)
+    }
+  });
+  assert.ok(maximumLengthHtml.includes(`<p class="model-note text-long">${'好'.repeat(80)}</p>`));
+  assert.ok(maximumLengthHtml.includes(`<p class="model-note text-long">${'心'.repeat(80)}</p>`));
+  assert.ok(maximumLengthHtml.includes(`<p class="thought-text text-long">${'话'.repeat(120)}</p>`));
+  assert.ok(maximumLengthHtml.includes(`<span class="attitude text-long">稳定态度：${'稳'.repeat(120)}</span>`));
+  assert.ok(!maximumLengthHtml.includes('line-clamp'));
+
   const data = normalizeStatusBarData({ snapshot: {} }, { now: new Date(0), timezone: 'UTC' });
   assert.deepStrictEqual(
     { affectionText: data.affectionText, stageLabel: data.stageLabel, mood: data.mood },
