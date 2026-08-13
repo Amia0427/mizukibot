@@ -31,6 +31,11 @@ module.exports = (async () => {
   assert.strictEqual(isUnsafeUserFacingReply('(内心OS：这段也不应进入正文)正文'), true);
   assert.strictEqual(isUnsafeUserFacingReply('心里OS：这段仍是内部思考\n\n正文'), true);
   assert.strictEqual(isUnsafeUserFacingReply('大家常说“内心OS”，但这里只是在讨论这个词。'), false);
+  assert.strictEqual(isUnsafeUserFacingReply('思维链是不能直接展示的，但我可以解释结论。'), false);
+  assert.strictEqual(isUnsafeUserFacingReply('思维链是内部内容，不能直接发给你。'), false);
+  assert.strictEqual(isUnsafeUserFacingReply('原始思维链是内部推理，不能直接发给你。'), false);
+  assert.strictEqual(isUnsafeUserFacingReply('思维链内容如下：第一步先判断用户的问题。'), true);
+  assert.strictEqual(isUnsafeUserFacingReply('完整思考过程：先识别用户意图，再组织答案。'), true);
   assert.strictEqual(isUnsafeUserFacingReply('我看了一眼代码，问题在 planner gate。'), false);
   assert.strictEqual(isUnsafeUserFacingReply('……没监控你还特意强调，怎么，你打算对猪做什么不可告人的事啊'), false);
   const mixedContent = '■ Two pigs, one shoving the other. Reply as Mizuki, 1:45am, casual, no brackets, no emoji, short chunks. --- 哈哈哈这个接得太准了吧';

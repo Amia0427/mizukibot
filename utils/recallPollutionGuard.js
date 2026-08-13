@@ -67,7 +67,7 @@ const ASSISTANT_SELF_INSTRUCTION_PATTERNS = [
 const REASONING_TRACE_LEAK_PATTERNS = [
   /<think(?:ing)?\b|<\/think(?:ing)?\s*>/i,
   /\b(?:reasoning_content|internal_check|chain[-\s]*of[-\s]*thought)\b/i,
-  /(?:思维链|思考过程|推理过程|内部推理|内部思考|隐藏推理|草稿).{0,40}(?:如下|内容|是|为|[:：=])/i,
+  /(?:思维链|思考过程|推理过程|内部推理|内部思考|隐藏推理|草稿)(?:的?(?:具体|完整|详细)?内容)?\s*(?:如下|为)?\s*[:：=]/i,
   /\*\s*\*(?:Addressing|Response|Final|Draft|Answer)\b[^*：:]{0,80}[:：]\s*\*?/i,
   /\bAddressing the (?:question|message|song|user)\s*:/i,
   /\b(?:maybe|what if|wait|let(?:'|’)s see|i need to|i should|the user (?:asks|wants|means)|they (?:ask|want|mean)|addressing the (?:question|message|song|user)|final answer|draft reply)\b.{0,240}\b(?:maybe|what if|wait|no,|i need to|i should|final answer|draft reply)\b.{0,240}\b(?:maybe|what if|wait|no,|i need to|i should|final answer|draft reply)\b/i

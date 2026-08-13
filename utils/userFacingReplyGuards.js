@@ -59,7 +59,7 @@ function isReasoningTraceLeak(text = '') {
   if (containsRoleplayReasoningLeak(raw)) return true;
   if (splitReasoningPreamble(raw)) return true;
   if (/\b(?:reasoning_content|internal_check|chain[-\s]*of[-\s]*thought)\b/i.test(compact)) return true;
-  if (/(?:思维链|思考过程|推理过程|内部推理|内部思考|隐藏推理|草稿).{0,40}(?:如下|内容|是|为|[:：=])/i.test(compact)) return true;
+  if (/(?:思维链|思考过程|推理过程|内部推理|内部思考|隐藏推理|草稿)(?:的?(?:具体|完整|详细)?内容)?\s*(?:如下|为)?\s*[:：=]/i.test(compact)) return true;
   if (/\*\s*\*(?:Addressing|Response|Final|Draft|Answer)\b[^*：:]{0,80}[:：]\s*\*?/i.test(raw)) return true;
   if (/\bAddressing the (?:question|message|song|user)\s*:/i.test(compact)) return true;
 

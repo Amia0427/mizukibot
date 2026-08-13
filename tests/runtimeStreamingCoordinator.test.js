@@ -135,6 +135,34 @@ module.exports = (async () => {
   });
   assert.strictEqual(objectStreamed.finalReply, 'persisted object reply');
 
+  const reasoningBoundaryReply = '原始思维链是内部推理，不能直接发给你。';
+  const reasoningBoundaryDeltas = [];
+  const reasoningBoundaryHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    requestStreamingReplyImpl: async () => ({ persistedText: reasoningBoundaryReply }),
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    config: { AI_MAX_TOKENS: 3500 }
+  });
+  const reasoningBoundaryStreamed = await reasoningBoundaryHelpers.streamDirectReply([], {
+    request: {
+      routePolicyKey: 'chat/default',
+      routeMeta: { chatType: 'private' },
+      modelConfig: {},
+      onDelta(text) { reasoningBoundaryDeltas.push(text); }
+    },
+    memory: {},
+    output: {}
+  });
+  assert.strictEqual(reasoningBoundaryStreamed.finalReply, reasoningBoundaryReply);
+  assert.notStrictEqual(reasoningBoundaryStreamed.unsafeBlocked, true);
+  assert.deepStrictEqual(reasoningBoundaryDeltas, [reasoningBoundaryReply]);
+
   const safetyStreamHelpers = createStreamingCoordinatorHelpers({
     sanitizeUserFacingText: (text, options = {}) => {
       const raw = String(text || '');
