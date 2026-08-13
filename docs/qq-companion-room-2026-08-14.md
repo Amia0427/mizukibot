@@ -98,3 +98,5 @@ node scripts/run-tests.js tests/companionRoomParser.test.js tests/companionRoomS
 - `npm test` 运行 182.5 秒后仅 `tests/weatherAlertProvider.test.js:65` 失败；单独复跑同样失败。该既有夹具使用固定的 2026-08-07 预警并以当前 `Date.now()` 判断活跃状态，在 2026-08-14 已过期，本次没有修改天气模块。
 - 当前测试运行时为 Node.js 24.14.1；项目声明的生产版本仍为 Node.js 20。
 - 真实 QQ 私聊 smoke 已通过：NapCat `get_status` 返回 `online=true`、`good=true`；临时状态文件中的已到时 15 分钟房间经实际 `tick()` 和 `send_private_msg` 发送 1 条收尾，第二次扫描没有重复发送，消息 `1489089511` 已通过 `get_friend_msg_history` 定位并由 `get_msg` 回读。正式插件开关、正式房间状态和普通长期记忆均未修改。
+
+2026-08-14 00:42 +08:00：实现提交 `82a4369b` 已完成，QQ 私聊共处房间 v1 小目标已完成；未修改天气模块、普通长期记忆结构、主动私聊创建策略或群聊行为，未推送远端。
