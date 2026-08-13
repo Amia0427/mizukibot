@@ -2052,3 +2052,10 @@
 - 数据切换：真实 dry-run/apply 均迁移 97 条旧关系，备份位于 `data/backups/conversation-variables-2026-08-08T05-23-02-520Z`；SQLite `quick_check=ok`，管理员 `1960901788` 的 5 个关系变量均为锁定覆盖。
 - 验收：变量、迁移、提示词、查询、Persona、live state、Memory 注入、post-reply worker、消息处理边界、主动私聊和开发文档测试通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过。完整 `npm test` 运行 162 秒，仅 `weatherAlertProvider.test.js` 因在 2026-08-08 断言 2026-08-07 已过期的固定预警仍有效而失败，本任务未修改天气模块。
 - 小目标已完成：对话变量系统已实现、迁移、审计并提交；`.belt/`、`AGENT.md` 和 `tests/maimaiAgentIntegration.test.js` 未纳入，当前分支未推送远端。
+## 运行维护 2026-08-14 01:02 +08:00
+
+- 根因：境外订阅 `65E77` 的和风预警详情接口返回 HTTP 400，原扫描用 `Promise.all` 直接抛出，导致其余有效地区也停止同步；模型回复仅使用末级区县名时又被全称校验误拒。
+- 修复：订阅阶段明确仅支持中国地区；单个 LocationID 请求失败仅记录该地点错误并跳过同步，不再误将旧预警置为失效，也不影响其他地区；地区事实校验接受完整订阅名或末级区县名，类型、等级、发布来源和“和风天气”仍为必填。
+- 运行数据：已移除 `3636999165` 的无效东京订阅，保留广东省梅州兴宁、广东省惠州及 `1960901788` 的重庆市沙坪坝区；4 条已失效重庆预警的历史模型重试错误已清理，不补发，扫描状态 `lastError` 已清空。
+- 验收：真实和风地点与详情请求验证兴宁、惠州均成功且当前无生效预警；真实扫描 3 个有效地区，`failedLocations=[]`；天气专项 6 项、`npm run lint`、`npm run typecheck`、`npm test` 和 `git diff --check` 均退出 0；重启后 `/live`、`/ready` 均为 HTTP 200。
+- 小目标已完成：天气订阅不会再因单个不支持地区中断，实现提交 `d85c6aa8`；当前分支未推送远端。
