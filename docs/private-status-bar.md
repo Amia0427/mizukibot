@@ -1,6 +1,6 @@
 # QQ 私聊状态栏
 
-更新时间：2026-08-13 23:57 +08:00
+更新时间：2026-08-14 00:31 +08:00
 
 ## 行为边界
 
@@ -26,6 +26,7 @@ PRIVATE_STATUS_BAR_IMAGE_URLS={"0":"D:/waifu/zhungtailan.jpg"}
 
 - `core/privateStatusBar/model.js` 只发送 `messages`，不发送工具 schema，要求 `response_format=json_object`，使用有限深度 JSON 解析和严格 zod Schema，只接受 `affection_note`、`mood_note`、`inner_thought` 三个字段。
 - `core/privateStatusBar/template.js` 使用参考图同构的 `960×640` 粉白手账模板：左侧人物相框、右侧好感度/心情/心里话三块信纸和左下小贴士。好感度进度条宽度由已校验的数值计算，时间使用 `TIMEZONE` 格式化为 `YYYY-MM-DD HH:mm`，所有动态文本统一 HTML 实体转义。
+- 模板不使用省略号或固定行数裁切动态字段；好感说明、心情说明、心里话和稳定态度按内容长度选择受控字号，三张右侧卡片的空间按真实字段上限分配。
 - 独立模型严格输出 `{"affection_note":"...","mood_note":"...","inner_thought":"..."}`；好感度、关系等级、情绪、态度和时间仍来自主模型本轮快照。`PRIVATE_STATUS_BAR_IMAGE_URLS` 按好感度阈值选择本地图片或图床图片，本地文件在机器人进程内读取为内存图片，渲染器只接受调用方提供的受信任图片槽，不开放模型直接写入 `<img>`、文件路径或 URL。
 - `core/privateStatusBar/runtime.js` 在模型、输出守卫、敏感词审查、本机渲染和 QQ 图片发送之间编排 freshness 检查；任一步失败均静默降级且不使用固定心里话兜底。
 
@@ -33,6 +34,7 @@ PRIVATE_STATUS_BAR_IMAGE_URLS={"0":"D:/waifu/zhungtailan.jpg"}
 
 ## 验收记录
 
+- 2026-08-14 00:31 +08:00：实现提交 `3aba67f1`。用户截图中的好感说明、心情说明和心里话底部裁切已修复；使用 `80/120/80/120` 字的好感说明、稳定态度、心情说明和心里话同时做浏览器边界检查，全部满足 `scrollHeight <= clientHeight` 且位于对应卡片内。用户截图自然文案与本地立绘经真实 HTML 端点生成 `960×640`、251,913 字节 PNG，字段完整且无重叠。状态栏聚焦测试、lint、typecheck、全量密钥扫描和差异检查通过；完整测试唯一失败为与本目标无关且可单独复现的 `weatherAlertProvider.test.js:65` 固定过期时间断言。小目标已完成。
 - 2026-08-13 23:57 +08:00：实现提交 `e754e356`。9 项状态栏及 Runtime V2 相邻测试、887 文件 lint、typecheck、暂存密钥扫描和差异检查通过；完整 `npm test` 运行 187.1 秒，唯一失败为既有 `weatherAlertProvider.test.js:65` 过期时间夹具，单独复跑相同。本机仅有 Node 24.14.1，未宣称 Node 20 验收。
 - 2026-08-13 23:57 +08:00：真实用户 `1960901788` 的会话变量经 Runtime Host 捕获后包含关系、角色和 system 消息，资格原因为空；真实独立模型、本地立绘和本机 HTML 渲染生成 `960×640`、245,878 字节非空 PNG，发送器替换为内存检查，未向 QQ 发送验收消息。重启后主进程 PID `33088`、post-reply worker PID `35792`，`/live` 与 `/ready` 均返回 200。小目标已完成。
 - 2026-08-12 16:30 +08:00：实现提交 `eecd43b8`；四项聚焦测试、887 文件 lint、typecheck、暂存密钥扫描、`git diff --check` 通过。全量 `npm test` 196.7 秒退出 1，仅 `weatherAlertProvider.test.js` 的过期预警时间夹具失败，单独复跑结果相同，与状态栏无关。
