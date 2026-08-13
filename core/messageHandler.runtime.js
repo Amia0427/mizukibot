@@ -652,6 +652,7 @@ function createMessageHandler({
   sendWithRetry,
   actionClient = null,
   privateProactiveEngine = null,
+  companionRoomRuntime = null,
   detectIntentHybridOverride = null,
   generateSessionContextSummaryOverride = null,
   inboundConcurrencyControllerOverride = null,
@@ -1868,6 +1869,52 @@ function createMessageHandler({
           replyPath: 'private_proactive_control',
           sent: Boolean(controlSent)
         });
+        return;
+      }
+    }
+
+    if (isPrivateChatType(chatType) && companionRoomRuntime) {
+      const adminResult = typeof companionRoomRuntime.handleAdminCommand === 'function'
+        ? await companionRoomRuntime.handleAdminCommand({
+          chatType,
+          userId: senderId,
+          rawText: rawMessageText,
+          isAdmin: isAdminUser(senderId)
+        })
+        : { handled: false };
+      const companionResult = adminResult?.handled
+        ? adminResult
+        : (typeof companionRoomRuntime.handleUserMessage === 'function'
+            ? await companionRoomRuntime.handleUserMessage({
+              chatType,
+              userId: senderId,
+              rawText: rawMessageText
+            })
+            : { handled: false });
+      if (companionResult?.handled) {
+        const companionSent = await sendGroupReply({
+          chatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: companionResult.replyText,
+          atSender: false,
+          retries: 1,
+          waitMs: 300,
+          source: 'companion_room',
+          routePolicyKey: 'companion-room/control',
+          triggerReason: `companion_room.${companionResult.code || 'unknown'}`,
+          topRouteType: 'companion_room'
+        });
+        appendRequestCompleteTrace({
+          routePolicyKey: 'companion-room/control',
+          topRouteType: 'companion_room',
+          replyPath: 'companion_room',
+          sent: Boolean(companionSent)
+        });
+        if (companionSent && typeof companionResult.afterReplySent === 'function') {
+          companionResult.afterReplySent();
+        }
         return;
       }
     }

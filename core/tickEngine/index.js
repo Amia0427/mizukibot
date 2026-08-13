@@ -1006,13 +1006,16 @@ async function runLifeSchedulerTick(actionClient, askAIByGraph, date = new Date(
   });
 }
 
-function startTickEngine(askAIByGraph, actionClient = null) {
+function startTickEngine(askAIByGraph, actionClient = null, options = {}) {
   const state = loadTickState();
+  const companionRoomRuntime = options.companionRoomRuntime || null;
+  const legacyEnabled = options.legacyEnabled !== false;
   let stopped = false;
   const timers = {
     proactive: null,
     dailyShare: null,
-    lifeScheduler: null
+    lifeScheduler: null,
+    companionRoom: null
   };
 
   async function runOnce() {
@@ -1048,6 +1051,17 @@ function startTickEngine(askAIByGraph, actionClient = null) {
     }
   }
 
+  async function runCompanionRoomOnce() {
+    if (stopped || !companionRoomRuntime) return;
+    try {
+      await companionRoomRuntime.tick();
+    } catch (error) {
+      console.error('[tick] companion room execution failed:', error?.message || error);
+    } finally {
+      if (!stopped) scheduleCompanionRoomTick(Math.max(10000, Number(config.COMPANION_ROOM_SCAN_INTERVAL_MS) || 60000));
+    }
+  }
+
   function armTimer(slot, delayMs, runner) {
     if (stopped) return;
     if (timers[slot]) {
@@ -1074,24 +1088,32 @@ function startTickEngine(askAIByGraph, actionClient = null) {
     armTimer('lifeScheduler', delayMs, runLifeSchedulerOnce);
   }
 
+  function scheduleCompanionRoomTick(delayMs) {
+    armTimer('companionRoom', delayMs, runCompanionRoomOnce);
+  }
+
   const startDelayMs = getProactiveStartDelayMs();
   const intervalMs = getProactiveScanIntervalMs();
   const dailyShareIntervalMs = getDailyShareScanIntervalMs();
   const lifeSchedulerIntervalMs = getLifeSchedulerScanIntervalMs();
 
-  scheduleProactiveTick(startDelayMs);
-  void runDailyShareOnce();
-  void runLifeSchedulerOnce();
-
-  console.log(
-    `[tick] proactive scheduler armed: first scan in ${Math.floor(startDelayMs / 60000)}m, interval ${Math.floor(intervalMs / 60000)}m`
-  );
-  console.log(
-    `[tick] daily share scheduler armed: immediate first scan, interval ${Math.floor(dailyShareIntervalMs / 60000)}m`
-  );
-  console.log(
-    `[tick] life scheduler armed: immediate first scan, interval ${Math.floor(lifeSchedulerIntervalMs / 60000)}m`
-  );
+  if (legacyEnabled) {
+    scheduleProactiveTick(startDelayMs);
+    void runDailyShareOnce();
+    void runLifeSchedulerOnce();
+    console.log(
+      `[tick] proactive scheduler armed: first scan in ${Math.floor(startDelayMs / 60000)}m, interval ${Math.floor(intervalMs / 60000)}m`
+    );
+    console.log(
+      `[tick] daily share scheduler armed: immediate first scan, interval ${Math.floor(dailyShareIntervalMs / 60000)}m`
+    );
+    console.log(
+      `[tick] life scheduler armed: immediate first scan, interval ${Math.floor(lifeSchedulerIntervalMs / 60000)}m`
+    );
+  }
+  if (companionRoomRuntime) {
+    scheduleCompanionRoomTick(Math.max(10000, Number(config.COMPANION_ROOM_SCAN_INTERVAL_MS) || 60000));
+  }
 
   return {
     stop() {

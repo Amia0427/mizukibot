@@ -77,6 +77,10 @@ function roleScopedDataFile(baseName) {
 const lowResourceMainProcessMode = lowResourceMode && runtimeRole === 'main';
 const lowResourceDisableLanceDbHotPath = pickBool('LOW_RESOURCE_DISABLE_LANCEDB_HOT_PATH', false);
 const lowResourceDisableWorldbookSemantic = pickBool('LOW_RESOURCE_DISABLE_WORLDBOOK_SEMANTIC', false);
+const configuredCompanionRoomDefaultDuration = pickNum('COMPANION_ROOM_DEFAULT_DURATION_MINUTES', 45);
+const companionRoomDefaultDuration = [15, 30, 45, 60, 120].includes(configuredCompanionRoomDefaultDuration)
+  ? configuredCompanionRoomDefaultDuration
+  : 45;
 const lowResourceLiteBudget = lowResourceMainProcessMode;
 const MAIN_REPLY_DEFAULT_MAX_TOKENS = 50000;
 const CHROME_LIKE_JA3 = '771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-27-17513,29-23-24,0';
@@ -176,6 +180,11 @@ module.exports = {
   PRIVATE_PROACTIVE_GLOBAL_MODEL_DAILY_LIMIT: Math.max(0, Math.floor(pickNum('PRIVATE_PROACTIVE_GLOBAL_MODEL_DAILY_LIMIT', 50))),
   PRIVATE_PROACTIVE_MAX_UNANSWERED_BATCHES: Math.max(1, Math.floor(pickNum('PRIVATE_PROACTIVE_MAX_UNANSWERED_BATCHES', 2))),
   PRIVATE_PROACTIVE_STATE_FILE: pick('PRIVATE_PROACTIVE_STATE_FILE', path.join(DATA_DIR, 'private-proactive-state.json')),
+  COMPANION_ROOM_ENABLED: pickBool('COMPANION_ROOM_ENABLED', false),
+  COMPANION_ROOM_STATE_FILE: pick('COMPANION_ROOM_STATE_FILE', path.join(DATA_DIR, 'companion-room-state.json')),
+  COMPANION_ROOM_DEFAULT_DURATION_MINUTES: companionRoomDefaultDuration,
+  COMPANION_ROOM_SCAN_INTERVAL_MS: Math.max(10000, pickNum('COMPANION_ROOM_SCAN_INTERVAL_MS', 60000)),
+  COMPANION_ROOM_MODEL_TIMEOUT_MS: Math.max(1000, pickNum('COMPANION_ROOM_MODEL_TIMEOUT_MS', 12000)),
   WEATHER_ALERT_ENABLED: pickBool('WEATHER_ALERT_ENABLED', false),
   QWEATHER_API_KEY: pick('QWEATHER_API_KEY', ''),
   WEATHER_ALERT_SCAN_INTERVAL_MINUTES: Math.max(1, pickNum('WEATHER_ALERT_SCAN_INTERVAL_MINUTES', 60)),

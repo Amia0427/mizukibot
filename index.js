@@ -55,6 +55,7 @@ const { createWeatherAlertCommandHandler } = require('./src/features/weather-ale
 const { initializeWeatherAlertRuntime } = require('./src/features/weather-alerts/runtime');
 const { createEmailGreetingCommandHandler } = require('./src/features/email-greetings/commands');
 const { initializeEmailGreetingRuntime } = require('./src/features/email-greetings/runtime');
+const { createCompanionRoomRuntime } = require('./src/features/companion-room');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -446,6 +447,10 @@ const privateProactiveEngine = createPrivateProactiveEngine({
   actionClient: platformActionClient,
   resolvePrivateTarget: platformRuntime.resolvePrivateTarget
 });
+const companionRoomRuntime = createCompanionRoomRuntime({
+  config,
+  actionClient: platformActionClient
+});
 const weatherAlertRuntime = initializeWeatherAlertRuntime({
   config,
   actionClient: platformActionClient,
@@ -521,6 +526,7 @@ const { handleIncomingMessage } = createMessageHandler({
   sendWithRetry,
   actionClient: platformActionClient,
   privateProactiveEngine,
+  companionRoomRuntime,
   groupContextStore: platformRuntime.groupContextStore
 });
 const platformMessageProcessor = createPlatformMessageProcessor({
@@ -617,8 +623,12 @@ function startConnectedRuntimes() {
   getMaimaiRuntime()?.syncScheduler?.start();
   getPjskRuntime()?.syncScheduler?.start();
   privateProactiveEngine.start();
-  if (config.TICK_ENGINE_ENABLED && !tickStarted) {
-    tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
+  companionRoomRuntime.start();
+  if (!tickStarted) {
+    tickRuntime = startTickEngine(askAIByGraph, napcatActionClient, {
+      legacyEnabled: config.TICK_ENGINE_ENABLED,
+      companionRoomRuntime
+    });
     tickStarted = true;
   }
   if (!config.TICK_ENGINE_ENABLED && !dailyJournalSummaryStarted) {
@@ -813,6 +823,7 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     { name: 'maimai_sync_scheduler', run: () => peekMaimaiRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'pjsk_sync_scheduler', run: () => peekPjskRuntime()?.syncScheduler?.stop({ drain: true }) },
     { name: 'private_proactive', run: () => privateProactiveEngine.stop() },
+    { name: 'companion_room', run: () => companionRoomRuntime.stop() },
     { name: 'scheduler', run: () => schedulerRuntime.stop() },
     { name: 'tick', run: () => tickRuntime?.stop?.() },
     { name: 'daily_journal_summary', run: () => dailyJournalSummaryRuntime?.stop?.() },
@@ -993,6 +1004,7 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       runtimeReadiness,
       platformRuntime,
       privateProactiveEngine,
+      companionRoomRuntime,
       weatherAlertRuntime,
       scheduleMainProcessEmbeddingBackfill,
       setMessageIngressDispatcherForTest(dispatcher) {
