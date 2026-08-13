@@ -44,6 +44,7 @@ function formatSubscriptionResult(result = {}) {
   if (result.status === 'unsubscribed') return `已取消 ${result.subscription.displayName} 的天气预警订阅。`;
   if (result.status === 'not_subscribed') return '没有找到该地区的已有订阅。';
   if (result.status === 'not_found') return '和风天气未找到该地区，请换用更完整的市、区或县名。';
+  if (result.status === 'unsupported_region') return '天气预警目前仅支持中国地区。';
   if (result.status === 'limit_reached') return `每个用户最多订阅 ${result.limit || 5} 个地区，请先取消一个已有订阅。`;
   if (result.status === 'ambiguous') {
     return [

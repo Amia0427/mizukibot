@@ -42,6 +42,9 @@ function createWeatherAlertSubscriptionService(options = {}) {
     const candidates = await provider.lookupLocations(query);
     const resolved = resolveLocation(candidates, query);
     if (resolved.status !== 'resolved') return resolved;
+    if (normalizeText(resolved.location.country) !== '中国') {
+      return { status: 'unsupported_region' };
+    }
     const current = stateStore.getPrincipal(principalId);
     if (current.subscriptions.some((item) => item.locationId === resolved.location.locationId)) {
       return { status: 'duplicate', subscription: resolved.location };

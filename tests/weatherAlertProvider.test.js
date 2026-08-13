@@ -34,7 +34,7 @@ module.exports = (async () => {
             severity: 'Moderate',
             eventType: '暴雨',
             description: '请注意防范。',
-            expireTime: '2026-08-07T12:00:00+08:00'
+            expireTime: '2099-08-07T12:00:00+08:00'
           }]
         }
       };

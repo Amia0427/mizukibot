@@ -188,6 +188,12 @@ function alertFacts(entry = {}) {
   };
 }
 
+function regionNames(region = '') {
+  const fullName = normalizeText(region);
+  const districtMatch = fullName.match(/(?:市|自治州|地区|盟)(.+(?:区|县|市|旗))$/u);
+  return [fullName, districtMatch?.[1]].filter(Boolean);
+}
+
 function buildWeatherAlertPrompt(entries, companionContext) {
   const facts = entries.map(alertFacts);
   return [
@@ -205,7 +211,8 @@ function validateWeatherAlertReply(reply, entries) {
   if (!text || !text.includes('和风天气')) return false;
   return entries.every((entry) => {
     const facts = alertFacts(entry);
-    return [facts.region, facts.type, facts.level, facts.source]
+    const hasRegion = regionNames(facts.region).some((name) => text.includes(name));
+    return hasRegion && [facts.type, facts.level, facts.source]
       .filter(Boolean)
       .every((fact) => text.includes(fact));
   });
@@ -364,13 +371,22 @@ function createWeatherAlertEngine(options = {}) {
     }
 
     const warningsByLocation = new Map();
+    const failedLocations = [];
     await Promise.all([...subscriptionsByLocation.entries()].map(async ([locationId, subscribers]) => {
-      warningsByLocation.set(locationId, await provider.getWarnings(subscribers[0].subscription));
+      try {
+        warningsByLocation.set(locationId, await provider.getWarnings(subscribers[0].subscription));
+      } catch (error) {
+        failedLocations.push({
+          locationId,
+          error: normalizeText(error?.message || error).slice(0, 300)
+        });
+      }
     }));
 
     for (const principalId of principalIds) {
       stateStore.updatePrincipal(principalId, (principal) => {
         for (const subscription of principal.subscriptions) {
+          if (!warningsByLocation.has(subscription.locationId)) continue;
           syncLocationWarnings(
             principal,
             subscription,
@@ -387,9 +403,16 @@ function createWeatherAlertEngine(options = {}) {
     stateStore.updateRuntime((runtime) => {
       runtime.lastScanAt = timestamp;
       runtime.nextScanAt = running ? timestamp + intervalMs : 0;
-      runtime.lastError = '';
+      runtime.lastError = failedLocations
+        .map((item) => `${item.locationId}: ${item.error}`)
+        .join('; ');
     });
-    return { scannedPrincipals: principalIds.length, queriedLocations: warningsByLocation.size, results };
+    return {
+      scannedPrincipals: principalIds.length,
+      queriedLocations: warningsByLocation.size,
+      failedLocations,
+      results
+    };
   }
 
   function scan(input = {}) {
@@ -438,6 +461,7 @@ module.exports = {
   buildWeatherAlertPrompt,
   createWeatherAlertEngine,
   quietHoursState,
+  regionNames,
   shouldDelayWarning,
   syncLocationWarnings,
   validateWeatherAlertReply,

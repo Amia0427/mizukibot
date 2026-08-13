@@ -2,6 +2,7 @@ const assert = require('assert');
 
 const {
   createWeatherAlertCommandHandler,
+  formatSubscriptionResult,
   parseWeatherAlertCommand
 } = require('../src/features/weather-alerts/commands');
 
@@ -12,6 +13,7 @@ module.exports = (async () => {
   });
   assert.deepStrictEqual(parseWeatherAlertCommand('/天气预警 列表'), { action: 'list', location: '' });
   assert.strictEqual(parseWeatherAlertCommand('我想订阅北京天气预警'), null);
+  assert.strictEqual(formatSubscriptionResult({ status: 'unsupported_region' }), '天气预警目前仅支持中国地区。');
 
   const calls = [];
   const replies = [];

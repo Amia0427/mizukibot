@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { createWeatherAlertEngine } = require('../src/features/weather-alerts/engine');
+const { createWeatherAlertEngine, validateWeatherAlertReply } = require('../src/features/weather-alerts/engine');
 const { createWeatherAlertStateStore } = require('../src/features/weather-alerts/store');
 
 function warning(overrides = {}) {
@@ -107,6 +107,56 @@ module.exports = (async () => {
   await engine.scan({ now: nowValue });
   const snapshot = stateStore.getPrincipal('person-a');
   assert.ok(Object.values(snapshot.alerts).every((item) => item.active === false));
+
+  assert.strictEqual(validateWeatherAlertReply(
+    '沙坪坝区高温橙色预警，重庆市气象局发布，数据来源为和风天气。',
+    [{
+      regionName: '重庆市沙坪坝区',
+      warning: warning({
+        sender: '重庆市气象局',
+        severityLabel: '橙色',
+        severityRank: 3,
+        typeName: '高温'
+      })
+    }]
+  ), true, '地区末级行政区名称应视为有效事实');
+
+  const failureStore = createStore(now, 'failure-state.json');
+  failureStore.updatePrincipal('person-a', (principal) => {
+    principal.alerts['loc-b:warning-old'] = {
+      key: 'loc-b:warning-old',
+      locationId: 'loc-b',
+      active: true,
+      warning: warning({ id: 'warning-old', locationId: 'loc-b' }),
+      delivery: { status: 'sent', nextAttemptAt: 0 }
+    };
+  }, { flushNow: true });
+  const failedLocations = [];
+  const failureEngine = createWeatherAlertEngine({
+    config: { WEATHER_ALERT_ENABLED: true, TIMEZONE: 'Asia/Shanghai' },
+    provider: {
+      getWarnings: async (subscription) => {
+        if (subscription.locationId === 'loc-b') {
+          failedLocations.push(subscription.locationId);
+          throw new Error('weather warning unavailable');
+        }
+        return [warning()];
+      }
+    },
+    stateStore: failureStore,
+    now,
+    resolvePrivateTarget: () => target,
+    buildContext: async () => ({}),
+    askAIByGraph: async () => '测试市测试区暴雨黄色预警，测试市气象台发布，数据来源为和风天气。',
+    sendPrivateMessage: async () => true,
+    recordAssistantBubble: () => {}
+  });
+  const failureResult = await failureEngine.scan({ now: nowValue });
+  assert.deepStrictEqual(failedLocations, ['loc-b']);
+  assert.strictEqual(failureResult.queriedLocations, 1);
+  assert.strictEqual(failureResult.failedLocations.length, 1);
+  assert.strictEqual(failureStore.getPrincipal('person-a').alerts['loc-b:warning-old'].active, true);
+  assert.ok(failureStore.read().runtime.lastError.includes('loc-b'));
 
   console.log('weatherAlertEngine.test.js passed');
 })().catch((error) => {
