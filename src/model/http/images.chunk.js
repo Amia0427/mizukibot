@@ -155,8 +155,53 @@ function buildUnavailableImageText(imageUrl = '') {
     : `[Image URL] ${imageUrl}`;
 }
 
+function parseImageDataUrl(url = '') {
+  const match = String(url || '').trim().match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+  if (!match) return null;
+  return {
+    mediaType: String(match[1] || '').toLowerCase(),
+    data: String(match[2] || '').replace(/\s+/g, '')
+  };
+}
+
 function isImageDataUrl(url = '') {
-  return /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(String(url || '').trim());
+  return Boolean(parseImageDataUrl(url));
+}
+
+async function buildOpenAICompatibleImageDataUrl(mediaType = 'image/jpeg', data = '') {
+  const normalizedMediaType = normalizeText(mediaType).toLowerCase().split(';', 1)[0] || 'image/jpeg';
+  const cleanData = String(data || '').replace(/\s+/g, '');
+  if (!cleanData) return null;
+  if (normalizedMediaType !== 'image/gif') {
+    return `data:${normalizedMediaType};base64,${cleanData}`;
+  }
+
+  const sharp = loadSharpForImageProcessing();
+  if (!sharp) return null;
+  try {
+    const jpegBuffer = await sharp(Buffer.from(cleanData, 'base64')).jpeg().toBuffer();
+    return `data:image/jpeg;base64,${jpegBuffer.toString('base64')}`;
+  } catch (error) {
+    console.warn('[vision] failed to convert GIF image for openai-compatible block: ' + (error?.message || error));
+    return null;
+  }
+}
+
+async function buildOpenAICompatibleImagePartFromData(mediaType, data, detail = '', sourceUrl = '') {
+  const imageDataUrl = await buildOpenAICompatibleImageDataUrl(mediaType, data);
+  if (!imageDataUrl) {
+    return {
+      type: 'text',
+      text: buildOpenAICompatibleImageFallbackText(sourceUrl)
+    };
+  }
+  return {
+    type: 'image_url',
+    image_url: {
+      url: imageDataUrl,
+      ...(detail ? { detail } : {})
+    }
+  };
 }
 
 function getAnthropicInlineImageMaxBase64Chars() {
@@ -190,7 +235,7 @@ function getAnthropicDownsampledImageMaxEdge() {
   return Math.max(96, parsed);
 }
 
-function loadSharpForAnthropicDownsample() {
+function loadSharpForImageProcessing() {
   if (sharpLoaderState !== 'unloaded') return sharpModule;
   sharpLoaderState = 'loaded';
   try {
@@ -198,7 +243,7 @@ function loadSharpForAnthropicDownsample() {
   } catch (error) {
     sharpModule = null;
     if (config.ENABLE_DEBUG_LOG) {
-      console.warn('[vision] sharp is unavailable for oversized anthropic image downsample: ' + (error?.message || error));
+      console.warn('[vision] sharp is unavailable for image processing: ' + (error?.message || error));
     }
   }
   return sharpModule;
@@ -248,7 +293,7 @@ async function buildDownsampledAnthropicImageBlock(imagePayload = {}) {
   const maxChars = getAnthropicInlineImageMaxBase64Chars();
   if (maxChars <= 0) return null;
 
-  const sharp = loadSharpForAnthropicDownsample();
+  const sharp = loadSharpForImageProcessing();
   if (!sharp) return null;
 
   const data = String(imagePayload?.data || '').trim();
@@ -369,25 +414,24 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
         text: buildOpenAICompatibleImageFallbackText(String(normalizedPart?.image_url?.url || normalizedPart?.url || ''))
       };
     }
-    return {
-      type: 'image_url',
-      image_url: {
-        url: `data:${inlineMediaType || 'image/jpeg'};base64,${inlineData}`,
-        ...(imageDetail ? { detail: imageDetail } : {})
-      }
-    };
+    return buildOpenAICompatibleImagePartFromData(
+      inlineMediaType || 'image/jpeg',
+      inlineData,
+      imageDetail,
+      String(normalizedPart?.image_url?.url || normalizedPart?.url || '')
+    );
   }
 
   const imageUrl = String(normalizedPart?.image_url?.url || normalizedPart?.url || '').trim();
   if (!imageUrl) return null;
-  if (isImageDataUrl(imageUrl)) {
-    return {
-      type: 'image_url',
-      image_url: {
-        url: imageUrl,
-        ...(imageDetail ? { detail: imageDetail } : {})
-      }
-    };
+  const dataUrlPayload = isImageDataUrl(imageUrl) ? parseImageDataUrl(imageUrl) : null;
+  if (dataUrlPayload) {
+    return buildOpenAICompatibleImagePartFromData(
+      dataUrlPayload.mediaType,
+      dataUrlPayload.data,
+      imageDetail,
+      imageUrl
+    );
   }
   const cacheRef = parseCacheRef(imageUrl);
   const cachedImage = cacheRef ? readCachedImagePayload(imageUrl) : null;
@@ -398,13 +442,12 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
         text: buildOpenAICompatibleImageFallbackText(imageUrl)
       };
     }
-    return {
-      type: 'image_url',
-      image_url: {
-        url: `data:${cachedImage.mediaType || 'image/jpeg'};base64,${cachedImage.data}`,
-        ...(imageDetail ? { detail: imageDetail } : {})
-      }
-    };
+    return buildOpenAICompatibleImagePartFromData(
+      cachedImage.mediaType || 'image/jpeg',
+      cachedImage.data,
+      imageDetail,
+      imageUrl
+    );
   }
   if (cacheRef) {
     return {
@@ -431,13 +474,7 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
         text: buildOpenAICompatibleImageFallbackText(imageUrl)
       };
     }
-    return {
-      type: 'image_url',
-      image_url: {
-        url: `data:${mediaType};base64,${data}`,
-        ...(imageDetail ? { detail: imageDetail } : {})
-      }
-    };
+    return buildOpenAICompatibleImagePartFromData(mediaType, data, imageDetail, imageUrl);
   } catch (error) {
     const details = error?.response?.status ? ('status=' + error.response.status) : (error?.message || 'unknown-error');
     console.warn('[vision] failed to fetch image url for openai-compatible block: ' + details);

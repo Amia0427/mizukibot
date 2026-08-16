@@ -11,15 +11,21 @@ module.exports = (async () => {
   const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-httpclient-image-'));
 
   let capturedBody = null;
+  const gifBuffer = Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64');
 
   try {
     process.env.DATA_DIR = tempDataDir;
     process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     const httpClient = require('../api/httpClient');
-    originalAxios.get = async () => ({
-      headers: { 'content-type': 'image/png' },
-      data: Buffer.from('fake-image-binary')
-    });
+    originalAxios.get = async (url) => String(url).includes('animation.gif')
+      ? {
+          headers: { 'content-type': 'image/gif' },
+          data: gifBuffer
+        }
+      : {
+          headers: { 'content-type': 'image/png' },
+          data: Buffer.from('fake-image-binary')
+        };
 
     originalAxios.post = async (_url, body) => {
       capturedBody = body;
@@ -58,6 +64,42 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(imagePart, 'detail'));
 
     await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
+      model: 'gcli-gemini-3-flash-preview-nothinking',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '远程 GIF 也要转成模型可接受的图片' },
+            { type: 'image_url', image_url: { url: 'https://multimedia.nt.qq.com.cn/animation.gif' } }
+          ]
+        }
+      ],
+      stream: false
+    }, 0, 'test-key');
+
+    const remoteGifImagePart = capturedBody.input[0].content[1];
+    assert.ok(/^data:image\/jpeg;base64,/i.test(String(remoteGifImagePart.image_url || '')));
+    assert.strictEqual(Buffer.from(String(remoteGifImagePart.image_url).split(',')[1], 'base64').subarray(0, 3).toString('hex'), 'ffd8ff');
+
+    await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
+      model: 'gcli-gemini-3-flash-preview-nothinking',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '内联 GIF 也要转成模型可接受的图片' },
+            { type: 'image_url', image_url: { url: `data:image/gif;base64,${gifBuffer.toString('base64')}` } }
+          ]
+        }
+      ],
+      stream: false
+    }, 0, 'test-key');
+
+    const inlineGifImagePart = capturedBody.input[0].content[1];
+    assert.ok(/^data:image\/jpeg;base64,/i.test(String(inlineGifImagePart.image_url || '')));
+    assert.strictEqual(Buffer.from(String(inlineGifImagePart.image_url).split(',')[1], 'base64').subarray(0, 3).toString('hex'), 'ffd8ff');
+
+    await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
       model: 'gpt-4.1-mini',
       messages: [
         {
@@ -82,6 +124,12 @@ module.exports = (async () => {
       mediaType: 'image/png'
     }), 'utf8');
     fs.writeFileSync(path.join(cacheDir, 'cached-ref.bin'), Buffer.from('cached-image-binary'));
+    fs.writeFileSync(path.join(cacheDir, 'cached-gif-ref.json'), JSON.stringify({
+      cacheKey: 'cached-gif-ref',
+      sourceUrl: 'https://example.com/animation.gif',
+      mediaType: 'image/gif'
+    }), 'utf8');
+    fs.writeFileSync(path.join(cacheDir, 'cached-gif-ref.bin'), gifBuffer);
 
     await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
       model: 'gpt-4.1-mini',
@@ -100,6 +148,25 @@ module.exports = (async () => {
     const cachedHitImagePart = capturedBody.input[0].content[1];
     assert.strictEqual(cachedHitImagePart.type, 'input_image');
     assert.ok(/^data:image\/png;base64,/i.test(String(cachedHitImagePart.image_url || '')));
+
+    await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
+      model: 'gcli-gemini-3-flash-preview-nothinking',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '缓存 GIF 也要转成模型可接受的图片' },
+            { type: 'image_url', image_url: { url: 'cached-image://cached-gif-ref' } }
+          ]
+        }
+      ],
+      stream: false
+    }, 0, 'test-key');
+
+    const cachedGifImagePart = capturedBody.input[0].content[1];
+    assert.ok(/^data:image\/jpeg;base64,/i.test(String(cachedGifImagePart.image_url || '')));
+    assert.strictEqual(Buffer.from(String(cachedGifImagePart.image_url).split(',')[1], 'base64').subarray(0, 3).toString('hex'), 'ffd8ff');
+    assert.deepStrictEqual(fs.readFileSync(path.join(cacheDir, 'cached-gif-ref.bin')), gifBuffer);
 
     fs.rmSync(path.join(cacheDir, 'cached-ref.bin'));
 
