@@ -2059,3 +2059,11 @@
 - 运行数据：已移除 `3636999165` 的无效东京订阅，保留广东省梅州兴宁、广东省惠州及 `1960901788` 的重庆市沙坪坝区；4 条已失效重庆预警的历史模型重试错误已清理，不补发，扫描状态 `lastError` 已清空。
 - 验收：真实和风地点与详情请求验证兴宁、惠州均成功且当前无生效预警；真实扫描 3 个有效地区，`failedLocations=[]`；天气专项 6 项、`npm run lint`、`npm run typecheck`、`npm test` 和 `git diff --check` 均退出 0；重启后 `/live`、`/ready` 均为 HTTP 200。
 - 小目标已完成：天气订阅不会再因单个不支持地区中断，实现提交 `d85c6aa8`；当前分支未推送远端。
+
+## 运行维护 2026-08-16 10:50 +08:00
+
+- 根因：`gcli-gemini-3-flash-preview-nothinking` 的 OpenAI-compatible 网关对纯文本返回 200，但收到 `data:image/gif` 时返回 `500 {"detail":"#sym:500"}`；同一图片字节改用 JPEG MIME 可正常处理，故障不在 QQ 下载或缓存读取。
+- 修复：实现提交 `05ddbead` 在 OpenAI-compatible 请求整形边界使用现有 `sharp` 将内联、缓存和远程 GIF 的首帧编码为 JPEG；非 GIF 保持原数据，缓存中的原始 GIF 不改写，其他 provider 未调整。
+- 验收：远程、内联、缓存 GIF 回归及 PNG 保持测试通过；真实缓存 GIF 本地输出为 4,376 字节 JPEG；`npm run lint` 检查 892 个文件、`npm run typecheck`、`git diff --check` 和完整 `npm test` 均退出 0，完整测试用时 188.9 秒。
+- 外部状态：修复后的真实缓存 GIF 和 1×1 GIF 分别等待 124 秒、94 秒后被本地外层超时终止，目标网关未返回原 `#sym:500`，也未取得可声明成功的 200；待上游恢复响应后复验，不重复消耗请求。
+- 小目标已完成：本地 GIF 协议修复、回归和提交已完成；`.belt/`、`AGENT.md`、私有提示词、并行测试和本地图片未纳入，当前分支未推送远端。

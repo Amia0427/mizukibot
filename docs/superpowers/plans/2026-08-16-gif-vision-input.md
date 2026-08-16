@@ -16,3 +16,7 @@
 - 定向图片请求回归通过，确认 GIF 输出为 JPEG data URL、PNG 仍为 PNG data URL。
 - `npm run lint`、`npm run typecheck`、`git diff --check` 通过。
 - 使用真实缓存 GIF 对目标模型做一次只读请求验收，记录上游状态。
+
+## 完成记录
+
+2026-08-16 10:50 +08:00：实现提交 `05ddbead` 已创建。远程、内联、缓存 GIF 及 PNG 保持回归通过，真实缓存 GIF 本地转换为 4,376 字节 JPEG；`npm run lint`、`npm run typecheck`、`git diff --check` 和 188.9 秒完整 `npm test` 均退出 0。目标模型两次实时请求均被上游超时阻断，未再返回 `#sym:500`，但没有取得 200 成功证据。
