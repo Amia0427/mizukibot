@@ -2,6 +2,22 @@ function normalizeReplyText(text = '') {
   return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
+function extractHttpStatusCode(value) {
+  const structuredStatus = [
+    value?.response?.status,
+    value?.statusCode,
+    value?.status
+  ].find((candidate) => {
+    const statusCode = Number(candidate);
+    return Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599;
+  });
+  if (structuredStatus !== undefined) return Number(structuredStatus);
+
+  const compact = normalizeReplyText(value?.message || value);
+  const match = compact.match(/\b(?:status(?:_code)?\s*=\s*|http[\s_-]*)([1-5]\d{2})\b/i);
+  return match ? Number(match[1]) : null;
+}
+
 function classifyReplyFailure(text = '') {
   const compact = normalizeReplyText(text);
   if (!compact) {
@@ -83,7 +99,7 @@ function classifyReplyFailure(text = '') {
 
   if (
     /^model invocation failed:/i.test(compact)
-    || /^status_code=\d+/i.test(compact)
+    || extractHttpStatusCode(compact) !== null
     || /^\{[\s\S]*"type"\s*:\s*"error"/i.test(compact)
     || /^\[[^\]]*error[^\]]*\]/i.test(compact)
     || /^the model response format was malformed/i.test(compact)
@@ -119,6 +135,7 @@ function isReplyFailure(text = '', options = {}) {
 
 module.exports = {
   classifyReplyFailure,
+  extractHttpStatusCode,
   isReplyFailure,
   normalizeReplyText
 };

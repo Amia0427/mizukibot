@@ -96,7 +96,11 @@ const { recordMemoryScope } = require('../../../utils/memoryScopeIndex');
 const { learnSomethingNew } = require('../../memoryExtraction');
 const { postWithRetry } = require('../../httpClient');
 const { extractMessageContent } = require('../../parser');
-const { isReplyFailure, classifyReplyFailure } = require('../../../utils/replyFailure');
+const {
+  isReplyFailure,
+  classifyReplyFailure,
+  extractHttpStatusCode
+} = require('../../../utils/replyFailure');
 const {
   captureToolFailure,
   learnSelfImprovement
@@ -535,7 +539,10 @@ function createRuntime(options = {}) {
     return normalizeArray(executedToolEnvelopes).length === 0;
   }
 
-  function getControlledFailureReply(failureType = 'generic_model_failure') {
+  function getControlledFailureReply(failureType = 'generic_model_failure', error = null) {
+    const httpStatusCode = extractHttpStatusCode(error);
+    if (httpStatusCode !== null) return `HTTP ${httpStatusCode}`;
+
     if (failureType === 'tool_loop_limit') {
       return '记忆那边刚刚绕住了。你把想找的点再捏具体一点，我接着翻。';
     }
@@ -731,7 +738,7 @@ function createRuntime(options = {}) {
       }));
     }
     return {
-      text: getControlledFailureReply(failureType),
+      text: getControlledFailureReply(failureType, telemetry.rawErrorMessage),
       source: 'controlled_failure'
     };
   }

@@ -1,6 +1,7 @@
 const assert = require('assert');
 
 const { createAgentDecideNode } = require('../api/runtimeV2/nodes/agentDecide');
+const { extractHttpStatusCode } = require('../utils/replyFailure');
 
 function createNode(overrides = {}) {
   return createAgentDecideNode({
@@ -21,7 +22,12 @@ function createNode(overrides = {}) {
         : 'tool_error'
     ),
     summarizeDirectReplyError: (error) => String(error?.message || error || ''),
-    getControlledFailureReply: () => '刚刚那句没组织稳。你再发一次，我继续接。',
+    getControlledFailureReply: (_failureType, error) => {
+      const httpStatusCode = extractHttpStatusCode(error);
+      return httpStatusCode === null
+        ? '刚刚那句没组织稳。你再发一次，我继续接。'
+        : `HTTP ${httpStatusCode}`;
+    },
     ...overrides
   });
 }
@@ -56,6 +62,26 @@ module.exports = (async () => {
   const failureEvent = failed.events.find((event) => event.type === 'agent_decision');
   assert.strictEqual(failureEvent.failureType, 'generic_model_failure');
   assert.ok(failureEvent.rawErrorMessage.includes('upstream timeout'));
+
+  const httpError = new Error('upstream timeout while requesting direct reply');
+  httpError.response = { status: 502 };
+  const httpFailureNode = createNode({
+    requestReplyImpl: async () => {
+      throw httpError;
+    }
+  });
+  const httpFailure = await httpFailureNode(createState());
+  assert.strictEqual(httpFailure.output.draftReply, 'HTTP 502');
+
+  const assistantHttpError = new Error('upstream service unavailable');
+  assistantHttpError.statusCode = 503;
+  const assistantHttpFailureNode = createNode({
+    requestAssistantMessageImpl: async () => {
+      throw assistantHttpError;
+    }
+  });
+  const assistantHttpFailure = await assistantHttpFailureNode(createState(['memory_cli']));
+  assert.strictEqual(assistantHttpFailure.output.draftReply, 'HTTP 503');
 
   const objectContentNode = createNode({
     requestAssistantMessageImpl: async () => ({

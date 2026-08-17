@@ -1,6 +1,20 @@
 const assert = require('assert');
 
-const { classifyReplyFailure } = require('../utils/replyFailure');
+const {
+  classifyReplyFailure,
+  extractHttpStatusCode
+} = require('../utils/replyFailure');
+
+assert.strictEqual(extractHttpStatusCode({ response: { status: 502 } }), 502);
+assert.strictEqual(extractHttpStatusCode({ statusCode: '503' }), 503);
+assert.strictEqual(extractHttpStatusCode({ status: 504 }), 504);
+assert.strictEqual(extractHttpStatusCode('status=502'), 502);
+assert.strictEqual(extractHttpStatusCode('status_code=503'), 503);
+assert.strictEqual(extractHttpStatusCode('HTTP 504'), 504);
+assert.strictEqual(extractHttpStatusCode('finalErrorCode=http_505'), 505);
+assert.strictEqual(extractHttpStatusCode(new Error('upstream timeout')), null);
+
+assert.strictEqual(classifyReplyFailure('finalErrorCode=http_502').type, 'generic_model_failure');
 
 assert.strictEqual(
   classifyReplyFailure('status=403 | response={"error":{"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ＄0.05"}}').type,

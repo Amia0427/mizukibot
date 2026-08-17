@@ -9,7 +9,11 @@ const {
 } = require('./systemGroupReply');
 const routeExecution = require('./routeExecution');
 const { humanizeReply } = require('../utils/humanizer');
-const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
+const {
+  classifyReplyFailure,
+  isReplyFailure,
+  extractHttpStatusCode
+} = require('../utils/replyFailure');
 const { sanitizeUserFacingText } = require('../utils/userFacingText');
 const { prepareSubagentFallbackReply } = require('../utils/subagentStyleGuard');
 const { buildCuteRefusalReply } = require('./refusalReply');
@@ -164,6 +168,8 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
   }
 
   if (failure.type === 'generic_model_failure') {
+    const httpStatusCode = extractHttpStatusCode(failure.text);
+    if (httpStatusCode !== null) return `HTTP ${httpStatusCode}`;
     return '刚刚那句没组织稳。你再发一次，我继续接。';
   }
 

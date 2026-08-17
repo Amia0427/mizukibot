@@ -245,7 +245,7 @@ function createAgentDecideNode(deps = {}) {
         }, 'agent_decide', 'running', nextEvents);
       } catch (error) {
         const failureType = deps.classifyDirectReplyError(error);
-        const reply = deps.getControlledFailureReply(failureType);
+        const reply = deps.getControlledFailureReply(failureType, error);
         const nextEvents = events.concat([
           createDecisionEvent({
             node: 'agent_decide',
@@ -291,7 +291,7 @@ function createAgentDecideNode(deps = {}) {
       ));
     } catch (error) {
       const failureType = deps.classifyDirectReplyError(error);
-      const reply = deps.getControlledFailureReply(failureType);
+      const reply = deps.getControlledFailureReply(failureType, error);
       const nextEvents = events.concat([
         createDecisionEvent({
           node: 'agent_decide',
