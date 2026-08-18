@@ -19,6 +19,9 @@ if ($logDir -and -not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
 
+$stdoutLogPath = Join-Path $ProjectRoot "data\bot-runtime.out.log"
+$stderrLogPath = Join-Path $ProjectRoot "data\bot-runtime.err.log"
+
 function Write-Log {
   param([string]$Message)
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -172,6 +175,8 @@ try {
     workingDirectory = $ProjectRoot
     lockPath = $lockFile
     logPath = $LogFile
+    stdoutLogPath = $stdoutLogPath
+    stderrLogPath = $stderrLogPath
   }
 
   if ($ValidateOnly) {
@@ -219,7 +224,7 @@ try {
   Write-Log "Starting Bot..."
   Push-Location $ProjectRoot
   try {
-    $startProcess = Start-Process -FilePath $restartPlan.nodeExecutable -ArgumentList $restartPlan.arguments -WorkingDirectory $restartPlan.workingDirectory -WindowStyle Hidden -PassThru
+    $startProcess = Start-Process -FilePath $restartPlan.nodeExecutable -ArgumentList $restartPlan.arguments -WorkingDirectory $restartPlan.workingDirectory -WindowStyle Hidden -RedirectStandardOutput $restartPlan.stdoutLogPath -RedirectStandardError $restartPlan.stderrLogPath -PassThru
     Write-Log "Bot started with PID: $($startProcess.Id)"
     Start-Sleep -Seconds 3
     if (-not (Test-LockOwnedByRunningMainBot -LockPath $lockFile)) {

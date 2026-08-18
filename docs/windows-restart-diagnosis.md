@@ -1,5 +1,7 @@
 # Windows 重启脚本诊断
 
+更新 2026-08-18 10:35 +08:00：修复 `scripts\restart-bot-periodic.ps1` 启动 `node index.js` 时未重定向 stdout/stderr，导致 `data\bot-runtime.out.log` 与 `data\bot-runtime.err.log` 无法记录周期重启后进程输出。脚本现将两条日志路径同时暴露在 `-ValidateOnly` 计划中，并传给真实 `Start-Process` 的 `-RedirectStandardOutput`/`-RedirectStandardError`。验收：`node tests\periodicRestartScript.test.js`、PowerShell AST parse 和 `git diff --check` 通过；直接执行周期脚本停止旧 PID `44816` 并启动 PID `33892`，`.mizukibot.lock` 持有且 `cmd /c restart-bot.cmd status` 显示主 bot/worker 均 Running；两条 runtime 日志 mtime 更新至 10:35:13，文件均非空（stdout 435、stderr 393 字节）。
+
 更新 2026-06-26 09:56 +08:00：修复 `restart-bot.cmd restart confirm` 在旧 pid 文件存在但主 bot/worker 进程都已退出时直接报 `无法将参数绑定到参数“Process”，因为该参数是空值。`。根因是进程识别 helper 仍把 `$Process` 声明为强制参数，空快照/空管道下调用会在进入判断前被 PowerShell 参数绑定拦截；现空进程对象统一返回“不匹配”，让脚本继续走启动恢复流程。验收：`node tests\restartBotScript.test.js`、`scripts\restart-bot.ps1` AST parse、`cmd /c restart-bot.cmd restart confirm` 和 `cmd /c restart-bot.cmd status` 通过，最终 main bot PID=5608、post-reply worker PID=21452 Running。小目标完成：确认重启遇到 stale pid + 空进程列表时不再被 PowerShell 强制参数绑定挡住。
 
 更新 2026-06-22 13:18 +08:00：修复“主 bot 已退出但 worker 还在时，`restart-bot.cmd restart confirm` 直接报错”。现场 `data\restart-bot.log` 记录 `无法将参数绑定到参数“MainProcesses”，因为该参数为空数组。`；根因是 launcher 清理函数把 main/worker 进程列表设为强制参数，而主进程缺席本来就是重启脚本要修复的合法状态。现 `Get-RestartLauncherPids` 接受空列表，空 main 列表时继续停止/启动流程。验收：目标测试、PowerShell AST parse、`restart-bot.cmd status` 和实际确认重启通过；旧 worker `20668` 被停止，最终 main bot `54672` 与 post-reply worker `14432` 均 Running。
