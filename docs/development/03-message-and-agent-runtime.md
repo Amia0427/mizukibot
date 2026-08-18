@@ -319,6 +319,10 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 
 实现提交 `aeab4a2a` 将用户出口与记忆污染守卫收窄为仅拦截带明确内容分隔符的思维链泄漏；“思维链是不能直接展示的”这类拒绝说明继续作为普通角色回复发送。守卫、私聊流式和相邻 reasoning 回归、lint、typecheck、diff check 均通过；完整测试的唯一失败为既有天气用例使用已过期的固定时间，未纳入本目标修改。小目标已完成。
 
+### HTTP 状态码失败回复验收（2026-08-17 10:27 +08:00）
+
+请求 `req_a38fbfa5d6c77f9` 证实上游连续三次 HTTP 502 后，原链路把 `finalErrorCode=http_502` 降级为 `generic_model_failure`，导致状态码被固定兜底文案覆盖。提交 `c0bad30c` 已统一提取结构化状态和错误文本中的 HTTP 状态码，私聊与主回复失败直接输出 `HTTP XXX`；`node tests/replyFailure.test.js`、`node tests/runtimeV2DirectReplyFailureTelemetry.test.js` 和差异检查均通过。
+
 ### 消息入口与并发
 
 ```bash
