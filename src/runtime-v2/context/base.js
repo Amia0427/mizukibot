@@ -1,7 +1,9 @@
 'use strict';
 
 const { estimateTokens, getAffinitySettings, trimTextByTokenBudget } = require('../../../utils/contextBudget');
-const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
+const { compilePromptPlan } = require('../../../utils/promptCompiler');
+const { resolvePromptPlan } = require('../../../utils/promptPlan');
+const { getPromptSnapshot } = require('../../../utils/promptLoader');
 const { getRecentResearchBriefs } = require('../../../utils/sessionResearchCache');
 const { buildDynamicFewShotPrompt } = require('../../../utils/fewShotPrompts');
 const { buildHeuristicDynamicPromptPlan, getMainReplyDynamicBlockCatalog } = require('../../../utils/mainReplyPromptBlocks');
@@ -64,6 +66,16 @@ function buildSharedShortTermContextMessages(...args) {
   return require('../../../utils/shortTermMemory').buildSharedShortTermContextMessages(...args);
 }
 
+function compileResolvedPrompt(blocks, context, promptRuntimeSnapshot) {
+  const compileContext = {
+    ...context,
+    blocks,
+    version: promptRuntimeSnapshot.version,
+    runtimeSnapshot: promptRuntimeSnapshot
+  };
+  return compilePromptPlan(resolvePromptPlan(compileContext), compileContext);
+}
+
 function buildMainStableSystemBlocks(...args) {
   return require('../../../utils/stagePromptContracts').buildMainStableSystemBlocks(...args);
 }
@@ -81,6 +93,7 @@ function selectPersonaModules(...args) {
 }
 
 async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
+  const promptRuntimeSnapshot = options.promptRuntimeSnapshot || getPromptSnapshot();
   const promptMaterials = options.promptMaterials && typeof options.promptMaterials === 'object'
     ? options.promptMaterials
     : null;
@@ -290,14 +303,14 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       kind: 'custom_prompt',
       source: 'custom'
     });
-    const customSnapshot = buildPromptSnapshot(customPromptBlock ? [customPromptBlock] : [], {
+    const customSnapshot = compileResolvedPrompt(customPromptBlock ? [customPromptBlock] : [], {
       stage: customStage,
       policyKey: String(options?.routePolicyKey || '').trim() || customStage,
       isAdmin: adminPromptContext,
       userId,
       adminUserIds: config.ADMIN_USER_IDS,
       modelName
-    });
+    }, promptRuntimeSnapshot);
     return {
       dynamicPrompt: customSnapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n\n'),
       stableSystemBlocks: customSnapshot.assembledBlocks,
@@ -322,6 +335,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     ? normalizeArray(options.cachedStableSystemBlocks).map((block) => ({ ...block }))
     : buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT,
+      promptRuntimeSnapshot,
       userId,
       routeMeta,
       isAdmin: adminPromptContext,
@@ -658,6 +672,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     }
   }
   const dynamicFewShotContext = {
+    promptRuntimeSnapshot,
     question,
     routePolicyKey: options.routePolicyKey,
     topRouteType: options.topRouteType,
@@ -819,7 +834,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     ...normalizedLaneSplit.assistantOnlyContextBlocks
   ];
 
-  let promptSnapshot = buildPromptSnapshot(snapshotBlocks.filter(Boolean), {
+  let promptSnapshot = compileResolvedPrompt(snapshotBlocks.filter(Boolean), {
     stage: 'main',
     policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
     budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens),
@@ -827,12 +842,13 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     userId,
     adminUserIds: config.ADMIN_USER_IDS,
     modelName
-  });
+  }, promptRuntimeSnapshot);
   let dynamicPrompt = serializePromptBlocks(snapshotBlocks);
   const promptBudget = Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens);
   if (estimateTokens(dynamicPrompt) > promptBudget) {
     const compactPromptBlocks = buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT,
+      promptRuntimeSnapshot,
       userId,
       routeMeta,
       isAdmin: adminPromptContext,
@@ -1018,7 +1034,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       audit: baseDynamicContextAudit,
       budgetTokens: promptBudget
     });
-    promptSnapshot = buildPromptSnapshot(compactSelectedBlocks.filter(Boolean), {
+    promptSnapshot = compileResolvedPrompt(compactSelectedBlocks.filter(Boolean), {
       stage: 'main',
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main_compact',
       budgetTokens: promptBudget,
@@ -1026,7 +1042,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       userId,
       adminUserIds: config.ADMIN_USER_IDS,
       modelName
-    });
+    }, promptRuntimeSnapshot);
     dynamicPrompt = serializePromptBlocks(compactSelectedBlocks);
   }
 

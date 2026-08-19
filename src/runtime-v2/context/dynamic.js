@@ -4,7 +4,9 @@ const { estimateTokens, getAffinitySettings, trimTextByTokenBudget } = require('
 const { buildPromptSnippet } = require('../../../utils/selfImprovementRuntime');
 const { buildStyleProfileSnippet } = require('../../../utils/styleProfileRuntime');
 const { buildSocialContextSnippet } = require('../../../utils/socialContextRuntime');
-const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
+const { compilePromptPlan } = require('../../../utils/promptCompiler');
+const { resolvePromptPlan } = require('../../../utils/promptPlan');
+const { getPromptSnapshot } = require('../../../utils/promptLoader');
 const { buildHeuristicDynamicPromptPlan, isCriticalDynamicContextBlock } = require('../../../utils/mainReplyPromptBlocks');
 const { isBalancedOrMinimalPromptMode, resolveMainReplyPromptMode, shouldBuildDynamicFewShot } = require('../../../utils/mainReplyPromptMode');
 const { buildChatLivenessDisciplinePrompt, resolveChatSurface } = require('../../../utils/chatLivenessContext');
@@ -87,6 +89,11 @@ function buildSharedShortTermContextMessages(...args) {
   return require('../../../utils/shortTermMemory').buildSharedShortTermContextMessages(...args);
 }
 
+function compileResolvedPrompt(blocks, context, promptRuntimeSnapshot) {
+  const compileContext = { ...context, blocks, version: promptRuntimeSnapshot.version };
+  return compilePromptPlan(resolvePromptPlan(compileContext), compileContext);
+}
+
 function getLifeSchedulerEngine(...args) {
   return require('../../../core/lifeSchedulerEngine').getLifeSchedulerEngine(...args);
 }
@@ -104,6 +111,7 @@ function selectPersonaModules(...args) {
 }
 
 async function buildDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
+  const promptRuntimeSnapshot = options.promptRuntimeSnapshot || getPromptSnapshot();
   const promptAssemblyTiming = createPromptAssemblyTimingCollector(options.__promptAssemblyTiming);
   const buildStage = promptAssemblyTiming.start('buildDynamicPromptImpl', {
     category: 'prompt_assembly',
@@ -135,7 +143,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     String(currentConfig.LIFE_SCHEDULER_ENABLED),
     String(currentConfig.PROMPT_OPTIONAL_BUILD_ENABLED)
   ].join('|'));
-  const systemPromptFingerprint = buildStableSystemPromptFingerprint(currentConfig);
+  const systemPromptFingerprint = `${buildStableSystemPromptFingerprint(currentConfig)}:${promptRuntimeSnapshot.version}`;
   const promptModeFingerprint = hashText(mainReplyPromptMode);
   const normalizedPromptUserId = normalizeText(
     userId
@@ -275,6 +283,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const promptMaterials = await withSoftTimeout(
     () => collectPromptInputs(userInfo, userId, question, customPrompt, {
       ...options,
+      promptRuntimeSnapshot,
       isAdmin: adminPromptContext,
       sharedShortTermContext,
       __promptAssemblyTiming: promptAssemblyTiming
@@ -310,6 +319,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     const customBuilt = await withSoftTimeout(
       () => promptAssemblyTiming.measureAsync('renderPromptLayers.custom', () => renderPromptLayers(promptMaterials, {
         ...options,
+        promptRuntimeSnapshot,
         modelName,
         isAdmin: adminPromptContext,
         sharedShortTermContext
@@ -372,6 +382,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const essentialRenderStartedAt = Date.now();
   const stableLayer = stableCacheHit || await promptAssemblyTiming.measureAsync('renderPromptLayers.stable', () => renderPromptLayers(promptMaterials, {
     ...options,
+    promptRuntimeSnapshot,
     modelName,
     isAdmin: adminPromptContext,
     sharedShortTermContext,
@@ -395,6 +406,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   }
   const sessionCandidateLayer = await promptAssemblyTiming.measureAsync('renderPromptLayers.session', () => renderPromptLayers(promptMaterials, {
     ...options,
+    promptRuntimeSnapshot,
     modelName,
     isAdmin: adminPromptContext,
     sharedShortTermContext,
@@ -577,6 +589,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     optionalLayer = await withSoftTimeout(
       () => promptAssemblyTiming.measureAsync('renderPromptLayers.optional', () => renderPromptLayers(promptMaterials, {
         ...options,
+        promptRuntimeSnapshot,
         modelName,
         isAdmin: adminPromptContext,
         sharedShortTermContext,
@@ -1039,12 +1052,13 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ? []
     : optionalBlocks;
   const laneSplit = splitBlocksByLane(criticalBlocks.concat(includedOptionalBlocks));
-  const mergedSnapshot = buildPromptSnapshot(
-    [
+  const mergedBlocks = [
       ...laneSplit.stableSystemBlocks,
       ...laneSplit.dynamicContextBlocks,
       ...laneSplit.assistantOnlyContextBlocks
-    ].filter(Boolean),
+    ].filter(Boolean);
+  const mergedSnapshot = compileResolvedPrompt(
+    mergedBlocks,
     {
       stage: 'main',
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
@@ -1052,7 +1066,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       userId,
       adminUserIds: currentConfig.ADMIN_USER_IDS,
       modelName
-    }
+    },
+    promptRuntimeSnapshot
   );
   const promptSegments = {
     ...(sessionCandidateLayer.promptSegments || {}),

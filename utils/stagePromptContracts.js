@@ -2,6 +2,7 @@ const config = require('../config');
 const { buildRuntimePrompt } = require('./runtimePrompts');
 const { buildSecuritySystemPrompt } = require('./promptSecurity');
 const { loadPersonaModuleText } = require('./personaModules');
+const { getPromptSnapshot } = require('./promptLoader');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -9,6 +10,10 @@ function normalizeText(value) {
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function resolveSnapshotAssetText(snapshot, assetId, fallback = '') {
+  return normalizeText(snapshot?.assets?.[assetId]?.text) || normalizeText(fallback);
 }
 
 function isAdminPromptContext(options = {}) {
@@ -89,23 +94,29 @@ function shouldIncludePromptBlockForMainContext(block = {}, options = {}) {
 
 function buildMainStageBlocks(options = {}) {
   const blocks = [];
+  const promptRuntimeSnapshot = options.promptRuntimeSnapshot || getPromptSnapshot();
   const optionSystemPrompt = normalizeText(options.systemPrompt);
   const configSystemPrompt = normalizeText(config.SYSTEM_PROMPT);
   const hasSystemPromptOverride = Boolean(optionSystemPrompt && optionSystemPrompt !== configSystemPrompt);
   const configuredSystemBlocks = Array.isArray(options.systemPromptBlocks)
     ? options.systemPromptBlocks
     : (!hasSystemPromptOverride && Array.isArray(config.SYSTEM_PROMPT_BLOCKS) ? config.SYSTEM_PROMPT_BLOCKS : []);
-  const normalizedSystemBlocks = configuredSystemBlocks.map((block, index) => ({
+  const normalizedSystemBlocks = configuredSystemBlocks.map((block, index) => {
+    const id = normalizeText(block.id, `system_prompt_block_${index + 1}`);
+    return {
     ...block,
-    id: normalizeText(block.id, `system_prompt_block_${index + 1}`),
+    id,
     label: normalizeText(block.label, normalizeText(block.id, `System Prompt Block ${index + 1}`)),
     stage: normalizeText(block.stage, 'main'),
     priority: Number.isFinite(Number(block.priority)) ? Number(block.priority) : 500 + index,
     authority: normalizeText(block.authority, 'persona'),
     kind: normalizeText(block.kind, 'persona'),
     appliesWhen: normalizeObject(block.appliesWhen || block.applies_when, {}),
-    content: normalizeText(block.content)
-  }))
+    content: id === 'main_persona_system'
+      ? resolveSnapshotAssetText(promptRuntimeSnapshot, 'main_persona_system', block.content)
+      : normalizeText(block.content)
+  };
+  })
     .filter((block) => block.content)
     .filter((block) => shouldIncludePromptBlockForMainContext(block, options));
   const rootSystemBlocks = normalizedSystemBlocks.filter((block) => block.authority === 'system_root' || block.kind === 'system_root');
@@ -145,7 +156,12 @@ function buildMainStableSystemBlocks(options = {}) {
     ...block,
     lane: 'stable_system'
   }));
-  const coreBaseline = normalizeText(loadPersonaModuleText('core_baseline'));
+  const promptRuntimeSnapshot = options.promptRuntimeSnapshot || getPromptSnapshot();
+  const coreBaseline = resolveSnapshotAssetText(
+    promptRuntimeSnapshot,
+    'core_baseline_patch',
+    loadPersonaModuleText('core_baseline')
+  );
   if (coreBaseline) {
     blocks.push({
       id: 'core_baseline_patch',

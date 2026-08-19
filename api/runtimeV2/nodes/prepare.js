@@ -1,4 +1,6 @@
-const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
+const { compilePromptPlan } = require('../../../utils/promptCompiler');
+const { resolvePromptPlan } = require('../../../utils/promptPlan');
+const { getPromptSnapshot } = require('../../../utils/promptLoader');
 const { buildMainStableSystemBlocks } = require('../../../utils/stagePromptContracts');
 const {
   recordMainPromptBlockObservation
@@ -248,21 +250,22 @@ function createPrepareNode(deps = {}) {
       .includes(userId);
   }
 
-  function buildDefaultStableSystemBlocks(request = {}) {
+  function buildDefaultStableSystemBlocks(request = {}, promptRuntimeSnapshot = null) {
     return normalizePromptBlocks(buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT,
       systemPromptBlocks: config.SYSTEM_PROMPT_BLOCKS,
+      promptRuntimeSnapshot: promptRuntimeSnapshot || getPromptSnapshot(),
       userId: request.userId,
       routeMeta: request.routeMeta,
       isAdmin: isAdminPromptRequest(request)
     }));
   }
 
-  function ensureMainStableSystemBlocks(blocks = [], request = {}) {
+  function ensureMainStableSystemBlocks(blocks = [], request = {}, promptRuntimeSnapshot = null) {
     const stableBlocks = normalizePromptBlocks(blocks);
     if (!isMainPromptGuardEnabled(request)) return stableBlocks;
 
-    const defaults = buildDefaultStableSystemBlocks(request);
+    const defaults = buildDefaultStableSystemBlocks(request, promptRuntimeSnapshot);
     const existingIds = new Set(stableBlocks.map(blockId).filter(Boolean));
     const missingDefaults = defaults.filter((block) => {
       const id = blockId(block);
@@ -576,7 +579,8 @@ function createPrepareNode(deps = {}) {
     const rawValue = typeof rawResult === 'function' ? rawResult() : rawResult;
     const raw = normalizeObject(rawValue, {});
     const rawStableBlocks = normalizePromptBlocks(raw.stableSystemBlocks);
-    const stableSystemBlocks = ensureMainStableSystemBlocks(rawStableBlocks, request);
+    const promptRuntimeSnapshot = options.promptRuntimeSnapshot || getPromptSnapshot();
+    const stableSystemBlocks = ensureMainStableSystemBlocks(rawStableBlocks, request, promptRuntimeSnapshot);
     const dynamicContextBlocks = normalizePromptBlocks(raw.dynamicContextBlocks);
     const assistantOnlyContextBlocks = normalizePromptBlocks(raw.assistantOnlyContextBlocks);
     const allBlocks = stableSystemBlocks.concat(dynamicContextBlocks, assistantOnlyContextBlocks);
@@ -592,17 +596,36 @@ function createPrepareNode(deps = {}) {
       || !existingSnapshot
       || normalizeArray(existingSnapshot.assembledBlocks).length === 0;
     const compiledSnapshot = shouldRebuildSnapshot
-      ? buildPromptSnapshot(allBlocks, {
+      ? compilePromptPlan(resolvePromptPlan({
+        blocks: allBlocks,
         stage: 'main',
         policyKey: String(request.routePolicyKey || '').trim() || 'direct_chat/main',
+        budgetTokens: Math.max(0, Number(request.promptBudgetTokens || 0) || 0),
         isAdmin: isAdminPromptRequest(request),
         userId: request.userId,
-        adminUserIds: config.ADMIN_USER_IDS
+        adminUserIds: config.ADMIN_USER_IDS,
+        version: promptRuntimeSnapshot.version,
+        runtimeSnapshot: promptRuntimeSnapshot
+      }), {
+        blocks: allBlocks,
+        stage: 'main',
+        policyKey: String(request.routePolicyKey || '').trim() || 'direct_chat/main',
+        budgetTokens: Math.max(0, Number(request.promptBudgetTokens || 0) || 0),
+        isAdmin: isAdminPromptRequest(request),
+        userId: request.userId,
+        adminUserIds: config.ADMIN_USER_IDS,
+        version: promptRuntimeSnapshot.version,
+        runtimeSnapshot: promptRuntimeSnapshot
       })
       : null;
+    const runtimeDiagnostics = compiledSnapshot?.promptRuntimeDiagnostics
+      || existingSnapshot?.promptRuntimeDiagnostics
+      || null;
     const promptSnapshot = {
       ...(existingSnapshot || {}),
       ...(compiledSnapshot || {}),
+      version: promptRuntimeSnapshot.version,
+      ...(runtimeDiagnostics ? { promptRuntimeDiagnostics: runtimeDiagnostics } : {}),
       stableBlockIds: stableSystemBlocks.map(blockId).filter(Boolean),
       dynamicBlockIds: dynamicContextBlocks.map(blockId).filter(Boolean),
       assistantOnlyBlockIds: assistantOnlyContextBlocks.map(blockId).filter(Boolean),
@@ -658,7 +681,7 @@ function createPrepareNode(deps = {}) {
     };
   }
 
-  function buildPromptSoftTimeoutFallback(state = {}, request = {}) {
+  function buildPromptSoftTimeoutFallback(state = {}, request = {}, promptRuntimeSnapshot = null) {
     const memoryContext = buildFallbackMemoryContext(state, request);
     const dynamicContextBlocks = buildSoftTimeoutDynamicBlocks(state, request, memoryContext);
     return buildGuardedPromptArtifacts({
@@ -690,7 +713,7 @@ function createPrepareNode(deps = {}) {
         optionalBudgetMs: 0,
         optionalBudgetExceeded: false
       }
-    }, request, { forceGuardApplied: true });
+    }, request, { forceGuardApplied: true, promptRuntimeSnapshot });
   }
 
   function isPlainChatPrepareFastPath(request = {}) {
@@ -791,7 +814,7 @@ function createPrepareNode(deps = {}) {
     return '';
   }
 
-  function buildLightDirectFastPromptArtifacts(state = {}, request = {}, fastPath = 'plain_private_chat') {
+  function buildLightDirectFastPromptArtifacts(state = {}, request = {}, fastPath = 'plain_private_chat', promptRuntimeSnapshot = null) {
     const liveStateContext = String(request.liveStateContext || '').trim();
     const dynamicContextBlocks = [];
     appendUniquePromptBlock(dynamicContextBlocks, createFallbackPromptBlock(
@@ -842,12 +865,13 @@ function createPrepareNode(deps = {}) {
         promptRenderMs: 0
       },
       fastPath
-    }, request, { forceGuardApplied: true });
+    }, request, { forceGuardApplied: true, promptRuntimeSnapshot });
   }
 
   return async function prepareNode(state) {
     const startedAt = nowTs();
     const request = normalizeObject(state.request, {});
+    const promptRuntimeSnapshot = getPromptSnapshot();
     const routeMeta = normalizeObject(request.routeMeta, {});
     const requestQuestionText = String(request.runtimeQuestionText || request.question || '').trim();
     const persistUserText = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
@@ -1026,7 +1050,7 @@ function createPrepareNode(deps = {}) {
       : request;
 
     const promptBuildResult = lightDirectFastPath
-      ? buildLightDirectFastPromptArtifacts(state, requestForPromptBuild, prepareFastPath)
+      ? buildLightDirectFastPromptArtifacts(state, requestForPromptBuild, prepareFastPath, promptRuntimeSnapshot)
       : await withSoftTimeout(
           () => buildDynamicPromptImpl(
             request.userInfo,
@@ -1050,13 +1074,14 @@ function createPrepareNode(deps = {}) {
               shortTermMemory,
               sessionKey: request.sessionKey,
               latencyDecision,
-              __memoryContextMemo: memoryContextMemo
+              __memoryContextMemo: memoryContextMemo,
+              promptRuntimeSnapshot
             }
           ),
           latencyDecision.prepareSoftBudgetMs,
-          () => buildPromptSoftTimeoutFallback(state, request)
+          () => buildPromptSoftTimeoutFallback(state, request, promptRuntimeSnapshot)
         );
-    const guardedPromptBuildResult = buildGuardedPromptArtifacts(promptBuildResult, request);
+    const guardedPromptBuildResult = buildGuardedPromptArtifacts(promptBuildResult, request, { promptRuntimeSnapshot });
     const {
       dynamicPrompt,
       stableSystemBlocks,

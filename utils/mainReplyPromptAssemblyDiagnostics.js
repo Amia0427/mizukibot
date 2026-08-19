@@ -354,6 +354,27 @@ function summarizeBlocks(snapshot = {}, catalogById = null) {
   };
 }
 
+function summarizePromptRuntimeDiagnostics(snapshot = {}) {
+  const diagnostics = normalizeObject(snapshot.promptRuntimeDiagnostics, {});
+  return {
+    schemaVersion: normalizeText(diagnostics.schemaVersion),
+    version: normalizeText(diagnostics.version),
+    stage: normalizeText(diagnostics.stage),
+    policyKey: normalizeText(diagnostics.policyKey),
+    enabledModules: normalizeArray(diagnostics.enabledModules).map((item) => ({
+      id: normalizeText(item.id),
+      version: normalizeText(item.version),
+      tier: normalizeText(item.tier),
+      reason: normalizeText(item.reason)
+    })).filter((item) => item.id),
+    selectionDecisions: normalizeArray(diagnostics.selectionDecisions).map((item) => ({ ...item })),
+    estimatedTokens: Math.max(0, Number(diagnostics.estimatedTokens || 0) || 0),
+    trimmedModules: normalizeArray(diagnostics.trimmedModules).map((item) => ({ ...item })),
+    finalOrder: uniqueTexts(diagnostics.finalOrder),
+    budget: normalizeObject(diagnostics.budget, {})
+  };
+}
+
 function sourceStatus(source = {}) {
   const normalized = normalizeObject(source, {});
   return {
@@ -850,6 +871,7 @@ async function buildFromTestInput(rawInput = {}, options = {}) {
       assistantOnlyBlocks: blocks.assistantOnly,
       tokenUsageByBlock: normalizeArray(snapshot.tokenUsageByBlock),
       trimDecisions: normalizeArray(snapshot.trimDecisions),
+      promptRuntimeDiagnostics: summarizePromptRuntimeDiagnostics(snapshot),
       cacheLanes: normalizeObject(snapshot.cacheLanes, {})
     },
     planner: summarizePlanner(snapshot),
@@ -1035,7 +1057,8 @@ function buildFromRequestId(requestId = '', options = {}) {
       assistantOnlyBlocks: observedSourceIndex.assistantOnlyBlocks,
       inferredRuntimeBlocksFromModelCall: observedSourceIndex.inferredRuntimeBlocksFromModelCall,
       tokenUsageByBlock: normalizeArray(observation?.prompt?.tokenUsageByBlock),
-      trimDecisions: normalizeArray(observation?.prompt?.trimDecisions)
+      trimDecisions: normalizeArray(observation?.prompt?.trimDecisions),
+      promptRuntimeDiagnostics: summarizePromptRuntimeDiagnostics(observation?.prompt || {})
     },
     planner,
     personaModules: observedPersonaSummary,
@@ -1146,5 +1169,6 @@ module.exports = {
   buildFromTestInput,
   parseArgs,
   readDiagnosticRows,
-  summarizeBlocks
+  summarizeBlocks,
+  summarizePromptRuntimeDiagnostics
 };

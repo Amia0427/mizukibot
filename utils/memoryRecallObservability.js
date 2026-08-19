@@ -511,6 +511,28 @@ function summarizePromptAssemblyStageTimings(promptSnapshot = {}) {
   };
 }
 
+function summarizePromptRuntimeDiagnostics(promptSnapshot = {}) {
+  const diagnostics = normalizeObject(normalizeObject(promptSnapshot, {}).promptRuntimeDiagnostics, {});
+  if (Object.keys(diagnostics).length === 0) return null;
+  return {
+    schemaVersion: normalizeText(diagnostics.schemaVersion),
+    version: normalizeText(diagnostics.version),
+    stage: normalizeText(diagnostics.stage),
+    policyKey: normalizeText(diagnostics.policyKey),
+    enabledModules: normalizeArray(diagnostics.enabledModules)
+      .map((item) => ({ ...normalizeObject(item, {}) })),
+    selectionDecisions: normalizeArray(diagnostics.selectionDecisions)
+      .map((item) => ({ ...normalizeObject(item, {}) })),
+    estimatedTokens: Math.max(0, Number(diagnostics.estimatedTokens || 0) || 0),
+    trimmedModules: normalizeArray(diagnostics.trimmedModules)
+      .map((item) => ({ ...normalizeObject(item, {}) })),
+    finalOrder: normalizeArray(diagnostics.finalOrder)
+      .map((item) => normalizeText(item))
+      .filter(Boolean),
+    budget: { ...normalizeObject(diagnostics.budget, {}) }
+  };
+}
+
 function findPlannerDecisionForBlock(plan = {}, blockId = '') {
   const target = normalizeText(blockId);
   if (!target) return null;
@@ -573,7 +595,8 @@ function recordMainPromptBlockObservation(input = {}) {
       trimDecisions: summarizeTrimDecisions(promptSnapshot),
       shortTermContinuity: summarizeShortTermContinuityPrompt(promptSnapshot),
       liveStateDynamic: summarizeLiveStateDynamicPrompt(promptSnapshot),
-      stageTimings: summarizePromptAssemblyStageTimings(promptSnapshot)
+      stageTimings: summarizePromptAssemblyStageTimings(promptSnapshot),
+      promptRuntimeDiagnostics: summarizePromptRuntimeDiagnostics(promptSnapshot)
     },
     planner: {
       dynamicPromptPlanSource: normalizeText(dynamicPromptPlan.source || dynamicPromptPlan._source),

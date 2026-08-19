@@ -67,18 +67,10 @@ module.exports = (() => {
     clearProjectCache();
 
     const fewShotPrompts = require('../utils/fewShotPrompts');
+    const { reloadPromptSnapshot } = require('../utils/promptLoader');
     fewShotPrompts.clearFewShotIndexCache();
 
-    const originalReadFileSync = fs.readFileSync;
-    let indexReads = 0;
-    try {
-      fs.readFileSync = function patchedReadFileSync(filePath, ...args) {
-        if (path.resolve(String(filePath || '')) === path.resolve(indexFile)) {
-          indexReads += 1;
-        }
-        return originalReadFileSync.call(this, filePath, ...args);
-      };
-
+    {
       const first = fewShotPrompts.buildDynamicFewShotPrompt({
         question: '缓存测试',
         routePolicyKey: 'chat/default',
@@ -94,18 +86,26 @@ module.exports = (() => {
 
       assert.ok(first.includes('[示例:first_example]'));
       assert.strictEqual(first, second);
-      assert.strictEqual(indexReads, 1);
 
       writeFewShotIndex(indexFile, 'second_example', '刷新');
-      const changed = fewShotPrompts.buildDynamicFewShotPrompt({
+      const unchanged = fewShotPrompts.buildDynamicFewShotPrompt({
         question: '刷新测试',
         routePolicyKey: 'chat/default',
         topRouteType: 'chat',
         maxExamples: 1
       });
 
+      assert.ok(!unchanged.includes('[示例:second_example]'));
+
+      const reloaded = reloadPromptSnapshot();
+      assert.strictEqual(reloaded.ok, true);
+      const changed = fewShotPrompts.buildDynamicFewShotPrompt({
+        question: '刷新测试',
+        routePolicyKey: 'chat/default',
+        topRouteType: 'chat',
+        maxExamples: 1
+      });
       assert.ok(changed.includes('[示例:second_example]'));
-      assert.strictEqual(indexReads, 2);
 
       fs.writeFileSync(indexFile, JSON.stringify({
         version: 2,
@@ -129,6 +129,7 @@ module.exports = (() => {
           }
         ]
       }), 'utf8');
+      assert.strictEqual(reloadPromptSnapshot().ok, true);
       const linked = fewShotPrompts.buildDynamicFewShotPrompt({
         question: '继续',
         routePolicyKey: 'chat/default',
@@ -140,8 +141,6 @@ module.exports = (() => {
       assert.ok(linked.indexOf('[示例:linked_worldbook]') >= 0);
       assert.ok(linked.indexOf('[示例:plain_match]') >= 0);
       assert.ok(linked.indexOf('[示例:linked_worldbook]') < linked.indexOf('[示例:plain_match]'));
-    } finally {
-      fs.readFileSync = originalReadFileSync;
     }
 
     console.log('fewShotPromptsCache.test.js passed');

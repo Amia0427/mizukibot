@@ -72,6 +72,18 @@ function observation(requestId) {
         { id: 'live_state_dynamic', tokens: 66 },
         { id: 'persona_module_wb_mizuki_future_two_tracks', tokens: 80 }
       ],
+      promptRuntimeDiagnostics: {
+        schemaVersion: 'prompt_compilation_diagnostics_v1',
+        version: '2026-08-17.1',
+        stage: 'main',
+        policyKey: 'chat/default',
+        enabledModules: [{ id: 'main_persona_system', version: '2026-08-17.1', tier: 'persona', reason: 'enabled_when_true' }],
+        selectionDecisions: [{ id: 'main_persona_system', enabled: true, reason: 'enabled_when_true' }],
+        estimatedTokens: 120,
+        trimmedModules: [{ id: 'dynamic_few_shot', reason: 'budget_trim_example' }],
+        finalOrder: ['root_system_prompt', 'main_persona_system'],
+        budget: { limitTokens: 200, usedTokens: 120, exceededByProtectedModules: false }
+      },
       liveStateDynamic: {
         hit: true,
         block: {
@@ -201,6 +213,8 @@ function observation(requestId) {
   assert.strictEqual(rebuilt.mode, 'test_input');
   assert.strictEqual(rebuilt.exactPromptRebuilt, true);
   assert.ok(rebuilt.promptAssembly.stableBlocks.some((item) => item.id === 'main_persona_system'));
+  assert.strictEqual(rebuilt.promptAssembly.promptRuntimeDiagnostics.version, '2026-08-17.1');
+  assert.ok(Array.isArray(rebuilt.promptAssembly.promptRuntimeDiagnostics.finalOrder));
   assert.ok(rebuilt.promptAssembly.dynamicBlocks.some((item) => item.moduleId === 'wb_mizuki_future_two_tracks'));
   assert.ok(rebuilt.personaModules.selected.includes('wb_mizuki_future_two_tracks'));
   assert.ok(rebuilt.personaWorldbook.selected.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
@@ -289,6 +303,7 @@ function observation(requestId) {
   assert.ok(requestIdReport.planner.traceSignals.includes('planner_timeout'));
   assert.ok(requestIdReport.observed.blockIds.dynamic.includes('persona_module_wb_mizuki_future_two_tracks'));
   assert.ok(requestIdReport.promptAssembly.dynamicBlocks.some((item) => item.moduleId === 'wb_mizuki_future_two_tracks'));
+  assert.strictEqual(requestIdReport.promptAssembly.promptRuntimeDiagnostics.version, '2026-08-17.1');
   assert.ok(requestIdReport.personaModules.selected.includes('wb_mizuki_future_two_tracks'));
   assert.ok(requestIdReport.personaWorldbook.selected.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
   assert.ok(requestIdReport.runtimeLocalInjection.selectedWithoutPlanner.some((item) => item.moduleId === 'wb_mizuki_future_two_tracks'));

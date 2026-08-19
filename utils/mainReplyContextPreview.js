@@ -70,6 +70,39 @@ function summarizeMemoryTrace(trace = {}) {
   };
 }
 
+function summarizePromptRuntimeDiagnostics(prompt = {}) {
+  const diagnostics = prompt.promptRuntimeDiagnostics && typeof prompt.promptRuntimeDiagnostics === 'object'
+    ? prompt.promptRuntimeDiagnostics
+    : null;
+  if (!diagnostics) return null;
+  return {
+    schemaVersion: diagnostics.schemaVersion || '',
+    version: diagnostics.version || '',
+    enabledModules: Array.isArray(diagnostics.enabledModules)
+      ? diagnostics.enabledModules.map((module) => ({
+          id: module?.id || '',
+          version: module?.version || '',
+          tier: module?.tier || '',
+          reason: module?.reason || ''
+        }))
+      : [],
+    finalOrder: Array.isArray(diagnostics.finalOrder)
+      ? diagnostics.finalOrder.map((id) => String(id || '')).filter(Boolean)
+      : [],
+    budget: diagnostics.budget && typeof diagnostics.budget === 'object'
+      ? { ...diagnostics.budget }
+      : {},
+    trimmedModules: Array.isArray(diagnostics.trimmedModules)
+      ? diagnostics.trimmedModules.map((module) => ({
+          id: module?.id || '',
+          tier: module?.tier || '',
+          estimatedTokens: Number(module?.estimatedTokens || 0) || 0,
+          reason: module?.reason || ''
+        }))
+      : []
+  };
+}
+
 function summarizeObservation(row = {}) {
   const prompt = row.prompt && typeof row.prompt === 'object' ? row.prompt : {};
   const continuity = prompt.shortTermContinuity && typeof prompt.shortTermContinuity === 'object'
@@ -88,6 +121,7 @@ function summarizeObservation(row = {}) {
     hasRetrievedMemoryLite: prompt.hasRetrievedMemoryLite === true,
     hasDailyJournal: hasDailyJournalBlock(prompt),
     hasMemosRecall: prompt.hasMemosRecall === true,
+    promptRuntimeDiagnostics: summarizePromptRuntimeDiagnostics(prompt),
     localMemoryEvidenceCount: Math.max(0, Number(row.localMemory?.evidenceCount || 0) || 0),
     memoryTrace: summarizeMemoryTrace(memoryTrace || {}),
     memosUsed: row.memos?.used === true,

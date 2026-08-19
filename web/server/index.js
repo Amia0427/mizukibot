@@ -40,6 +40,7 @@ const {
   renderMainReplyContextPreviewPanel
 } = require('../mainReplyContextPreviewAdmin');
 const { registerMainReplyContextPreviewRoute } = require('../mainReplyContextPreviewRoute');
+const { registerPromptRuntimeReloadRoute } = require('../promptRuntimeReloadRoute');
 const {
   renderMemoryV3NocturneClientScript,
   renderMemoryV3NocturnePanel
@@ -237,6 +238,7 @@ function createWebApp(options = {}) {
   });
 
   registerMainReplyContextPreviewRoute(app);
+  registerPromptRuntimeReloadRoute(app);
   registerMemoryV3NocturneRoutes(app);
   registerConversationVariablesRoutes(app);
 

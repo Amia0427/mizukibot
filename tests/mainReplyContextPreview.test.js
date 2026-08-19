@@ -18,6 +18,18 @@ fs.writeFileSync(logFile, [
       hasShortTermContinuity: true,
       hasRetrievedMemoryLite: true,
       hasMemosRecall: false,
+      promptRuntimeDiagnostics: {
+        schemaVersion: 'prompt_compilation_diagnostics_v1',
+        version: '2026-08-17.1',
+        enabledModules: [
+          { id: 'retrieved_memory_lite', version: '1.0.0', tier: 'context', reason: 'memory_needed' }
+        ],
+        finalOrder: ['stable_identity', 'retrieved_memory_lite'],
+        budget: { limitTokens: 120, usedTokens: 80, exceededByProtectedModules: false },
+        trimmedModules: [
+          { id: 'dynamic_few_shot', tier: 'example', estimatedTokens: 20, reason: 'budget_trim_example' }
+        ]
+      },
       shortTermContinuity: {
         contextProfile: 'memory_recall',
         rawTurnCount: 30,
@@ -71,6 +83,21 @@ const preview = buildMainReplyContextPreview({
 assert.strictEqual(preview.schemaVersion, 'main_reply_context_preview_v1');
 assert.strictEqual(preview.observations.length, 1);
 assert.strictEqual(preview.observations[0].hasDailyJournal, true);
+assert.strictEqual(preview.observations[0].promptRuntimeDiagnostics.version, '2026-08-17.1');
+assert.deepStrictEqual(preview.observations[0].promptRuntimeDiagnostics.enabledModules, [
+  { id: 'retrieved_memory_lite', version: '1.0.0', tier: 'context', reason: 'memory_needed' }
+]);
+assert.deepStrictEqual(preview.observations[0].promptRuntimeDiagnostics.finalOrder, [
+  'stable_identity', 'retrieved_memory_lite'
+]);
+assert.deepStrictEqual(preview.observations[0].promptRuntimeDiagnostics.budget, {
+  limitTokens: 120,
+  usedTokens: 80,
+  exceededByProtectedModules: false
+});
+assert.deepStrictEqual(preview.observations[0].promptRuntimeDiagnostics.trimmedModules, [
+  { id: 'dynamic_few_shot', tier: 'example', estimatedTokens: 20, reason: 'budget_trim_example' }
+]);
 assert.strictEqual(preview.observations[0].shortTermContinuity.contextProfile, 'memory_recall');
 assert.strictEqual(preview.observations[0].memoryTrace.retrievalPath, 'v3');
 assert.strictEqual(preview.observations[0].memoryTrace.hits[0].category, 'preference');

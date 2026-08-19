@@ -22,6 +22,7 @@
     "prompts/prompt-manifest.json",
     "prompts/persona_modules/",
     "prompts/persona_worldbook/",
+    "prompts/main-reply/",
     "prompts/runtime/",
     "scripts/",
     "src/",

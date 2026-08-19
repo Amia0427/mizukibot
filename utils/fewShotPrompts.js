@@ -1,6 +1,6 @@
-const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getPromptSnapshot } = require('./promptLoader');
 const {
   recallFewShotExamplesSync
 } = require('./localPromptRecall');
@@ -8,24 +8,6 @@ const {
 const FEW_SHOT_INDEX_PATH = path.join(config.PROMPTS_DIR, 'persona', '05_examples.index.json');
 const FEW_SHOT_EXAMPLES_PATH = path.join(config.PROMPTS_DIR, 'persona', '05_examples.txt');
 let fewShotIndexCache = null;
-
-function safeReadText(filePath, fallback = '') {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    return fs.readFileSync(filePath, 'utf8');
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function safeStatFile(filePath) {
-  try {
-    const stat = fs.statSync(filePath);
-    return stat && stat.isFile() ? stat : null;
-  } catch (_) {
-    return null;
-  }
-}
 
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -116,34 +98,24 @@ const HIGH_EMOTION_PATTERNS = [
   /(负担|回不去|说不出口|逃避)/i
 ];
 
-function loadFewShotIndex() {
-  const stat = safeStatFile(FEW_SHOT_INDEX_PATH);
-  const fileVersion = stat ? `${Number(stat.mtimeMs || 0)}:${Number(stat.size || 0)}` : 'missing';
+function loadFewShotIndex(promptSnapshot = getPromptSnapshot()) {
+  const asset = promptSnapshot?.assets?.few_shot_index;
   if (
     fewShotIndexCache
-    && fewShotIndexCache.filePath === FEW_SHOT_INDEX_PATH
-    && fewShotIndexCache.fileVersion === fileVersion
+    && fewShotIndexCache.snapshot === promptSnapshot
   ) {
     return fewShotIndexCache.index;
   }
 
-  const raw = stat ? safeReadText(FEW_SHOT_INDEX_PATH, '').trim() : '';
-  if (!raw) {
+  if (!asset || !asset.value) {
     const index = emptyFewShotIndex();
-    fewShotIndexCache = { filePath: FEW_SHOT_INDEX_PATH, fileVersion, index };
+    fewShotIndexCache = { snapshot: promptSnapshot, index };
     return index;
   }
 
-  try {
-    const parsed = JSON.parse(raw);
-    const index = normalizeFewShotIndex(parsed);
-    fewShotIndexCache = { filePath: FEW_SHOT_INDEX_PATH, fileVersion, index };
-    return index;
-  } catch (_) {
-    const index = emptyFewShotIndex();
-    fewShotIndexCache = { filePath: FEW_SHOT_INDEX_PATH, fileVersion, index };
-    return index;
-  }
+  const index = normalizeFewShotIndex(asset.value);
+  fewShotIndexCache = { snapshot: promptSnapshot, index };
+  return index;
 }
 
 function shouldUseExtraFewShotSlot(context = {}) {
@@ -280,7 +252,7 @@ function scoreFewShotExample(example = {}, context = {}) {
 }
 
 function selectDynamicFewShotExamples(context = {}) {
-  const index = loadFewShotIndex();
+  const index = loadFewShotIndex(context.promptRuntimeSnapshot || getPromptSnapshot());
   const maxExamples = resolveFewShotMaxExamples(context, index);
   if (maxExamples <= 0) return [];
 
@@ -333,7 +305,9 @@ function selectDynamicFewShotExamples(context = {}) {
 }
 
 function buildDynamicFewShotPrompt(context = {}) {
-  const examples = selectDynamicFewShotExamples(context);
+  const promptRuntimeSnapshot = context.promptRuntimeSnapshot || getPromptSnapshot();
+  const intro = String(promptRuntimeSnapshot.assets?.few_shot_intro?.text || '').trim();
+  const examples = selectDynamicFewShotExamples({ ...context, promptRuntimeSnapshot });
   if (!examples.length) return '';
 
   const blocks = examples.map((example) => {
@@ -351,10 +325,9 @@ function buildDynamicFewShotPrompt(context = {}) {
   if (!blocks.length) return '';
 
   return [
-    '[动态示例参考]',
-    '以下示例只用于帮助你贴近语气、节奏和分寸，不要照抄内容，也不要假装发生过相同经历。',
+    intro,
     blocks.join('\n\n')
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 function clearFewShotIndexCache() {

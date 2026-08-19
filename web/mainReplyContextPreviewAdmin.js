@@ -4,7 +4,7 @@ function renderMainReplyContextPreviewPanel() {
     <h3>主回复上下文预览</h3>
     <div class="hint">只读摘要：短期连续性、Memory V3/本地记忆、日记和 MemOS 召回是否进入主回复。</div>
     <div class="actions"><button type="button" id="btn-context-preview-load">刷新上下文预览</button><span id="context-preview-updated" class="muted"></span></div>
-    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>时间</th><th>User</th><th>Profile</th><th>Raw</th><th>Summary</th><th>Memory V3</th><th>Journal</th><th>MemOS</th><th>Trim</th></tr></thead><tbody id="context-preview-body"></tbody></table></div>
+    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>时间</th><th>User</th><th>Profile</th><th>Raw</th><th>Summary</th><th>Memory V3</th><th>Journal</th><th>MemOS</th><th>Trim</th><th>Prompt Runtime</th></tr></thead><tbody id="context-preview-body"></tbody></table></div>
   </div>`;
 }
 
@@ -15,13 +15,22 @@ function renderMainReplyContextPreviewClientScript() {
       const rows = Array.isArray(preview && preview.observations) ? preview.observations : [];
       document.getElementById('context-preview-updated').textContent = preview && preview.updatedAt ? ('updated: ' + preview.updatedAt) : '';
       if (rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="9" class="muted">暂无上下文观测</td></tr>';
+        body.innerHTML = '<tr><td colspan="10" class="muted">暂无上下文观测</td></tr>';
         return;
       }
       body.innerHTML = rows.slice().reverse().map(function (row) {
         const st = row.shortTermContinuity || {};
         const raw = String(Number(st.selectedRawTurnCount || 0)) + '/' + String(Number(st.rawTurnCount || 0));
         const trim = Array.isArray(st.trimReasons) ? st.trimReasons.join(', ') : '';
+        const runtime = row.promptRuntimeDiagnostics || {};
+        const runtimeTrim = Array.isArray(runtime.trimmedModules)
+          ? runtime.trimmedModules.map(function (item) { return item.id + ':' + (item.reason || 'trim'); }).join(', ')
+          : '';
+        const budget = runtime.budget || {};
+        const budgetLabel = Number.isFinite(Number(budget.usedTokens)) || Number.isFinite(Number(budget.limitTokens))
+          ? String(Number(budget.usedTokens || 0)) + '/' + String(Number(budget.limitTokens || 0))
+          : '-';
+        const runtimeLabel = [runtime.version || '-', budgetLabel, runtime.finalOrder && runtime.finalOrder.length ? runtime.finalOrder.join(' > ') : '-', runtimeTrim || '-'].join(' | ');
         return '<tr>'
           + '<td>' + escapeCell(row.ts || '') + '</td>'
           + '<td class="mono">' + escapeCell(row.userId || '-') + '</td>'
@@ -32,6 +41,7 @@ function renderMainReplyContextPreviewClientScript() {
           + '<td>' + (row.hasDailyJournal ? 'yes' : 'no') + '</td>'
           + '<td>' + (row.hasMemosRecall || row.memosUsed ? 'yes' : 'no') + '</td>'
           + '<td title="' + escapeCell(trim) + '">' + escapeCell(trim || '-') + '</td>'
+          + '<td class="mono" title="' + escapeCell(runtimeLabel) + '">' + escapeCell(runtimeLabel) + '</td>'
           + '</tr>';
       }).join('');
     }

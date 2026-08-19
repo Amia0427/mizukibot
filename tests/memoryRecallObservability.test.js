@@ -173,6 +173,16 @@ function clearProjectCache() {
         hotspots: [
           { name: 'collectPromptInputs', durationMs: 17, category: 'collect', status: 'ok' }
         ]
+      },
+      promptRuntimeDiagnostics: {
+        schemaVersion: 'prompt_compilation_diagnostics_v1',
+        version: '2026-08-17.1',
+        enabledModules: [{ id: 'stable_identity', version: '1.0.0', reason: 'enabled_when_true' }],
+        selectionDecisions: [{ id: 'retrieved_memory_lite', enabled: true, reason: 'memory_needed' }],
+        estimatedTokens: 100,
+        trimmedModules: [{ id: 'dynamic_few_shot', reason: 'budget_trim_example' }],
+        finalOrder: ['stable_identity', 'short_term_continuity', 'retrieved_memory_lite'],
+        budget: { limitTokens: 120, usedTokens: 100, exceededByProtectedModules: false }
       }
     },
     memoryContext: { memoryForPrompt: '完整内容不应进入测试断言。' },
@@ -241,6 +251,25 @@ function clearProjectCache() {
   assert.strictEqual(prompt.prompt.stageTimings.schemaVersion, 'prompt_assembly_stage_timing_v1');
   assert.strictEqual(prompt.prompt.stageTimings.readOnly, true);
   assert.strictEqual(prompt.prompt.stageTimings.byName.collectPromptInputs.durationMs, 17);
+  assert.strictEqual(prompt.prompt.promptRuntimeDiagnostics.version, '2026-08-17.1');
+  assert.deepStrictEqual(prompt.prompt.promptRuntimeDiagnostics.enabledModules, [
+    { id: 'stable_identity', version: '1.0.0', reason: 'enabled_when_true' }
+  ]);
+  assert.deepStrictEqual(prompt.prompt.promptRuntimeDiagnostics.selectionDecisions, [
+    { id: 'retrieved_memory_lite', enabled: true, reason: 'memory_needed' }
+  ]);
+  assert.strictEqual(prompt.prompt.promptRuntimeDiagnostics.estimatedTokens, 100);
+  assert.deepStrictEqual(prompt.prompt.promptRuntimeDiagnostics.trimmedModules, [
+    { id: 'dynamic_few_shot', reason: 'budget_trim_example' }
+  ]);
+  assert.deepStrictEqual(prompt.prompt.promptRuntimeDiagnostics.finalOrder, [
+    'stable_identity', 'short_term_continuity', 'retrieved_memory_lite'
+  ]);
+  assert.deepStrictEqual(prompt.prompt.promptRuntimeDiagnostics.budget, {
+    limitTokens: 120,
+    usedTokens: 100,
+    exceededByProtectedModules: false
+  });
   assert.strictEqual(prompt.planner.memosRecallDecision.decision, 'skip');
   assert.strictEqual(prompt.drop.dropped, false);
   assert.strictEqual(dropped.stage, 'memos_recall_dropped_before_prompt');

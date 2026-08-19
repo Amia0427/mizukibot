@@ -2,6 +2,7 @@ const {
   mapPromptBlockToMessage,
   splitPromptBlocksByTrust
 } = require('./promptSecurity');
+const { resolvePromptPlan } = require('./promptPlan');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -9,15 +10,6 @@ function normalizeText(value) {
 
 function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
-}
-
-function normalizeObject(value, fallback = {}) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
-}
-
-function normalizeStage(value, fallback = 'main') {
-  const text = normalizeText(value).toLowerCase();
-  return text || fallback;
 }
 
 function estimateTextTokens(value) {
@@ -32,121 +24,96 @@ function estimateTextTokens(value) {
   return cjkChars + Math.ceil(Math.max(0, latinChars) / 4);
 }
 
-function normalizeBlock(block = {}, index = 0) {
-  const content = normalizeText(block.content);
+function normalizeRenderedModule(module = {}, rendered = {}, index = 0) {
+  const value = typeof rendered === 'string' ? { content: rendered } : rendered;
+  const content = normalizeText(value?.content);
   return {
-    id: normalizeText(block.id, `block_${index + 1}`),
-    label: normalizeText(block.label, normalizeText(block.id, `block_${index + 1}`)),
+    ...module,
+    ...(value && typeof value === 'object' ? value : {}),
+    id: normalizeText(module.id, `block_${index + 1}`),
+    label: normalizeText(value?.label || module.label, normalizeText(module.id, `block_${index + 1}`)),
     content,
-    stage: normalizeStage(block.stage, 'main'),
-    priority: Number.isFinite(Number(block.priority)) ? Number(block.priority) : 100 + index,
-    authority: normalizeText(block.authority, 'runtime'),
-    budgetTokens: Math.max(0, Number(block.budgetTokens || block.budget_tokens || 0) || 0),
-    required: block.required !== false,
-    conflictTags: normalizeArray(block.conflictTags || block.conflict_tags).map((item) => normalizeText(item)).filter(Boolean),
-    appliesWhen: normalizeObject(block.appliesWhen || block.applies_when, {}),
-    source: normalizeText(block.source, 'runtime'),
-    kind: normalizeText(block.kind, 'runtime'),
-    lane: normalizeText(block.lane || block.cacheLane, 'dynamic_context'),
-    meta: normalizeObject(block.meta, {}),
-    estimatedTokens: Math.max(0, Number(block.estimatedTokens || estimateTextTokens(content)) || 0)
+    stage: module.stage,
+    tier: module.tier,
+    priority: module.priority,
+    registrationOrder: module.registrationOrder,
+    authority: normalizeText(value?.authority || module.authority, 'runtime'),
+    budgetTokens: module.maxTokens,
+    maxTokens: module.maxTokens,
+    conflictTags: normalizeArray(value?.conflictTags || value?.conflict_tags || module.conflictTags || module.conflict_tags)
+      .map((item) => normalizeText(item)).filter(Boolean),
+    source: normalizeText(value?.source || module.source, 'runtime'),
+    kind: normalizeText(value?.kind || module.kind, 'runtime'),
+    lane: module.cacheScope,
+    cacheScope: module.cacheScope,
+    meta: value?.meta && typeof value.meta === 'object'
+      ? { ...value.meta }
+      : (module.meta && typeof module.meta === 'object' ? { ...module.meta } : {}),
+    estimatedTokens: Math.max(0, Number(value?.estimatedTokens || estimateTextTokens(content)) || 0)
   };
 }
 
-function shouldIncludeBlockForStage(block = {}, stage = 'main') {
-  const blockStage = normalizeStage(block.stage, 'main');
-  if (blockStage === 'shared') return true;
-  return blockStage === normalizeStage(stage, 'main');
+function compareByPriorityAndRegistration(a, b) {
+  return a.priority - b.priority || a.registrationOrder - b.registrationOrder;
 }
 
-function resolvePromptUserId(env = {}) {
-  const routeMeta = normalizeObject(env.routeMeta || env.route_meta, {});
-  return normalizeText(
-    env.userId
-    || env.user_id
-    || env.senderId
-    || env.sender_id
-    || routeMeta.userId
-    || routeMeta.user_id
-    || routeMeta.senderId
-    || routeMeta.sender_id
-  );
+function isProtectedModule(block = {}) {
+  if (block.tier === 'core' || block.tier === 'contract' || block.tier === 'capability') return true;
+  return block.required === true || block.meta?.required === true || block.meta?.criticality === 'critical';
 }
 
-function normalizeAdminUserIds(env = {}) {
-  const value = env.adminUserIds || env.admin_user_ids || env.ADMIN_USER_IDS;
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeText(item)).filter(Boolean);
+function trimRank(block = {}) {
+  if (block.tier === 'example') return 0;
+  if (block.tier === 'context') return 1;
+  if (block.tier === 'persona') return 2;
+  return 3;
+}
+
+function trimToBudget(blocks = [], budgetTokens = 0) {
+  const budget = Math.max(0, Number(budgetTokens || 0) || 0);
+  const total = blocks.reduce((sum, block) => sum + block.estimatedTokens, 0);
+  if (!budget || total <= budget) {
+    return { blocks, trimmedModules: [], estimatedTokens: total, exceededByProtectedModules: false };
   }
-  return String(value || '')
-    .split(',')
-    .map((item) => normalizeText(item))
-    .filter(Boolean);
+
+  const candidates = blocks
+    .filter((block) => !isProtectedModule(block))
+    .sort((a, b) => trimRank(a) - trimRank(b) || b.priority - a.priority || b.registrationOrder - a.registrationOrder);
+  const removed = new Set();
+  const trimmedModules = [];
+  let used = total;
+  for (const block of candidates) {
+    if (used <= budget) break;
+    removed.add(block.id);
+    used -= block.estimatedTokens;
+    trimmedModules.push({
+      id: block.id,
+      tier: block.tier,
+      estimatedTokens: block.estimatedTokens,
+      reason: `budget_trim_${block.tier}`
+    });
+  }
+  return {
+    blocks: blocks.filter((block) => !removed.has(block.id)),
+    trimmedModules,
+    estimatedTokens: used,
+    exceededByProtectedModules: used > budget
+  };
 }
 
-function isExplicitAdminPromptEnv(env = {}) {
-  if (env.isAdmin === true || env.admin === true) return true;
-  return normalizeText(env.userRole).toLowerCase() === 'admin';
-}
-
-function isConfiguredAdminPromptUser(env = {}) {
-  if (isExplicitAdminPromptEnv(env)) return true;
-  const userId = resolvePromptUserId(env);
-  if (!userId) return false;
-  return normalizeAdminUserIds(env).includes(userId);
-}
-
-function isNormalUserPromptEnv(env = {}) {
-  if (env.isNormalUser === true || normalizeText(env.userRole).toLowerCase() === 'normal') {
-    return !isConfiguredAdminPromptUser(env);
+function compilePromptPlan(plan = {}, context = {}) {
+  if (!plan || plan.schemaVersion !== 'prompt_plan_v1' || !Array.isArray(plan.modules)) {
+    throw new Error('compilePromptPlan requires a resolved PromptPlan');
   }
-  const userId = resolvePromptUserId(env);
-  if (!userId || isConfiguredAdminPromptUser(env)) return false;
-  return normalizeAdminUserIds(env).length > 0;
-}
-
-function checkAppliesWhen(block = {}, env = {}) {
-  const appliesWhen = normalizeObject(block.appliesWhen, {});
-  const stage = normalizeStage(env.stage, 'main');
-  if (appliesWhen.stage) {
-    const allowedStages = normalizeArray(appliesWhen.stage).map((item) => normalizeStage(item));
-    if (allowedStages.length > 0 && !allowedStages.includes(stage)) return false;
-  }
-  const adminOnly = appliesWhen.adminOnly === true || appliesWhen.admin_only === true;
-  if (adminOnly && !isExplicitAdminPromptEnv(env)) {
-    return false;
-  }
-  const normalUserOnly = appliesWhen.normalUserOnly === true || appliesWhen.normal_user_only === true;
-  if (normalUserOnly && !isNormalUserPromptEnv(env)) {
-    return false;
-  }
-  if (appliesWhen.modelPattern || appliesWhen.model_pattern) {
-    const pattern = normalizeText(appliesWhen.modelPattern || appliesWhen.model_pattern);
-    const modelName = normalizeText(env.modelName || env.model_name || env.model || '');
-    if (pattern) {
-      if (!modelName) return false;
-      if (!modelName.toLowerCase().includes(pattern.toLowerCase())) return false;
-    }
-  }
-  return true;
-}
-
-function compilePromptBlocks(blocks = [], options = {}) {
-  const stage = normalizeStage(options.stage, 'main');
-  const baseBudget = Math.max(0, Number(options.budgetTokens || 0) || 0);
-  const sorted = normalizeArray(blocks)
-    .map((block, index) => normalizeBlock(block, index))
+  const rendered = plan.modules
+    .map((module, index) => normalizeRenderedModule(module, module.render(context), index))
     .filter((block) => block.content)
-    .filter((block) => shouldIncludeBlockForStage(block, stage))
-    .filter((block) => checkAppliesWhen(block, { ...options, stage }))
-    .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
-
-  const assembledBlocks = [];
+    .sort(compareByPriorityAndRegistration);
+  const conflictFreeBlocks = [];
   const trimDecisions = [];
   const conflictOwners = new Map();
-  let usedBudget = 0;
 
-  for (const block of sorted) {
+  for (const block of rendered) {
     const conflictingTag = block.conflictTags.find((tag) => conflictOwners.has(tag));
     if (conflictingTag) {
       trimDecisions.push({
@@ -157,61 +124,91 @@ function compilePromptBlocks(blocks = [], options = {}) {
       });
       continue;
     }
-
-    const effectiveBudget = block.budgetTokens > 0 ? block.budgetTokens : 0;
-    if (effectiveBudget > 0 && block.estimatedTokens > effectiveBudget) {
+    if (block.maxTokens > 0 && block.estimatedTokens > block.maxTokens) {
       trimDecisions.push({
         type: 'block_budget_exceeded',
         blockId: block.id,
         estimatedTokens: block.estimatedTokens,
-        budgetTokens: effectiveBudget
+        budgetTokens: block.maxTokens
       });
     }
-
-    if (baseBudget > 0 && (usedBudget + block.estimatedTokens) > baseBudget) {
-      trimDecisions.push({
-        type: 'stage_budget_skip',
-        blockId: block.id,
-        estimatedTokens: block.estimatedTokens,
-        usedTokens: usedBudget,
-        budgetTokens: baseBudget
-      });
-      continue;
-    }
-
-    assembledBlocks.push(block);
-    usedBudget += block.estimatedTokens;
+    conflictFreeBlocks.push(block);
     for (const tag of block.conflictTags) {
       conflictOwners.set(tag, block.id);
     }
   }
 
+  const budgetResult = trimToBudget(conflictFreeBlocks, plan.budgetTokens);
+  const assembledBlocks = budgetResult.blocks;
+  for (const item of budgetResult.trimmedModules) {
+    trimDecisions.push({
+      type: 'stage_budget_skip',
+      blockId: item.id,
+      estimatedTokens: item.estimatedTokens,
+      budgetTokens: plan.budgetTokens,
+      tier: item.tier,
+      reason: item.reason
+    });
+  }
   const renderedSystemMessages = assembledBlocks.map(mapPromptBlockToMessage);
   const trustSplit = splitPromptBlocksByTrust(assembledBlocks);
-
+  const tokenUsageByBlock = assembledBlocks.map((block) => ({
+    id: block.id,
+    label: block.label,
+    tier: block.tier,
+    tokens: block.estimatedTokens
+  }));
+  const decisionById = new Map(normalizeArray(plan.decisions).map((item) => [item.id, item]));
+  const diagnostics = {
+    schemaVersion: 'prompt_compilation_diagnostics_v1',
+    version: plan.version,
+    stage: plan.stage,
+    policyKey: plan.policyKey,
+    enabledModules: assembledBlocks.map((block) => ({
+      id: block.id,
+      version: block.version,
+      tier: block.tier,
+      reason: decisionById.get(block.id)?.reason || 'enabled'
+    })),
+    selectionDecisions: normalizeArray(plan.decisions).map((item) => ({ ...item })),
+    estimatedTokens: budgetResult.estimatedTokens,
+    trimmedModules: budgetResult.trimmedModules,
+    finalOrder: assembledBlocks.map((block) => block.id),
+    budget: {
+      limitTokens: plan.budgetTokens,
+      usedTokens: budgetResult.estimatedTokens,
+      exceededByProtectedModules: budgetResult.exceededByProtectedModules
+    },
+    renderedSystemMessages,
+    trustedBlocks: trustSplit.trustedBlocks,
+    untrustedBlocks: trustSplit.untrustedBlocks,
+    tokenUsageByBlock,
+    trimDecisions
+  };
   return {
-    stage,
-    policyKey: normalizeText(options.policyKey),
+    systemPrompt: renderedSystemMessages.map((message) => normalizeText(message.content)).filter(Boolean).join('\n'),
+    sections: assembledBlocks,
+    diagnostics,
+    stage: plan.stage,
+    policyKey: plan.policyKey,
     assembledBlocks,
     renderedSystemMessages,
     trustedBlocks: trustSplit.trustedBlocks,
     untrustedBlocks: trustSplit.untrustedBlocks,
-    tokenUsageByBlock: assembledBlocks.map((block) => ({
-      id: block.id,
-      label: block.label,
-      tokens: block.estimatedTokens
-    })),
-    trimDecisions
+    tokenUsageByBlock,
+    trimDecisions,
+    promptRuntimeDiagnostics: diagnostics
   };
 }
 
 function buildPromptSnapshot(blocks = [], options = {}) {
-  return compilePromptBlocks(blocks, options);
+  const context = { ...options, blocks };
+  return compilePromptPlan(resolvePromptPlan(context), context);
 }
 
 module.exports = {
   buildPromptSnapshot,
-  compilePromptBlocks,
-  normalizeBlock,
-  shouldIncludeBlockForStage
+  compilePromptPlan,
+  estimateTextTokens,
+  normalizeRenderedModule
 };
