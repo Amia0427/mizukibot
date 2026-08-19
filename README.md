@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 主回复提示词运行时重构 2026-08-17
+
+- 主回复提示词已统一走“注册表 -> 计划解析 -> 编译”链路：`utils/promptManifest.js` 负责模块校验，`utils/promptPlan.js` 负责启用条件与稳定排序，`utils/promptCompiler.js` 负责渲染、预算裁剪和诊断。
+- `utils/promptLoader.js` 启动时加载 `prompts/main-reply/` 的不可变快照；每个请求固定一个版本，只有经过现有 Web 管理会话鉴权的 `POST /api/prompt-runtime/reload` 才会原子刷新。失败会保留旧快照并返回错误。
+- 上下文预览和主回复组装诊断现在展示版本、模块启用原因、最终顺序、预算和裁剪模块；稳定 system 前缀与 provider cache marker 位置保持不变。详细架构和边界见 [提示词运行时重构实施计划](docs/superpowers/plans/2026-08-17-prompt-runtime-refactor.md)。
+- 验收：定向 prompt/runtime 测试与 `node scripts/run-tests.js` 全部通过（2026-08-19，Node 24.14.1）；未修改提示词文案、`prompts/admin.txt`，未引入数据库或文件监听，未推送远端。
+
 ## QQ 私聊共处房间 2026-08-14 00:23 +08:00
 
 - 新增默认关闭的私聊陪伴插件。用户可自然发起专注或放松房间，也可用 `/陪伴` 完成开始、切换、暂停、继续、结束、状态、共同回忆修改和删除；群聊不会进入房间。
