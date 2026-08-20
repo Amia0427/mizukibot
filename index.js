@@ -752,6 +752,14 @@ function closeNapCatWebSocket() {
 }
 
 function startNapCatTransport() {
+  if (config.NAPCAT_HTTP_REVERSE_ENABLED === false) {
+    httpReverseServer = null;
+    startConnectedRuntimes();
+    connectNapCat();
+    console.log('[NapCat] HTTP reverse ingress disabled by configuration');
+    return null;
+  }
+
   httpReverseServer = startNapCatHttpReverseServer({
     handleMessage: async (msg) => {
       if (shuttingDown) return;
@@ -950,11 +958,11 @@ async function startMainProcess() {
   runtimeReadiness.markReady('startup_complete');
   scheduleRestartResultFeedback();
   recordMainRuntimeState('initialized', {
-    mode: 'http_reverse'
+    mode: config.NAPCAT_HTTP_REVERSE_ENABLED === false ? 'disabled' : 'http_reverse'
   });
   console.log('[startup] main bot initialized', {
     pid: process.pid,
-    mode: 'http_reverse',
+    mode: config.NAPCAT_HTTP_REVERSE_ENABLED === false ? 'disabled' : 'http_reverse',
     lockFile: LOCK_FILE
   });
 }

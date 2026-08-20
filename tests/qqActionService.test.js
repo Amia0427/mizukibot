@@ -20,7 +20,7 @@ const {
   sendGroupImageMessage,
   setMessageEmojiLike
 } = require('../api/qqActionService');
-const { createNapCatHttpActionClient } = require('../api/napcatHttpActionClient');
+const { createNapCatHttpActionClient, validateNapCatBaseUrl } = require('../api/napcatHttpActionClient');
 const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
 
 (async () => {
@@ -177,6 +177,8 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   }
   assert.strictEqual(httpActionCalls.length, 1);
   assert.strictEqual(httpActionCalls[0].options.timeout, 2345);
+  assert.strictEqual(validateNapCatBaseUrl('http://127.0.0.1:3000'), 'http://127.0.0.1:3000');
+  assert.throws(() => validateNapCatBaseUrl('http://napcat.example:3000'), /HTTPS outside loopback/);
 
   console.log('qqActionService.test.js passed');
 })().catch((error) => {

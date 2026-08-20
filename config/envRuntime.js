@@ -38,6 +38,7 @@ function loadLocalEnvFallback(rootDir = path.resolve(__dirname, '..')) {
 }
 
 function loadEnvironment(rootDir = path.resolve(__dirname, '..')) {
+  if (process.env.MIZUKIBOT_MCP_CHILD === '1') return;
   const envPath = resolveEnvironmentPath(rootDir);
   // Prefer dotenv when available, but keep startup independent from that optional dependency.
   try {

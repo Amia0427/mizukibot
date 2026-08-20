@@ -113,6 +113,7 @@
     "@lancedb/lancedb": "^0.27.2",
     "@langchain/core": "^1.1.49",
     "@langchain/langgraph": "^1.4.2",
+    "@memtensor/memos-api-mcp": "1.1.2",
     "@next-sekai/sonolus-next-sekai-engine": "2.4.3",
     "axios": "^1.18.0",
     "better-sqlite3": "^12.10.0",
@@ -126,7 +127,7 @@
     "mineflayer": "^4.37.1",
     "mineflayer-pathfinder": "^2.4.5",
     "node-telegram-bot-api": "^1.1.0",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "9.0.5",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.0",
     "simai.js": "1.1.4",
@@ -145,7 +146,7 @@
     "eslint": "^9.39.5",
     "globals": "^16.5.0",
     "husky": "^9.1.7",
-    "js-yaml": "^4.3.0",
+    "js-yaml": "4.3.1",
     "typescript": "^5.9.3"
   },
   "engines": {

@@ -89,6 +89,18 @@ function normalizeIncomingPacket(packet = {}) {
   };
 }
 
+function sanitizePacketForLog(packet = {}) {
+  return {
+    post_type: normalizeText(packet.post_type),
+    message_type: normalizeText(packet.message_type),
+    has_group_id: Boolean(String(packet.group_id || '').trim()),
+    has_user_id: Boolean(String(packet.user_id || '').trim()),
+    has_message_id: Boolean(String(packet.message_id || '').trim()),
+    has_message: Boolean(String(packet.raw_message || '').trim()),
+    message_length: String(packet.raw_message || '').length
+  };
+}
+
 function parsePacketFromLine(line = '') {
   const trimmed = String(line || '').trim();
   if (!trimmed) return null;
@@ -129,8 +141,7 @@ function createLineReader(onLine) {
 function appendNapcatPacketToLog(packet = {}, options = {}) {
   if (options.enabled === false) return;
   const enabled = options.enabled === true
-    || config.FOLLOWER_PACKET_LOG_ENABLED === true
-    || config.FOLLOWER_LOG_MONITOR_ENABLED === true;
+    || config.FOLLOWER_PACKET_LOG_ENABLED === true;
   if (!enabled) return;
 
   const targetPath = String(options.logPath || config.FOLLOWER_NAPCAT_LOG_PATH || '').trim();
@@ -138,6 +149,7 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
 
   const normalized = normalizeIncomingPacket(packet);
   if (String(normalized.post_type || '').trim().toLowerCase() !== 'message') return;
+  const sanitized = sanitizePacketForLog(normalized);
 
   try {
     if (!packetLogWriter || packetLogWriter.getMeta?.().filePath !== targetPath) {
@@ -147,7 +159,7 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
         maxDelayMs: Math.max(0, Number(config.FOLLOWER_LOG_WRITE_MAX_DELAY_MS || 1500) || 1500)
       });
     }
-    packetLogWriter.append(normalized);
+    packetLogWriter.append(sanitized);
     if (options.flushNow === true) packetLogWriter.flushSync();
   } catch (_) {}
 }

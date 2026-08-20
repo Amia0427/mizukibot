@@ -23,12 +23,13 @@ function createWebSessionManager(options = {}) {
     }
   }
 
-  function create() {
+  function create(options = {}) {
     evictOldestIfFull();
     const id = crypto.randomBytes(32).toString('base64url');
     const expiresAt = now() + ttlMs;
-    sessions.set(id, { expiresAt });
-    return { id, expiresAt };
+    const role = String(options.role || 'admin').trim().toLowerCase() === 'viewer' ? 'viewer' : 'admin';
+    sessions.set(id, { expiresAt, role });
+    return { id, expiresAt, role };
   }
 
   function has(id) {
@@ -43,6 +44,12 @@ function createWebSessionManager(options = {}) {
     return true;
   }
 
+  function getRole(id) {
+    const normalizedId = String(id || '').trim();
+    if (!has(normalizedId)) return '';
+    return sessions.get(normalizedId)?.role || '';
+  }
+
   function revoke(id) {
     return sessions.delete(String(id || '').trim());
   }
@@ -55,6 +62,7 @@ function createWebSessionManager(options = {}) {
     clearExpired,
     create,
     has,
+    getRole,
     revoke,
     size: () => sessions.size,
     stop: () => clearInterval(cleanupTimer)

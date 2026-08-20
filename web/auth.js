@@ -1,5 +1,7 @@
 // @ts-check
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const config = require('../config');
 const { isRequestSecure } = require('./securityHeaders');
@@ -93,6 +95,23 @@ function checkWebAuth(req, options = {}) {
   return isTrustedLocalOrigin(req, host, options.port || 3005);
 }
 
+function resolveWebTokenRole(candidate, options = {}) {
+  const adminToken = options.adminToken ?? config.WEB_TOKEN;
+  const viewerToken = options.viewerToken ?? config.WEB_VIEWER_TOKEN;
+  if (verifyWebToken(candidate, adminToken)) return 'admin';
+  if (verifyWebToken(candidate, viewerToken)) return 'viewer';
+  return '';
+}
+
+function getWebSessionRole(req, options = {}) {
+  const sessionRole = options.sessionManager?.getRole?.(getSessionId(req));
+  if (sessionRole) return sessionRole;
+  const host = options.host || config.WEB_BIND_HOST || '127.0.0.1';
+  return !String(config.WEB_TOKEN || '').trim() && isTokenlessLocalWebAllowed(host) && isLocalIp(getClientIp(req, options))
+    ? 'admin'
+    : '';
+}
+
 function verifyWebToken(candidate, expected = config.WEB_TOKEN) {
   const normalizedCandidate = String(candidate || '');
   const normalizedExpected = String(expected || '').trim();
@@ -107,13 +126,42 @@ function createLoginRateLimiter(options = {}) {
   const maxAttempts = Math.max(1, Math.floor(Number(options.maxAttempts) || 5));
   const maxClients = Math.max(1, Math.floor(Number(options.maxClients) || 1000));
   const now = typeof options.now === 'function' ? options.now : Date.now;
+  const stateFile = String(options.stateFile || '').trim();
   const clients = new Map();
+
+  function persist() {
+    if (!stateFile) return;
+    try {
+      fs.mkdirSync(path.dirname(path.resolve(stateFile)), { recursive: true });
+      fs.writeFileSync(path.resolve(stateFile), JSON.stringify({ version: 1, clients: Object.fromEntries(clients) }), 'utf8');
+    } catch (_) {}
+  }
+
+  function load() {
+    if (!stateFile) return;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.resolve(stateFile), 'utf8'));
+      const source = parsed && typeof parsed.clients === 'object' ? parsed.clients : {};
+      for (const [key, entry] of Object.entries(source)) {
+        const count = Number(entry?.count);
+        const resetAt = Number(entry?.resetAt);
+        if (key && Number.isFinite(count) && count > 0 && Number.isFinite(resetAt) && resetAt > now()) {
+          clients.set(key, { count: Math.floor(count), resetAt });
+        }
+      }
+    } catch (_) {}
+  }
 
   function clearExpired() {
     const currentTime = now();
+    let changed = false;
     for (const [key, entry] of clients) {
-      if (entry.resetAt <= currentTime) clients.delete(key);
+      if (entry.resetAt <= currentTime) {
+        clients.delete(key);
+        changed = true;
+      }
     }
+    if (changed) persist();
   }
 
   function ensureCapacity(key) {
@@ -123,6 +171,7 @@ function createLoginRateLimiter(options = {}) {
       const oldestKey = clients.keys().next().value;
       if (!oldestKey) break;
       clients.delete(oldestKey);
+      persist();
     }
   }
 
@@ -143,16 +192,24 @@ function createLoginRateLimiter(options = {}) {
     const entry = clients.get(key);
     if (entry) {
       entry.count += 1;
+      persist();
       return;
     }
     clients.set(key, { count: 1, resetAt: now() + windowMs });
+    persist();
   }
+
+  load();
 
   return {
     check,
     clearExpired,
     recordFailure,
-    reset: (clientKey) => clients.delete(String(clientKey || 'unknown')),
+    reset: (clientKey) => {
+      const deleted = clients.delete(String(clientKey || 'unknown'));
+      if (deleted) persist();
+      return deleted;
+    },
     size: () => clients.size
   };
 }
@@ -197,6 +254,7 @@ module.exports = {
   createLoginRateLimiter,
   escapeHtml,
   getClientIp,
+  getWebSessionRole,
   getRequestOrigin,
   getSessionId,
   isLocalBindHost,
@@ -204,5 +262,6 @@ module.exports = {
   isStrictSameOrigin,
   isTokenlessLocalWebAllowed,
   isTrustedLocalOrigin,
+  resolveWebTokenRole,
   verifyWebToken
 };

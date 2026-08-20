@@ -30,6 +30,7 @@ module.exports = (async () => {
     process.env.BOT_QQ = '3326471600';
     process.env.FOLLOWER_RULE_ENABLED = 'true';
     process.env.FOLLOWER_LOG_MONITOR_ENABLED = 'true';
+    process.env.FOLLOWER_PACKET_LOG_ENABLED = 'true';
     process.env.FOLLOWER_NAPCAT_LOG_PATH = logPath;
 
     clearProjectCache();
@@ -130,8 +131,9 @@ module.exports = (async () => {
     const lines = fs.readFileSync(logPath, 'utf8').trim().split(/\r?\n/);
     assert.strictEqual(lines.length, 1, 'message log appender should write one json line');
     const parsed = JSON.parse(lines[0]);
-    assert.strictEqual(parsed.group_id, 'g1');
-    assert.strictEqual(parsed.user_id, '10001');
+    assert.strictEqual(parsed.has_group_id, true);
+    assert.strictEqual(parsed.has_user_id, true);
+    assert.strictEqual(parsed.has_message, true);
 
     console.log('napcatLogFollower.test.js passed');
   } finally {

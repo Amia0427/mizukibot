@@ -30,6 +30,10 @@
     "json-bignum@0.0.3": {
       "license": "MIT",
       "source": "https://github.com/datalanche/json-bignum/blob/master/LICENSE"
+    },
+    "@memtensor/memos-api-mcp@1.1.2": {
+      "license": "Apache-2.0",
+      "source": "https://registry.npmjs.org/@memtensor/memos-api-mcp/-/memos-api-mcp-1.1.2.tgz"
     }
   }
 }

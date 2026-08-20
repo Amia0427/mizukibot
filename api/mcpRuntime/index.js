@@ -13,6 +13,7 @@ const {
 } = require('../mcp/constants');
 const {
   buildSpawnConfig,
+  buildMcpChildEnv,
   listConfiguredMcpServers,
   readMcpConfig,
   resolveMcpConfigPath
@@ -321,7 +322,7 @@ function createSessionEntry(serverConfig = {}) {
   try {
     child = childProcess.spawn(spawnConfig.command, spawnConfig.args, {
       cwd: path.dirname(serverConfig.configPath || resolveMcpConfigPath()),
-      env: { ...process.env, ...(serverConfig.env || {}) },
+      env: buildMcpChildEnv(serverConfig.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       ...spawnConfig.options

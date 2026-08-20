@@ -1,5 +1,13 @@
 # MizukiBot
 
+## 安全加固 2026-08-20
+
+- 生产依赖已锁定到 `js-yaml 4.3.1`、`nodemailer 9.0.5`，MCP MemOS 包固定为 `1.1.2`，不再运行 `npx -y` 临时下载。
+- NapCat HTTP 反向入口支持显式开关并默认关闭旧式 Bearer 兼容认证；远程 Web 请求要求 HTTPS，Compose 宿主端口继续只绑定 `127.0.0.1`。
+- MCP 子进程只接收运行所需的基础环境和配置声明变量；本地命令桥默认关闭；登录限流持久化，管理面板支持只读角色并记录脱敏审计日志。
+- NapCat 包日志默认关闭，显式开启时仅记录消息类型和长度等脱敏元数据，不保存聊天正文、用户号或群号。
+- 验收：`npm audit --omit=dev --audit-level=high` 为 0 漏洞；`npm run diag:security -- --json` 为 8 OK / 0 WARN / 0 ERROR；安全定向测试全部通过。
+
 ## `/create` 好感度解锁 2026-08-20 +08:00
 
 - `/create <提示词>` 支持群聊和私聊调用；管理员、`CREATE_AGENT_ALLOW_USER_IDS` 用户直接允许，其他用户在 `relationship.affection >= CREATE_AGENT_AFFECTION_THRESHOLD`（默认 `30`）后开放。

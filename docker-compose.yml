@@ -47,7 +47,7 @@ services:
       start_period: 20s
     volumes:
       - mizukibot-data:/app/data
-      - ./.env:/app/runtime.env:rw
+      - ./.env:/app/runtime.env:ro
       - ./prompts/persona:/app/prompts/persona:ro
       - ./prompts/admin.txt:/app/prompts/admin.txt:ro
     tmpfs:

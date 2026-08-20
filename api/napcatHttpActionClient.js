@@ -3,6 +3,27 @@ const config = require('../config');
 
 const MESSAGE_SEND_ACTIONS = new Set(['send_msg', 'send_private_msg', 'send_group_msg']);
 
+function isLoopbackHost(hostname = '') {
+  return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(String(hostname || '').trim().toLowerCase());
+}
+
+function validateNapCatBaseUrl(value = '') {
+  const normalized = String(value || '').trim();
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch (_) {
+    throw new Error('NAPCAT_HTTP_API_BASE_URL must be a valid HTTP(S) URL');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('NAPCAT_HTTP_API_BASE_URL must use http or https');
+  }
+  if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
+    throw new Error('NAPCAT_HTTP_API_BASE_URL must use HTTPS outside loopback');
+  }
+  return normalized.replace(/\/+$/, '');
+}
+
 function addMessageSendTimeout(action, params, requestTimeout) {
   if (!MESSAGE_SEND_ACTIONS.has(action) || Object.prototype.hasOwnProperty.call(params, 'timeout')) {
     return params;
@@ -46,7 +67,7 @@ function isKnownPreDeliveryTransportError(error = null) {
 }
 
 function createNapCatHttpActionClient() {
-  const baseURL = String(config.NAPCAT_HTTP_API_BASE_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const baseURL = validateNapCatBaseUrl(config.NAPCAT_HTTP_API_BASE_URL || 'http://127.0.0.1:3000');
   const secret = String(config.NAPCAT_HTTP_ACTION_SECRET || '').trim();
   const timeout = config.NAPCAT_ACTION_TIMEOUT_MS || 30000;
   let connected = true;
@@ -157,5 +178,6 @@ module.exports = {
   createNapCatHttpActionClient,
   NapCatActionError,
   isHttpTransportOfflineError,
-  isKnownPreDeliveryTransportError
+  isKnownPreDeliveryTransportError,
+  validateNapCatBaseUrl
 };

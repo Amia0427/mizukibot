@@ -29,11 +29,10 @@
       ]
     },
     "memos-api-mcp": {
-      "command": "npx",
+      "command": "node",
       "protocolMode": "line",
       "args": [
-        "-y",
-        "@memtensor/memos-api-mcp@1.1.2"
+        "node_modules/@memtensor/memos-api-mcp/build/index.js"
       ],
       "env": {
         "MEMOS_API_KEY": "${MEMOS_API_KEY}",

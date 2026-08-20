@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const MCP_RUNTIME_ENV_KEYS = ['PATH', 'SystemRoot', 'ComSpec', 'TEMP', 'TMP'];
+
 function resolveMcpConfigPath(explicitPath = '') {
   const candidate = String(explicitPath || process.env.MIZUKI_MCP_CONFIG || '').trim();
   if (candidate) return path.resolve(candidate);
@@ -131,8 +133,21 @@ function buildSpawnConfig(serverConfig = {}) {
   };
 }
 
+function buildMcpChildEnv(serverEnv = {}) {
+  const runtimeEnv = {};
+  for (const key of MCP_RUNTIME_ENV_KEYS) {
+    if (typeof process.env[key] === 'string' && process.env[key] !== '') runtimeEnv[key] = process.env[key];
+  }
+  return {
+    ...runtimeEnv,
+    ...(serverEnv && typeof serverEnv === 'object' ? serverEnv : {}),
+    MIZUKIBOT_MCP_CHILD: '1'
+  };
+}
+
 module.exports = {
   buildSpawnConfig,
+  buildMcpChildEnv,
   expandEnvObject,
   expandEnvValue,
   listConfiguredMcpServers,

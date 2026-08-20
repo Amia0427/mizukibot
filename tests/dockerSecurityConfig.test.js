@@ -78,7 +78,7 @@ for (const [serviceName, expected] of Object.entries(expectedLimits)) {
 
 assert.strictEqual(mainService.environment.MIZUKIBOT_MAIN_LOCK_FILE, '/app/data/runtime/main/.mizukibot.lock');
 assert.strictEqual(mainService.environment.MIZUKIBOT_ENV_FILE, '/app/runtime.env');
-assert.ok(mainService.volumes.includes('./.env:/app/runtime.env:rw'));
+assert.ok(mainService.volumes.includes('./.env:/app/runtime.env:ro'));
 assert.ok(!Object.hasOwn(workerService.environment, 'MIZUKIBOT_ENV_FILE'));
 assert.ok(workerService.volumes.every((volume) => !volume.includes('/app/runtime.env')));
 assert.strictEqual(

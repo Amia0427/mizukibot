@@ -1,8 +1,12 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const config = require('../config');
 const { createWebSessionManager } = require('../web/sessionManager');
 const { createWebApp } = require('../web/server');
+const { createLoginRateLimiter } = require('../web/auth');
 
 async function withConfig(patch, fn) {
   const snapshot = {};
@@ -56,6 +60,8 @@ async function listen(app) {
     WEB_SESSION_MAX_ACTIVE: 8,
     WEB_SESSION_TTL_MS: 60000,
     WEB_TOKEN: 'session-login-secret',
+    WEB_VIEWER_TOKEN: 'viewer-login-secret',
+    WEB_LOGIN_RATE_LIMIT_STATE_FILE: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-web-session-')), 'rate-limit.json'),
     WEB_TRUST_PROXY_HOPS: 0
   }, async () => {
     let restartCookie = '';
@@ -121,6 +127,23 @@ async function listen(app) {
         headers: { Cookie: cookie }
       });
       assert.strictEqual(authorized.status, 200);
+
+      const viewerLogin = await fetch(`${firstServer.baseUrl}/api/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: firstServer.baseUrl },
+        body: JSON.stringify({ token: 'viewer-login-secret' })
+      });
+      assert.strictEqual(viewerLogin.status, 201);
+      const viewerCookie = (viewerLogin.headers.get('set-cookie') || '').split(';', 1)[0];
+      const viewerRead = await fetch(`${firstServer.baseUrl}/api/settings`, {
+        headers: { Cookie: viewerCookie }
+      });
+      assert.strictEqual(viewerRead.status, 200);
+      const viewerWrite = await fetch(`${firstServer.baseUrl}/api/memory-governance/rebuild`, {
+        method: 'POST',
+        headers: { Cookie: viewerCookie, Origin: firstServer.baseUrl }
+      });
+      assert.strictEqual(viewerWrite.status, 403);
 
       const panel = await fetch(`${firstServer.baseUrl}/`, {
         headers: { Cookie: cookie }
@@ -214,7 +237,10 @@ async function listen(app) {
       now: () => expiryNow,
       ttlMs: 60000
     });
-    const expiryRuntime = createWebApp({ sessionManager: expiryManager });
+    const expiryRuntime = createWebApp({
+      sessionManager: expiryManager,
+      loginRateLimiter: createLoginRateLimiter({ maxAttempts: 2, maxClients: 100, windowMs: 60000 })
+    });
     const expiryServer = await listen(expiryRuntime.app);
     try {
       const login = await fetch(`${expiryServer.baseUrl}/api/session`, {
@@ -232,6 +258,28 @@ async function listen(app) {
     } finally {
       await expiryServer.close();
       expiryManager.stop();
+    }
+  });
+
+  await withConfig({
+    WEB_BIND_HOST: '0.0.0.0',
+    WEB_REQUIRE_HTTPS: true,
+    WEB_LOCAL_ONLY_WITHOUT_TOKEN: false,
+    WEB_TOKEN: 'remote-web-secret',
+    WEB_VIEWER_TOKEN: '',
+    WEB_TRUST_PROXY_HOPS: 0,
+    WEB_LOGIN_RATE_LIMIT_STATE_FILE: ''
+  }, async () => {
+    const runtime = createWebApp();
+    const server = await listen(runtime.app);
+    try {
+      const health = await fetch(`${server.baseUrl}/healthz`);
+      assert.strictEqual(health.status, 200);
+      const login = await fetch(`${server.baseUrl}/login`);
+      assert.strictEqual(login.status, 426);
+    } finally {
+      await server.close();
+      runtime.sessionManager.stop();
     }
   });
 

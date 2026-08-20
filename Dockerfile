@@ -23,8 +23,8 @@ WORKDIR /app
 ENV NODE_ENV=production \
   DATA_DIR=/app/data \
   PJSK_PYTHON_BIN=/opt/pjsk-venv/bin/python \
-  WEB_BIND_HOST=0.0.0.0 \
-  NAPCAT_HTTP_REVERSE_BIND_HOST=0.0.0.0
+  WEB_BIND_HOST=127.0.0.1 \
+  NAPCAT_HTTP_REVERSE_BIND_HOST=127.0.0.1
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates python3 fonts-noto-cjk \

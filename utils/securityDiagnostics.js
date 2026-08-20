@@ -52,6 +52,17 @@ function inspectTokenPosture(config = {}) {
   const webBindHost = normalizeText(config.WEB_BIND_HOST || '127.0.0.1') || '127.0.0.1';
   const bridgeEnabled = config.LOCAL_COMMAND_BRIDGE_ENABLED !== false;
 
+  if (bridgeEnabled && bridgeTokenConfigured && webTokenConfigured
+    && normalizeText(config.LOCAL_COMMAND_BRIDGE_TOKEN) === normalizeText(config.WEB_TOKEN)) {
+    findings.push(makeFinding(
+      'local-command-bridge-token-shared',
+      'warn',
+      'Local command bridge reuses the Web token',
+      'The command bridge and Web console must use separate credentials.',
+      'Generate a dedicated LOCAL_COMMAND_BRIDGE_TOKEN and keep the bridge disabled when it is not needed.'
+    ));
+  }
+
   if (!webTokenConfigured) {
     findings.push(makeFinding(
       'web-token-missing',
@@ -146,6 +157,7 @@ function inspectIngressExposure(config = {}, options = {}) {
   const webHost = normalizeText(config.WEB_BIND_HOST || '127.0.0.1') || '127.0.0.1';
   const napCatHost = normalizeText(config.NAPCAT_HTTP_REVERSE_BIND_HOST || '127.0.0.1') || '127.0.0.1';
   const napCatEnabled = config.NAPCAT_HTTP_REVERSE_ENABLED !== false;
+  const webRequireHttps = config.WEB_REQUIRE_HTTPS !== false;
 
   const webBoundary = options.webHostExposure || 'unknown';
   const napCatBoundary = options.napCatHostExposure || 'unknown';
@@ -165,8 +177,12 @@ function inspectIngressExposure(config = {}, options = {}) {
       'web-public-bind',
       'warn',
       'Web console listens beyond loopback',
-      `WEB_BIND_HOST is ${webHost}; token authentication alone does not provide transport encryption.`,
-      'Restrict the bind address or place the console behind an authenticated HTTPS reverse proxy.'
+      webRequireHttps
+        ? `WEB_BIND_HOST is ${webHost}; the application requires HTTPS for non-loopback requests.`
+        : `WEB_BIND_HOST is ${webHost}; token authentication alone does not provide transport encryption.`,
+      webRequireHttps
+        ? 'Keep HTTPS enforcement enabled and place the console behind an authenticated reverse proxy and firewall.'
+        : 'Restrict the bind address or enable HTTPS enforcement behind an authenticated reverse proxy.'
     ));
   }
 

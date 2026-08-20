@@ -2067,3 +2067,4 @@
 - 验收：远程、内联、缓存 GIF 回归及 PNG 保持测试通过；真实缓存 GIF 本地输出为 4,376 字节 JPEG；`npm run lint` 检查 892 个文件、`npm run typecheck`、`git diff --check` 和完整 `npm test` 均退出 0，完整测试用时 188.9 秒。
 - 外部状态：修复后的真实缓存 GIF 和 1×1 GIF 分别等待 124 秒、94 秒后被本地外层超时终止，目标网关未返回原 `#sym:500`，也未取得可声明成功的 200；待上游恢复响应后复验，不重复消耗请求。
 - 小目标已完成：本地 GIF 协议修复、回归和提交已完成；`.belt/`、`AGENT.md`、私有提示词、并行测试和本地图片未纳入，当前分支未推送远端。
+维护记录：2026-08-20 21:25 +08:00，完成运行安全加固：升级并锁定 `js-yaml 4.3.1`、`nodemailer 9.0.5` 和 MemOS MCP `1.1.2`；NapCat 反向入口新增显式开关并默认停用旧式 Bearer，远程 Web 明文请求拒绝，Compose 宿主端口保持 loopback 且 `.env` 改为只读挂载；MCP 子进程改为最小环境白名单，命令桥默认关闭；健康接口只返回 `ok`，登录限流持久化，面板新增 viewer/admin 分级与脱敏审计日志，聊天包日志改为默认关闭且显式开启时脱敏。验收：`npm audit --omit=dev --audit-level=high`、安全定向测试和 `npm run diag:security -- --json` 全部通过（8 OK / 0 WARN / 0 ERROR）。

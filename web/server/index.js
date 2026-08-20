@@ -27,12 +27,14 @@ const {
   escapeHtml,
   getClientIp,
   getSessionId,
+  getWebSessionRole,
   isLocalBindHost,
   isLocalIp,
   isStrictSameOrigin,
   isTokenlessLocalWebAllowed,
-  verifyWebToken
+  resolveWebTokenRole
 } = require('../auth');
+const { createWebAuditLogger } = require('../auditLog');
 const { createSecurityHeaders, isRequestSecure } = require('../securityHeaders');
 const { createWebSessionManager } = require('../sessionManager');
 const {
@@ -71,7 +73,7 @@ function handleLivenessRequest(_req, res, readiness) {
 function handleReadinessRequest(_req, res, readiness) {
   const snapshot = getReadinessSnapshot(readiness);
   const ready = snapshot.ready === true;
-  return res.status(ready ? 200 : 503).json({ ok: ready, ...snapshot });
+  return res.status(ready ? 200 : 503).json({ ok: ready });
 }
 
 function handleHealthRequest(req, res, readiness) {
@@ -129,6 +131,7 @@ function createWebApp(options = {}) {
   const readiness = options.readiness;
   const port = config.WEB_PORT || 3005;
   const host = config.WEB_BIND_HOST || '127.0.0.1';
+  const requireHttps = config.WEB_REQUIRE_HTTPS !== false && !isLocalBindHost(host);
   const trustProxyHops = Math.max(0, Math.floor(Number(config.WEB_TRUST_PROXY_HOPS) || 0));
   const sessionTtlMs = Math.max(60 * 1000, Number(config.WEB_SESSION_TTL_MS) || 15 * 60 * 1000);
   const sessionManager = options.sessionManager || createWebSessionManager({
@@ -138,8 +141,10 @@ function createWebApp(options = {}) {
   const loginRateLimiter = options.loginRateLimiter || createLoginRateLimiter({
     maxAttempts: config.WEB_LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
     maxClients: config.WEB_LOGIN_RATE_LIMIT_MAX_CLIENTS,
-    windowMs: config.WEB_LOGIN_RATE_LIMIT_WINDOW_MS
+    windowMs: config.WEB_LOGIN_RATE_LIMIT_WINDOW_MS,
+    stateFile: config.WEB_LOGIN_RATE_LIMIT_STATE_FILE
   });
+  const auditLogger = options.auditLogger || createWebAuditLogger({ filePath: config.WEB_AUDIT_LOG_FILE });
   if (!String(config.WEB_TOKEN || '').trim() && !isTokenlessLocalWebAllowed(host)) {
     throw new Error('WEB_TOKEN is required when WEB_BIND_HOST is not loopback');
   }
@@ -148,6 +153,11 @@ function createWebApp(options = {}) {
 
   app.disable('x-powered-by');
   app.use(createSecurityHeaders({ trustProxyHops }));
+  app.use((req, res, next) => {
+    if (!requireHttps || isRequestSecure(req, { trustProxyHops })
+      || ['/live', '/ready', '/healthz'].includes(req.path)) return next();
+    return res.status(426).json({ error: 'HTTPS required' });
+  });
   app.use(express.json({ limit: '300kb' }));
   app.get('/live', (req, res) => handleLivenessRequest(req, res, readiness));
   app.get('/ready', (req, res) => handleReadinessRequest(req, res, readiness));
@@ -166,21 +176,25 @@ function createWebApp(options = {}) {
     const rateLimit = loginRateLimiter.check(clientKey);
     if (!rateLimit.allowed) {
       res.setHeader('Retry-After', String(rateLimit.retryAfterSeconds));
+      auditLogger.record({ method: req.method, path: req.path, status: 429, clientIp: clientKey, action: 'login_rate_limited' });
       return res.status(429).json({ error: 'Too many login attempts' });
     }
-    if (!verifyWebToken(req.body?.token)) {
+    const role = resolveWebTokenRole(req.body?.token);
+    if (!role) {
       loginRateLimiter.recordFailure(clientKey);
+      auditLogger.record({ method: req.method, path: req.path, status: 401, clientIp: clientKey, action: 'login_failed' });
       return res.status(401).json({ error: 'Unauthorized' });
     }
     loginRateLimiter.reset(clientKey);
     sessionManager.revoke(getSessionId(req));
-    const session = sessionManager.create();
+    const session = sessionManager.create({ role });
     res.setHeader('Set-Cookie', buildSessionCookie(
       session.id,
       sessionTtlMs,
       isRequestSecure(req, { trustProxyHops })
     ));
-    return res.status(201).json({ ok: true, expires_at: session.expiresAt });
+    auditLogger.record({ method: req.method, path: req.path, status: 201, role, clientIp: clientKey, action: 'login_succeeded' });
+    return res.status(201).json({ ok: true, role, expires_at: session.expiresAt });
   });
 
   app.delete('/api/session', (req, res) => {
@@ -193,14 +207,30 @@ function createWebApp(options = {}) {
   });
 
   app.use((req, res, next) => {
-    if (!checkWebAuth(req, { host, port, sessionManager, trustProxyHops })) {
+    const role = getWebSessionRole(req, { host, port, sessionManager, trustProxyHops });
+    const method = String(req.method || 'GET').toUpperCase();
+    const shouldAudit = req.path.startsWith('/api/') && req.path !== '/api/session';
+    if (shouldAudit) {
+      res.once('finish', () => auditLogger.record({
+        method,
+        path: req.path,
+        status: res.statusCode,
+        role: role || 'anonymous',
+        clientIp: getClientIp(req, { trustProxyHops }),
+        action: method === 'GET' ? 'read' : 'write'
+      }));
+    }
+    if (!role || !checkWebAuth(req, { host, port, sessionManager, trustProxyHops })) {
       if (req.method === 'GET' && req.path === '/') return res.redirect('/login');
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const method = String(req.method || 'GET').toUpperCase();
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !isStrictSameOrigin(req, { trustProxyHops })) {
       return res.status(403).json({ error: 'Forbidden' });
     }
+    if (role !== 'admin' && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      return res.status(403).json({ error: 'Administrator role required' });
+    }
+    res.locals.webRole = role;
     return next();
   });
 

@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const config = require('../config');
 const {
@@ -123,6 +126,26 @@ async function withConfig(patch, fn) {
   assert.deepStrictEqual(limiter.check('client-a'), { allowed: false, retryAfterSeconds: 1 });
   now += 1001;
   assert.deepStrictEqual(limiter.check('client-a'), { allowed: true, retryAfterSeconds: 0 });
+
+  const rateLimitStateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-web-rate-limit-')), 'state.json');
+  const persistedLimiter = createLoginRateLimiter({
+    maxAttempts: 2,
+    maxClients: 2,
+    now: () => now,
+    windowMs: 60000,
+    stateFile: rateLimitStateFile
+  });
+  persistedLimiter.recordFailure('persisted-client');
+  persistedLimiter.recordFailure('persisted-client');
+  const restartedLimiter = createLoginRateLimiter({
+    maxAttempts: 2,
+    maxClients: 2,
+    now: () => now,
+    windowMs: 60000,
+    stateFile: rateLimitStateFile
+  });
+  assert.strictEqual(restartedLimiter.check('persisted-client').allowed, false);
+  fs.rmSync(path.dirname(rateLimitStateFile), { recursive: true, force: true });
 
   const capacityLimiter = createLoginRateLimiter({ maxAttempts: 2, maxClients: 2, now: () => now });
   capacityLimiter.recordFailure('oldest');

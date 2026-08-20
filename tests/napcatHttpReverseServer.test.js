@@ -40,6 +40,7 @@ module.exports = (async () => {
     process.env.NAPCAT_HTTP_REVERSE_PORT = '0';
     process.env.NAPCAT_HTTP_REVERSE_BIND_HOST = '127.0.0.1';
     process.env.NAPCAT_HTTP_REVERSE_SECRET = 'reverse-test-secret';
+    process.env.NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER = 'true';
     process.env.NAPCAT_HTTP_REVERSE_SIGNATURE_MAX_AGE_MS = '30000';
     clearProjectCache();
 
