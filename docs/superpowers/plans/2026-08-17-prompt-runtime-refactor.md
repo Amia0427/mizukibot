@@ -43,3 +43,9 @@
 - Explicit reload: `POST /api/prompt-runtime/reload` is registered after the existing web session and same-origin middleware. Failed reloads retain the old snapshot and return the diagnostic error.
 - Focused verification: `node --test tests/promptPlan.test.js tests/promptLoader.test.js tests/mainReplyPromptAssemblyDiagnostics.test.js tests/adminStableSystemPrompt.test.js tests/conversationContextClaudeCacheMarkers.test.js tests/fewShotPromptsCache.test.js tests/promptRuntimeReloadRoute.test.js`.
 - Full verification: `node scripts/run-tests.js` passed all tracked tests on 2026-08-19 with Node 24.14.1. No prompt wording, `prompts/admin.txt`, cache marker position, database, file watcher, or remote push was changed.
+
+## Verification Record (2026-08-20)
+
+- Prompt governance now treats `prompts/main-reply/manifest.json` and every asset it references as registered prompt resources, so the repository prompt check covers the new loader snapshot without changing the existing allowlist counts.
+- Focused regression: `node --test tests/agentPrompts.test.js tests/checkPromptsIntegration.test.js tests/promptCheckGovernance.test.js` passed.
+- Full verification: `node scripts/run-tests.js` exited 0 with Node 24.14.1. The fix only changes prompt asset reference discovery and its governance test; runtime prompt wording and reload behavior are unchanged.
