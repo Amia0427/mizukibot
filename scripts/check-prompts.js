@@ -17,7 +17,6 @@ const {
 const PROJECT_ROOT = path.join(__dirname, '..');
 const PROMPTS_DIR = path.resolve(process.env.PROMPTS_DIR || path.join(PROJECT_ROOT, 'prompts'));
 const PROMPT_MANIFEST_PATH = path.join(PROMPTS_DIR, 'prompt-manifest.json');
-const MAIN_REPLY_MANIFEST_PATH = path.join(PROMPTS_DIR, 'main-reply', 'manifest.json');
 const ROUTE_PROMPT_POLICY_PATH = path.join(PROMPTS_DIR, 'runtime', 'route-policies.json');
 
 function ok(msg) { console.log(`[OK] ${msg}`); }
