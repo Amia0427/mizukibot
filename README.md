@@ -629,7 +629,7 @@ npm run start:post-reply-worker   # 单独跑后台学习 worker
 
 ### NapCat HTTP reverse 鉴权
 
-HTTP reverse 入口必须配置 `NAPCAT_HTTP_REVERSE_SECRET`。原生 NapCat HTTP client 可在受控 loopback 网络内使用同一 token 的兼容模式；反向代理或自定义客户端应发送 `X-NapCat-Timestamp`、`X-NapCat-Nonce` 和 `X-NapCat-Signature: sha256=<hex>`，签名正文为 `timestamp.nonce.rawBody`。签名请求会校验时间窗并拒绝 nonce 重放，静态 Bearer 兼容模式不具备防重放能力。
+HTTP reverse 入口必须配置 `NAPCAT_HTTP_REVERSE_SECRET`。原生 NapCat HTTP client 按 OneBot 11 标准发送 `X-Signature: sha1=<hex>`，该签名不受 `NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER` 开关影响；旧式 Bearer/token 仅在显式开启兼容模式时接受。反向代理或自定义客户端应发送 `X-NapCat-Timestamp`、`X-NapCat-Nonce` 和 `X-NapCat-Signature: sha256=<hex>`，签名正文为 `timestamp.nonce.rawBody`。签名请求会校验时间窗并拒绝 nonce 重放，静态 Bearer 兼容模式不具备防重放能力。
 
 ```bash
 npm run smoke:napcat-ingress

@@ -55,10 +55,10 @@ function createAuthenticator({ secret, maxAgeMs, now, nonceCache, allowLegacyBea
     const signatureHeader = readHeader(req, 'x-napcat-signature');
     if (!timestampHeader && !nonce && !signatureHeader) {
       const oneBotSignature = readOneBotSignature(readHeader(req, 'x-signature'));
-      if (allowLegacyBearer && Buffer.isBuffer(req.rawBody) && oneBotSignature) {
+      if (Buffer.isBuffer(req.rawBody) && oneBotSignature) {
         const expectedSignature = crypto.createHmac('sha1', secret).update(req.rawBody).digest();
         return secureEqual(oneBotSignature, expectedSignature)
-          ? { ok: true, legacy: true }
+          ? { ok: true }
           : { ok: false, status: 401, error: 'Unauthorized' };
       }
       const legacyToken = readLegacyToken(req);

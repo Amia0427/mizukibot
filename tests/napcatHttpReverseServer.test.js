@@ -179,6 +179,40 @@ module.exports = (async () => {
     });
     assert.strictEqual(invalidOneBotRes.status, 401);
 
+    const signedOnlyApp = createNapCatHttpReverseServer({
+      secret: 'reverse-test-secret',
+      allowLegacyBearer: false
+    });
+    const signedOnlyServer = signedOnlyApp.listen(0, '127.0.0.1');
+    await new Promise((resolve) => signedOnlyServer.once('listening', resolve));
+    const signedOnlyAddress = signedOnlyServer.address();
+    const signedOnlyBody = JSON.stringify({ post_type: 'notice', notice_type: 'signed-only' });
+    const signedOnlySignature = crypto
+      .createHmac('sha1', 'reverse-test-secret')
+      .update(signedOnlyBody)
+      .digest('hex');
+    const signedOnlyRes = await fetch(`http://127.0.0.1:${signedOnlyAddress.port}/`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-signature': `sha1=${signedOnlySignature}`
+      },
+      body: signedOnlyBody
+    });
+    assert.strictEqual(signedOnlyRes.status, 204);
+    const disabledBearerRes = await fetch(`http://127.0.0.1:${signedOnlyAddress.port}/`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer reverse-test-secret'
+      },
+      body: signedOnlyBody
+    });
+    assert.strictEqual(disabledBearerRes.status, 401);
+    await new Promise((resolve, reject) => {
+      signedOnlyServer.close((error) => (error ? reject(error) : resolve()));
+    });
+
     const limitedApp = createNapCatHttpReverseServer({
       secret: 'reverse-test-secret',
       rateLimitMax: 1,

@@ -1,6 +1,6 @@
 # 消息与 Agent 运行时
 
-本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-14 00:31 +08:00。
+本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-20 21:39 +08:00。
 
 读完后应能回答：一条 OneBot 消息在哪里被接收、在哪些位置可能提前返回、何时进入 Runtime V2、工具如何受策略约束、回复如何防重复与过期，以及回复后的持久化为何不应阻塞用户可见结果。
 
@@ -330,6 +330,12 @@ node scripts/run-tests.js tests/napcatWsIngressSmoke.test.js tests/messageIngres
 ```
 
 验收点：WebSocket/HTTP 事件都进入统一 handler；队列容量和 drain 生效；同一用户限制不被全局并发绕过。
+
+### NapCat HTTP reverse 401 验收（2026-08-20 21:39 +08:00）
+
+根因是 NapCat 原生 HTTP Client 按 OneBot 11 标准发送 `X-Signature: sha1=<hex>`，但反向入口错误地把该签名与旧式 Bearer 兼容开关绑定；关闭 `NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER` 时，合法事件因此返回 401。现已让标准 `X-Signature` 独立校验，旧式 Bearer/token 仍需显式开启兼容开关。
+
+验收命令：`npm run smoke:napcat-ingress`；4 个入口回归全部通过，包含标准签名在兼容开关关闭时返回 204、旧式 Bearer 返回 401；`node --check core/napcatHttpReverseServer.js` 与 `node --check tests/napcatHttpReverseServer.test.js` 通过。
 
 ### 模块边界、路由与回复
 
