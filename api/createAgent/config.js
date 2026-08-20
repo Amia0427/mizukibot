@@ -31,6 +31,23 @@ function isCreateAgentUserAllowed(userId = '', overrides = {}) {
   return buildCreateAgentAllowedUserIds(overrides).has(normalizedUserId);
 }
 
+function normalizeAffectionThreshold(value = appConfig.CREATE_AGENT_AFFECTION_THRESHOLD) {
+  const threshold = Number(value);
+  if (!Number.isFinite(threshold)) return 30;
+  return Math.max(0, Math.min(100, threshold));
+}
+
+function isCreateAgentAffectionAllowed(affection = 0, overrides = {}) {
+  return Number(affection) >= normalizeAffectionThreshold(
+    overrides.affectionThreshold ?? appConfig.CREATE_AGENT_AFFECTION_THRESHOLD
+  );
+}
+
+function isCreateAgentAccessAllowed(userId = '', overrides = {}) {
+  return isCreateAgentUserAllowed(userId, overrides)
+    || isCreateAgentAffectionAllowed(overrides.affection, overrides);
+}
+
 function normalizeRequestedImageSize(value = '') {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw || raw === 'auto') return 'auto';
@@ -143,6 +160,9 @@ function resolveConfig(overrides = {}) {
     dailyLimit: Math.max(0, Number(overrides.dailyLimit ?? appConfig.CREATE_AGENT_DAILY_LIMIT ?? 20) || 0),
     timeoutMs: Math.max(1000, Number(overrides.timeoutMs ?? appConfig.CREATE_AGENT_TIMEOUT_MS ?? 120000) || 120000),
     groupOnly: overrides.groupOnly ?? appConfig.CREATE_AGENT_GROUP_ONLY,
+    affectionThreshold: normalizeAffectionThreshold(
+      overrides.affectionThreshold ?? appConfig.CREATE_AGENT_AFFECTION_THRESHOLD
+    ),
     maxConcurrency: Math.max(1, Number(overrides.maxConcurrency ?? appConfig.CREATE_AGENT_MAX_CONCURRENCY ?? 1) || 1),
     requestedImageSize,
     imageSize: normalizeRequestedImageSize(requestedImageSize),
@@ -171,7 +191,10 @@ module.exports = {
   buildCreateAgentChatCompletionsUrlCandidates,
   buildCreateAgentGenerationUrl,
   buildCreateAgentGenerationUrlCandidates,
+  isCreateAgentAccessAllowed,
+  isCreateAgentAffectionAllowed,
   isCreateAgentUserAllowed,
+  normalizeAffectionThreshold,
   normalizeCreateAgentBaseUrl,
   normalizeCreateAgentProtocol,
   normalizeIdList,

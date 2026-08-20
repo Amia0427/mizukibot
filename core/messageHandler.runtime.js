@@ -1644,7 +1644,20 @@ function createMessageHandler({
     }
     const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
-      if (isPrivateChatType(chatType) && !privilegedPrivateChat) {
+      const createAgentExecutor = getCreateAgentExecutorModule();
+      const legacyCreateAllowed = createAgentExecutor.isCreateAgentUserAllowed(senderId);
+      let affection = 0;
+      if (!legacyCreateAllowed) {
+        const conversationVariables = require('../utils/conversationVariables');
+        const snapshot = conversationVariables.getSnapshot({ userId: senderId });
+        affection = snapshot.relationship?.affection;
+      }
+      const createAccessAllowed = legacyCreateAllowed
+        || createAgentExecutor.isCreateAgentAffectionAllowed(affection, {
+          affectionThreshold: config.CREATE_AGENT_AFFECTION_THRESHOLD
+        });
+
+      if (isPrivateChatType(chatType) && !createAccessAllowed) {
         const sendStartedAt = Date.now();
         appendTraceTiming('final_reply_send_start', {
           stage: 'final_reply_send_start',
@@ -1680,8 +1693,7 @@ function createMessageHandler({
         return;
       }
 
-      const createAgentExecutor = getCreateAgentExecutorModule();
-      if (!createAgentExecutor.isCreateAgentUserAllowed(senderId)) {
+      if (!createAccessAllowed) {
         if (isPrivateChatType(chatType)) {
           const sendStartedAt = Date.now();
           appendTraceTiming('final_reply_send_start', {
@@ -1767,6 +1779,7 @@ function createMessageHandler({
         chatType,
         groupId,
         senderId,
+        allowPrivate: isPrivateChatType(chatType) && createAccessAllowed,
         rawText: rawMessageText,
         requestTrace: cloneTraceForMeta(requestTrace)
       });

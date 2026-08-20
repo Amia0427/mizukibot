@@ -2,7 +2,7 @@ const path = require('path');
 const axios = require('axios');
 const config = require('../../config');
 const { extractSSEEvents, flushSSEState } = require('../parser');
-const { sendGroupImageMessage } = require('../qqActionService');
+const { sendImageMessageForContext } = require('../qqActionService');
 const {
   extractErrorCode,
   extractHttpStatus
@@ -34,7 +34,10 @@ const {
   buildCreateAgentChatCompletionsUrlCandidates,
   buildCreateAgentGenerationUrl,
   buildCreateAgentGenerationUrlCandidates,
+  isCreateAgentAccessAllowed,
+  isCreateAgentAffectionAllowed,
   isCreateAgentUserAllowed,
+  normalizeAffectionThreshold,
   normalizeCreateAgentBaseUrl,
   normalizeCreateAgentProtocol,
   normalizeIdList,
@@ -911,11 +914,11 @@ async function executeCreateCommand(context = {}, deps = {}) {
     emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'empty_prompt' });
     return { ok: false, replyText: '用法: /create <prompt>', code: 'empty_prompt' };
   }
-  if (runtimeConfig.groupOnly && chatType === 'private') {
+  if (runtimeConfig.groupOnly && chatType === 'private' && context.allowPrivate !== true) {
     emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'group_only' });
     return { ok: false, replyText: '这个要在群里才接得住啦', code: 'group_only' };
   }
-  if (!groupId) {
+  if (chatType !== 'private' && !groupId) {
     emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'missing_group' });
     return { ok: false, replyText: '这个要在群里才接得住啦', code: 'missing_group' };
   }
@@ -946,7 +949,15 @@ async function executeCreateCommand(context = {}, deps = {}) {
       runtimeConfig,
       { ...deps, requestTrace }
     );
-    await (deps.sendGroupImageMessage || sendGroupImageMessage)(groupId, materialized.buffer, deps.sendOptions || {});
+    if (chatType !== 'private' && typeof deps.sendGroupImageMessage === 'function') {
+      await deps.sendGroupImageMessage(groupId, materialized.buffer, deps.sendOptions || {});
+    } else {
+      await (deps.sendImageMessageForContext || sendImageMessageForContext)({
+        chatType,
+        groupId,
+        userId: senderId
+      }, materialized.buffer, deps.sendOptions || {});
+    }
     emitCommandTrace('create_agent_runtime_success', {
       imagePath: String(materialized.filePath || '').trim()
     });
@@ -1003,7 +1014,10 @@ module.exports = {
   loadQuotaState,
   loadRuntimeState,
   isRuntimeStateStale,
+  isCreateAgentAccessAllowed,
+  isCreateAgentAffectionAllowed,
   isCreateAgentUserAllowed,
+  normalizeAffectionThreshold,
   isImageGenerationParameterCompatibilityError,
   normalizeCreateAgentBaseUrl,
   normalizeCreateAgentProtocol,

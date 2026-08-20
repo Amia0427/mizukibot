@@ -79,22 +79,59 @@ module.exports = (async () => {
     process.env.CREATE_AGENT_MODEL = 'gpt-image-1.5';
     process.env.ADMIN_USER_IDS = 'admin_user';
     process.env.CREATE_AGENT_ALLOW_USER_IDS = 'allowed_user';
+    process.env.CREATE_AGENT_AFFECTION_THRESHOLD = '30';
+    process.env.CONVERSATION_VARIABLES_ENABLED = 'true';
+    process.env.PRIVATE_CHAT_TEST_USER_IDS = 'explicit_private_allowlist_user';
+    process.env.PRIVATE_CHAT_ALLOWED_USER_IDS = 'explicit_private_allowlist_user';
 
     clearProjectCache();
 
     const config = require('../config');
     const { createMessageHandler } = require('../core/messageHandler');
     const createAgentExecutor = require('../api/createAgentExecutor');
+    const conversationVariables = require('../utils/conversationVariables');
+    conversationVariables.setOverride({
+      scopeType: 'user',
+      scopeId: 'affection_group_user',
+      key: 'affection',
+      value: 30,
+      locked: true,
+      reason: 'create command test',
+      actorId: 'test',
+      eventKey: 'create-test:affection-group',
+      now: Date.now()
+    });
+    conversationVariables.setOverride({
+      scopeType: 'user',
+      scopeId: 'affection_private_user',
+      key: 'affection',
+      value: 30,
+      locked: true,
+      reason: 'create command test',
+      actorId: 'test',
+      eventKey: 'create-test:affection-private',
+      now: Date.now()
+    });
+    conversationVariables.setOverride({
+      scopeType: 'user',
+      scopeId: 'low_private_user',
+      key: 'affection',
+      value: 29,
+      locked: true,
+      reason: 'create command test',
+      actorId: 'test',
+      eventKey: 'create-test:affection-low-private',
+      now: Date.now()
+    });
 
     const sentPayloads = [];
     const sendCalls = [];
+    const executorContexts = [];
     let executorCalls = 0;
     const originalExecuteCreateCommand = createAgentExecutor.executeCreateCommand;
-    createAgentExecutor.executeCreateCommand = async ({ chatType }) => {
+    createAgentExecutor.executeCreateCommand = async (context) => {
       executorCalls += 1;
-      if (chatType === 'private') {
-        return { ok: false, code: 'group_only', replyText: '这个要在群里才接得住啦' };
-      }
+      executorContexts.push(context);
       return { ok: true, code: 'sent' };
     };
 
@@ -119,6 +156,7 @@ module.exports = (async () => {
       }));
 
       assert.strictEqual(executorCalls, 1);
+      assert.strictEqual(executorContexts[0].allowPrivate, false);
       assert.strictEqual(sentPayloads.length, 0, 'successful /create should not send extra text');
       assert.strictEqual(sendCalls.length, 0);
 
@@ -130,6 +168,7 @@ module.exports = (async () => {
       }));
 
       assert.strictEqual(executorCalls, 2, 'allowlisted non-admin should execute create');
+      assert.strictEqual(executorContexts[1].allowPrivate, false);
       assert.strictEqual(sendCalls.length, 0);
 
       await handleIncomingMessage(buildGroupMessage({
@@ -162,26 +201,55 @@ module.exports = (async () => {
         user_id: 'not_allowed_user'
       });
 
+      await handleIncomingMessage(buildGroupMessage({
+        userId: 'affection_group_user',
+        groupId: 'group_1',
+        messageId: 'create_affection_group',
+        rawText: '/create high affection group test'
+      }));
+      assert.strictEqual(executorCalls, 3, 'high-affection group user should execute create');
+      assert.strictEqual(executorContexts[2].allowPrivate, false);
+      assert.strictEqual(sendCalls.length, 2);
+
       await handleIncomingMessage(buildPrivateMessage({
         userId: 'admin_user',
         messageId: 'create_admin_private',
         rawText: '/create private admin test'
       }));
 
-      assert.strictEqual(executorCalls, 3, 'admin private /create should reach executor instead of the private entry gate');
-      assert.strictEqual(sentPayloads.length, 3, 'admin private /create should send executor result');
-      assert.strictEqual(sendCalls[2]?.action, 'send_private_msg');
-      assert.ok(String(sentPayloads[2]?.params?.message || '').includes('这个要在群里才接得住啦'));
+      assert.strictEqual(executorCalls, 4, 'admin private /create should reach executor');
+      assert.strictEqual(executorContexts[3].allowPrivate, true);
+      assert.strictEqual(sentPayloads.length, 2, 'successful private /create should not send extra text');
+      assert.strictEqual(sendCalls.length, 2);
 
       await handleIncomingMessage(buildPrivateMessage({
-        userId: 'user_private',
+        userId: 'affection_private_user',
+        messageId: 'create_affection_private',
+        rawText: '/create private affection test'
+      }));
+
+      assert.strictEqual(executorCalls, 5, 'high-affection private user should execute create');
+      assert.strictEqual(executorContexts[4].allowPrivate, true);
+      assert.strictEqual(sendCalls.length, 2);
+
+      await handleIncomingMessage(buildPrivateMessage({
+        userId: 'low_private_user',
         messageId: 'create_2',
         rawText: '/create private test'
       }));
 
-      assert.strictEqual(executorCalls, 3);
-      assert.strictEqual(sentPayloads.length, 4, 'ordinary private /create should send private chat disabled reply');
-      assert.strictEqual(sendCalls[3]?.action, 'send_private_msg');
+      assert.strictEqual(executorCalls, 5);
+      assert.strictEqual(sentPayloads.length, 3, 'low-affection private /create should be blocked');
+      assert.strictEqual(sendCalls[2]?.action, 'send_private_msg');
+      assert.ok(String(sentPayloads[2]?.params?.message || '').includes('私聊现在先收起来了'));
+
+      await handleIncomingMessage(buildPrivateMessage({
+        userId: 'affection_private_user',
+        messageId: 'ordinary_private_after_create',
+        rawText: '普通私聊仍受白名单限制'
+      }));
+      assert.strictEqual(executorCalls, 5, 'ordinary private chat should not enter create executor');
+      assert.strictEqual(sentPayloads.length, 4);
       assert.ok(String(sentPayloads[3]?.params?.message || '').includes('私聊现在先收起来了'));
     } finally {
       createAgentExecutor.executeCreateCommand = originalExecuteCreateCommand;

@@ -1,6 +1,14 @@
 # Create Agent
 
-更新时间：2026-05-21 22:53 +08:00
+更新时间：2026-08-20 +08:00
+
+## `/create` 权限与私聊
+
+`/create <提示词>` 可在群聊或私聊中调用。管理员和 `CREATE_AGENT_ALLOW_USER_IDS` 中的用户直接拥有权限；其他用户读取现有 conversation variables 快照，在 `relationship.affection >= CREATE_AGENT_AFFECTION_THRESHOLD` 时开放，默认阈值为 `30`。好感度不足时，群聊保持原有拒绝动作，私聊继续返回私聊白名单提示。
+
+该阈值只负责授权，不会绕过 `CREATE_AGENT_ENABLED`、provider 鉴权、每日额度或并发限制；普通私聊、其他命令和自然聊天仍遵守原有私聊白名单。
+
+本地验收（2026-08-20）：`tests/messageHandlerCreateCommand.test.js` 验证高好感群聊与私聊均进入执行器，低好感群聊保持 poke、低好感私聊与普通私聊保持白名单拦截；`tests/createAgentExecutor.test.js` 验证群聊和私聊分别使用对应发送上下文。
 
 ## Right Code Draw 配置
 

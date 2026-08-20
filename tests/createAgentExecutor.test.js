@@ -72,6 +72,8 @@ module.exports = (async () => {
       getQuotaStatus,
       loadRuntimeState,
       isCreateAgentUserAllowed,
+      isCreateAgentAccessAllowed,
+      isCreateAgentAffectionAllowed,
       isImageGenerationParameterCompatibilityError,
       isRuntimeStateStale,
       normalizeCreateAgentBaseUrl,
@@ -109,6 +111,11 @@ module.exports = (async () => {
     assert.strictEqual(isCreateAgentUserAllowed('1960901788'), true);
     assert.strictEqual(isCreateAgentUserAllowed('u_extra', { allowUserIds: ['u_extra'] }), true);
     assert.strictEqual(isCreateAgentUserAllowed('u_other', { allowUserIds: ['u_extra'] }), false);
+    assert.strictEqual(isCreateAgentAffectionAllowed(29), false);
+    assert.strictEqual(isCreateAgentAffectionAllowed(30), true);
+    assert.strictEqual(isCreateAgentAccessAllowed('1960901788', { affection: 0 }), true);
+    assert.strictEqual(isCreateAgentAccessAllowed('u_other', { affection: 29 }), false);
+    assert.strictEqual(isCreateAgentAccessAllowed('u_other', { affection: 30 }), true);
     assert.strictEqual(
       isImageGenerationParameterCompatibilityError({
         response: {
@@ -239,6 +246,38 @@ module.exports = (async () => {
     assert.strictEqual(sentImages.length, 1);
     assert.strictEqual(sentImages[0].groupId, 'g1');
     assert.ok(Buffer.isBuffer(sentImages[0].imageInput));
+
+    const privateSends = [];
+    const privateResult = await executeCreateCommand({
+      prompt: 'private image delivery',
+      chatType: 'private',
+      groupId: '',
+      senderId: 'private_user',
+      allowPrivate: true
+    }, {
+      config: {
+        ...runtimeConfig,
+        quotaFile: path.join(tempRoot, 'quota-private.json'),
+        runtimeFile: path.join(tempRoot, 'runtime-private.json'),
+        errorLogFile: path.join(tempRoot, 'errors-private.log')
+      },
+      generateImage: async () => ({
+        filePath: path.join(tempRoot, 'output', 'private-test.png'),
+        buffer: Buffer.from(pngBase64, 'base64')
+      }),
+      sendImageMessageForContext: async (context, imageInput) => {
+        privateSends.push({ context, imageInput });
+        return { success: true };
+      }
+    });
+    assert.strictEqual(privateResult.ok, true);
+    assert.strictEqual(privateSends.length, 1);
+    assert.deepStrictEqual(privateSends[0].context, {
+      chatType: 'private',
+      groupId: '',
+      userId: 'private_user'
+    });
+    assert.ok(Buffer.isBuffer(privateSends[0].imageInput));
 
     let quotaStatus = getQuotaStatus(runtimeConfig);
     assert.strictEqual(quotaStatus.used, 1);
