@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const {
+  collectMainReplyManifestPaths,
   collectPromptAssetPaths,
   evaluatePromptGovernance,
   isGovernedPromptAssetPath,
@@ -112,6 +113,7 @@ const currentSections = currentManifest.system_prompt.sections;
 const promptAssets = collectPromptAssetPaths({ projectRoot, allowlist: currentAllowlist });
 const trackedWorldbookPaths = promptAssets.paths.filter((assetPath) => assetPath.startsWith('persona_worldbook/'));
 const referencedPaths = new Set(currentSections.map((section) => section.path));
+for (const assetPath of collectMainReplyManifestPaths({ projectRoot })) referencedPaths.add(assetPath);
 const supplementalRuntimePaths = promptAssets.paths.filter(
   (assetPath) => assetPath.startsWith('runtime/') && !referencedPaths.has(assetPath)
 );
@@ -127,7 +129,7 @@ const currentGovernance = evaluatePromptGovernance({
   allowlist: currentAllowlist,
   promptAssetPaths: promptAssets.paths,
   repositoryAssetPaths: promptAssets.allPaths,
-  referencedPaths: currentSections.map((section) => section.path),
+  referencedPaths: Array.from(referencedPaths),
   manifestSections: currentSections,
   today: '2026-07-12'
 });

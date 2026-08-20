@@ -157,6 +157,30 @@ function collectPromptAssetPaths(options = {}) {
   };
 }
 
+function collectMainReplyManifestPaths(options = {}) {
+  const promptsDir = path.resolve(options.promptsDir || path.join(options.projectRoot || path.join(__dirname, '..'), 'prompts'));
+  const manifestPath = path.join(promptsDir, 'main-reply', 'manifest.json');
+  if (!fs.existsSync(manifestPath)) return [];
+
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`main-reply prompt manifest missing or invalid: ${manifestPath}`);
+  }
+
+  const manifestDir = path.dirname(manifestPath);
+  const paths = ['main-reply/manifest.json'];
+  for (const asset of Array.isArray(manifest?.assets) ? manifest.assets : []) {
+    const assetPath = String(asset?.path || '').trim();
+    if (!assetPath) continue;
+    const fullPath = path.resolve(manifestDir, assetPath);
+    const relativePath = normalizeRelativePath(path.relative(promptsDir, fullPath));
+    if (relativePath && !relativePath.startsWith('../')) paths.push(relativePath);
+  }
+  return Array.from(new Set(paths));
+}
+
 function validateExactKeys(value, allowedKeys, label, errors) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
   for (const key of Object.keys(value)) {
@@ -394,6 +418,7 @@ module.exports = {
   DEFAULT_ALLOWLIST_PATH,
   collectConflictTagGroups,
   collectPrivateManifestAssetPaths,
+  collectMainReplyManifestPaths,
   collectPromptAssetPaths,
   evaluatePromptGovernance,
   isGovernedPromptAssetPath,

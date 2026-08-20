@@ -8,6 +8,7 @@ const {
 const { buildSecuritySystemPrompt } = require('../utils/promptSecurity');
 const {
   collectPrivateManifestAssetPaths,
+  collectMainReplyManifestPaths,
   collectPromptAssetPaths,
   evaluatePromptGovernance,
   loadPromptCheckAllowlist
@@ -16,6 +17,7 @@ const {
 const PROJECT_ROOT = path.join(__dirname, '..');
 const PROMPTS_DIR = path.resolve(process.env.PROMPTS_DIR || path.join(PROJECT_ROOT, 'prompts'));
 const PROMPT_MANIFEST_PATH = path.join(PROMPTS_DIR, 'prompt-manifest.json');
+const MAIN_REPLY_MANIFEST_PATH = path.join(PROMPTS_DIR, 'main-reply', 'manifest.json');
 const ROUTE_PROMPT_POLICY_PATH = path.join(PROMPTS_DIR, 'runtime', 'route-policies.json');
 
 function ok(msg) { console.log(`[OK] ${msg}`); }
@@ -91,6 +93,14 @@ function main() {
 
   const sections = readManifestSections(promptManifest);
   const referencedRelPaths = new Set(sections.map((section) => section.path).filter(Boolean));
+  try {
+    for (const assetPath of collectMainReplyManifestPaths({ promptsDir: PROMPTS_DIR, projectRoot: PROJECT_ROOT })) {
+      referencedRelPaths.add(assetPath);
+    }
+  } catch (error) {
+    fail(error.message || error);
+    failureCount += 1;
+  }
   let allowlist;
   let promptAssets;
   try {
