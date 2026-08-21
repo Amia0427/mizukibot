@@ -25,7 +25,7 @@ Runtime V2 的模型请求协议固定为两条：Anthropic provider 使用 `/v1
 
 `config.OPENAI_MAIN_API_MODE=responses` 不再改变运行时协议；`src/model/http/gemini-native.chunk.js` 仅保留历史 prompt/golden 兼容代码，不是可达的生产请求适配器。修改模型路由时应验证最终 `prepared.requestUrl`、`prepared.provider` 和请求体 `messages`，不要只检查模型名或配置值。
 
-验收记录（2026-08-21 21:35 +08:00）：协议归一化、provider 诊断、主回复流式、缓存、reasoning、图片内联、提示词和管理诊断定向测试通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过。
+验收记录（2026-08-21 21:35 +08:00，实现提交 `67607faf`）：协议归一化、provider 诊断、主回复流式、缓存、reasoning、图片内联、提示词和管理诊断定向测试通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过。
 
 ## QQ 私聊状态栏旁路
 

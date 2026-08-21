@@ -1,6 +1,6 @@
 ## 运行维护 2026-08-21 21:35 +08:00
 
-- Gemini Native 协议已从生产请求边界移除：Gemini 模型、历史 provider 别名、旧 `generateContent`/`streamGenerateContent` URL 和 `/responses` URL 均归一到 OpenAI-compatible Chat Completions；Anthropic 继续使用 `/v1/messages`。
+- 实现提交 `67607faf`：Gemini Native 协议已从生产请求边界移除；Gemini 模型、历史 provider 别名、旧 `generateContent`/`streamGenerateContent` URL 和 `/responses` URL 均归一到 OpenAI-compatible Chat Completions；Anthropic 继续使用 `/v1/messages`。
 - Qzone 图片生成、被动感知、模型自检、provider 诊断和相关回归测试已同步。验收：协议定向测试、`node tests/modelSelfCheck.test.js`、`node tests/promptGoldenSnapshots.test.js`、`node tests/diagnoseMainModelWebSearch.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 均通过；未推送远端。
 
 ## 运行维护 2026-08-21 21:07 +08:00

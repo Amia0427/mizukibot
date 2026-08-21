@@ -4,7 +4,7 @@
 
 - 当前项目永久禁用 Gemini Native 协议；Gemini 模型名、`gemini_native`/`gemini`/`google_gemini` 兼容别名以及旧 `generateContent`/`streamGenerateContent` URL 均归一到 OpenAI-compatible Chat Completions。
 - 非 Anthropic 请求最终只发送 `/chat/completions`；Responses URL 和旧 Gemini Native URL 会在请求准备阶段改写。Anthropic 请求继续使用 `/v1/messages`。
-- Qzone 图片生成、被动感知、模型自检和 provider 诊断已同步使用上述边界。验收（2026-08-21 21:35 +08:00）：协议归一化、诊断、流式、缓存、reasoning、图片内联、提示词和相关管理命令定向测试通过；`node tests/modelSelfCheck.test.js`、`node tests/promptGoldenSnapshots.test.js`、`node tests/diagnoseMainModelWebSearch.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 通过。
+- Qzone 图片生成、被动感知、模型自检和 provider 诊断已同步使用上述边界。实现提交：`67607faf`。验收（2026-08-21 21:35 +08:00）：协议归一化、诊断、流式、缓存、reasoning、图片内联、提示词和相关管理命令定向测试通过；`node tests/modelSelfCheck.test.js`、`node tests/promptGoldenSnapshots.test.js`、`node tests/diagnoseMainModelWebSearch.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 通过。
 
 ## 管理员模型切换 2026-08-21 21:03 +08:00
 
