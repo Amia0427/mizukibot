@@ -25,8 +25,8 @@
 - `diagnose-continuity-state.js`
 - `diagnose-local-knowledge.js`
 - `diagnose-main-model-fallback.js`
-- `diagnose-main-model-web-search.js`：更新 2026-05-23 23:20 +08:00，探测主回复/管理员主回复实际链路及 provider-native 参数是否具备内置联网搜索能力
-- `diagnose-provider-request.js`：更新 2026-05-26 18:35 +08:00，输出指定 provider 在 `http_client_direct/main_reply/admin_reply/vision_reply/qzone_image_generation` 下最终 headers、cache、鉴权来源、剔除字段和异常信号；可用 `npm run diag:provider-request -- --provider gemini_native`
+- `diagnose-main-model-web-search.js`：更新 2026-08-21 21:35 +08:00，探测主回复/管理员主回复实际链路及 provider 参数是否具备内置联网搜索能力；OpenAI-compatible 探针固定走 Chat Completions，Anthropic 探针固定走 `/v1/messages`
+- `diagnose-provider-request.js`：更新 2026-08-21 21:35 +08:00，输出指定 provider 在 `http_client_direct/main_reply/admin_reply/vision_reply/qzone_image_generation` 下最终 headers、cache、鉴权来源、剔除字段和异常信号；`gemini_native` 仅作为兼容别名并归一到 OpenAI-compatible，可用 `npm run diag:provider-request -- --provider gemini_native`
 - `verify-admin-cache-read.js`：更新 2026-06-17 20:09 +08:00，最小管理员缓存读写对照验收；对同一管理员连续发两次真实主模型请求，记录脱敏请求体差异、缓存读写 usage、model-call 和 request-trace 关键日志，区分上游不支持/请求体不符合缓存条件/本地读取链路漏吃结果；可用 `npm run verify:admin-cache-read -- --output artifacts/tmp/admin-cache-read.json`
 - `diagnose-main-reply.js`：统一主回复诊断，输出 route/model/fallback、memory freshness、群聊回复守卫、direct/tool/background 分支；更新 2026-06-06 12:44 +08:00：`--truncation` 汇总最近主回复截断候选，区分 `MAX_TOKENS`、上游断流、无 terminal event 和本地发送层失败
 - `diagnose-main-reply-prompt-assembly.js`：更新 2026-06-14 15:10 +08:00，只读回答“本次请求的 system prompt 最终怎么拼出来”，支持 `--request-id req_xxx` 和 `--text "..."`；输出 stable/dynamic/assistant-only blocks、persona modules、SQL worldbook 命中、planner provided/source、runtime 本地补入、来源文件/策略，以及 `buildDynamicPromptImpl` 子阶段耗时 `promptAssemblyStageTimings`（`collectPromptInputs`、`renderPromptLayers.*`、persona/worldbook、`profile_journal_db`、`daily_journal`、`short_term_continuity`）。验收：`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/memoryRecallObservability.test.js`、`npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0`、`node -e "require('./api/runtimeV2/context/service')"`。

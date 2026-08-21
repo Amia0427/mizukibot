@@ -1,11 +1,17 @@
 # Env Configuration
 
-更新时间：2026-08-21 21:03 +08:00
+更新时间：2026-08-21 21:35 +08:00
+
+## 模型协议边界
+
+- Gemini Native 已永久禁用。Gemini 模型名和历史 `gemini_native`/`gemini`/`google_gemini` provider 别名统一按 `openai_compatible` 处理，最终请求使用 `/chat/completions`。
+- `OPENAI_MAIN_API_MODE=responses` 仍可被旧配置读取，但不再选择 Responses 协议；只有 Anthropic provider 使用 `/v1/messages`。旧 `generateContent`、`streamGenerateContent` 和 `/responses` URL 会在请求准备阶段归一化。
 
 ## 管理员模型
 
 - `ADMIN_AI_MODEL=claude-opus-5`：管理员主回复模型。
 - `ADMIN_IMAGE_MODEL=claude-opus-5`：管理员多模态/图片理解模型；显式设置后优先于 `ADMIN_AI_MODEL`。
+- `ADMIN_AI_MAX_TOKENS=45000`：当前本地管理员输出预算。2026-08-21 21:31 +08:00 为应对上游账户余额 `¥0.250078` 低于请求预扣 `¥0.262740` 的 403 临时下调；充值后可恢复 `50000`。
 - 验收（2026-08-21 21:07 +08:00）：配置解析、管理员主回复路由和管理员视觉路由均解析为 `claude-opus-5`；受控重启脚本报告主进程和 post-reply worker 健康；未修改 `prompts/admin.txt`。
 
 ## NapCat OneBot action

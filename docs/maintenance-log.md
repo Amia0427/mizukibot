@@ -1,6 +1,15 @@
+## 运行维护 2026-08-21 21:35 +08:00
+
+- Gemini Native 协议已从生产请求边界移除：Gemini 模型、历史 provider 别名、旧 `generateContent`/`streamGenerateContent` URL 和 `/responses` URL 均归一到 OpenAI-compatible Chat Completions；Anthropic 继续使用 `/v1/messages`。
+- Qzone 图片生成、被动感知、模型自检、provider 诊断和相关回归测试已同步。验收：协议定向测试、`node tests/modelSelfCheck.test.js`、`node tests/promptGoldenSnapshots.test.js`、`node tests/diagnoseMainModelWebSearch.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 均通过；未推送远端。
+
 ## 运行维护 2026-08-21 21:07 +08:00
 
 - 管理员主回复与管理员多模态模型均已切换为 `claude-opus-5`，本地配置解析、主回复路由和视觉路由探针通过；受控重启后主进程与 post-reply worker 健康。小目标已完成，未修改 `prompts/admin.txt`，未推送远端。
+
+## 运行维护 2026-08-21 21:31 +08:00
+
+- 最新管理员 403 已定位为上游预扣费失败：账户余额 `¥0.250078`，当前请求需要 `¥0.262740`；管理员本地 `ADMIN_AI_MAX_TOKENS` 已临时从 `50000` 调为 `45000`，模型仍为 `claude-opus-5`，充值后可恢复原预算。
 
 ## 运行维护 2026-08-14 00:31 +08:00
 

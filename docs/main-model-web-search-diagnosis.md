@@ -1,5 +1,7 @@
 # 主回复模型内置联网搜索诊断
 
+更新 2026-08-21 21:35 +08:00：OpenAI-compatible 诊断探针已固定使用 Chat Completions；项目不再发送 OpenAI Responses 请求。Anthropic 原生搜索探针仍只在显式 Anthropic `/v1/messages` 链路中运行。
+
 更新 2026-06-05 10:44 +08:00：全量测试跟进已按当前代码契约更新失败基线：`dailyJournalAllUsersAvailability` 改为临时 Daily Journal fixture，不再依赖本地当天 `data/` 状态；persona prelude、journal recall `hybrid_rrf`、Profile Journal DB 主读、显式 Anthropic provider 隔离和发送层格式兜底文案断言同步到当前实现。
 
 更新 2026-06-05 10:17 +08:00：复盘 `qq-group:1092700300:user:1626492260` 的纳斯达克提问，日志实际命中为 `messageId=1637531363`、`requestId=req_0fdfcce493aef4fe`、`2026-06-04T17:15:42Z` 入站，非 17:41 UTC。该请求文本明确包含“联网搜索 / 必须网络搜索再回答”，但当时 planner 输出 `shouldUseTools=false`、`allowedToolCount=0`，route execution 走 `dispatchBranch=direct_reply`、`allowTools=false`，LangGraph 事件里 `allowedTools=[]/routeAllowedTools=[]`，最终主模型直接生成了“刚才偷偷瞄了一眼 / 查也查过了”的假搜索话术。根因是显式 web 需求没有贯穿到 `meta.allowedTools`，且 companion 工具模式会过滤泛用 `web_search/web_fetch`；不是工具执行失败回退。
@@ -30,7 +32,7 @@ node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 - `runtime_without_native_search`：按主回复实际 Claude Messages 链路请求，但显式关闭原生搜索注入。
 - `runtime_with_native_search`：按主回复实际 Claude Messages 链路请求，并通过 `anthropicWebSearch: true` 显式启用原生 `web_search_20250305` 注入。
 - `no_tool`：兼容旧字段，等同于 `runtime_without_native_search`。
-- `openai_responses_web_search_preview`：尝试 OpenAI Responses `web_search_preview` 原生工具参数。
+- `openai_chat_web_search_preview`：在 OpenAI-compatible Chat Completions 请求中尝试 `web_search_preview` 工具参数。
 - `anthropic_messages_web_search`：尝试 Anthropic Messages `web_search_20250305` 原生工具参数。
 
 ## 本次实测
@@ -45,7 +47,7 @@ node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 
 - 普通主回复 `no_tool` 返回 `can_web_search=false`，明确说明没有模型内置联网搜索能力。
 - 管理员主回复 `no_tool` 返回 `can_web_search=false`，明确说明没有模型内置联网搜索能力。
-- OpenAI Responses `web_search_preview` 对普通、管理员和 fallback 链路均返回 `500 not implemented`，当前网关不支持这一路原生搜索。
+- 旧版 OpenAI Responses `web_search_preview` 探针曾对普通、管理员和 fallback 链路返回 `500 not implemented`；当前诊断不再发送该协议。
 - Anthropic Messages `web_search_20250305` 在普通主回复和管理员主回复专用渠道均可被接受，并返回 Reuters 来源 URL；管理员 fallback 参考链路也返回成功，但文本自述搜索能力有限。
 - 管理员主回复专用渠道中途曾多次返回供应商 `503 system cpu overloaded`，23:24 +08:00 复测已成功，因此判定为临时渠道负载问题。
 
@@ -54,7 +56,7 @@ node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 - 普通主回复 `runtime_with_native_search`：`injectedAnthropicWebSearch=true`，`preparedAnthropicWebSearch=true`，但响应无 Anthropic 原生搜索执行证据。
 - 管理员主回复 `runtime_with_native_search`：`injectedAnthropicWebSearch=true`，`preparedAnthropicWebSearch=true`，但响应无 Anthropic 原生搜索执行证据。
 - `anthropic_messages_web_search` 裸探针在当前网关可返回 Reuters URL 或伪工具文本，但响应体没有 `server_tool_use`、`web_search_tool_result`、`usage.server_tool_use`；URL 只能说明模型文本中出现来源，不能证明 Anthropic server tool 真正执行。
-- OpenAI Responses `web_search_preview` 仍返回 `500 not implemented`。
+- 当前 Chat Completions 探针结果以 `openai_chat_web_search_preview` 字段为准。
 
 ## 使用判断
 

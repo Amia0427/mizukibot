@@ -1,9 +1,16 @@
 # MizukiBot
 
+## 模型协议边界 2026-08-21 21:35 +08:00
+
+- 当前项目永久禁用 Gemini Native 协议；Gemini 模型名、`gemini_native`/`gemini`/`google_gemini` 兼容别名以及旧 `generateContent`/`streamGenerateContent` URL 均归一到 OpenAI-compatible Chat Completions。
+- 非 Anthropic 请求最终只发送 `/chat/completions`；Responses URL 和旧 Gemini Native URL 会在请求准备阶段改写。Anthropic 请求继续使用 `/v1/messages`。
+- Qzone 图片生成、被动感知、模型自检和 provider 诊断已同步使用上述边界。验收（2026-08-21 21:35 +08:00）：协议归一化、诊断、流式、缓存、reasoning、图片内联、提示词和相关管理命令定向测试通过；`node tests/modelSelfCheck.test.js`、`node tests/promptGoldenSnapshots.test.js`、`node tests/diagnoseMainModelWebSearch.test.js`、`npm run lint`、`npm run typecheck`、`git diff --check` 通过。
+
 ## 管理员模型切换 2026-08-21 21:03 +08:00
 
 - 管理员主回复和管理员多模态模型均已切换为 `claude-opus-5`，分别由 `ADMIN_AI_MODEL` 与 `ADMIN_IMAGE_MODEL` 控制；运行时仍沿用原管理员 API 端点和密钥。
 - 验收（2026-08-21 21:07 +08:00）：配置解析与管理员主回复、视觉路由探针均解析为 `claude-opus-5`；受控重启脚本报告主进程和 post-reply worker 健康；未修改 `prompts/admin.txt`，未推送远端。
+- 2026-08-21 21:31 +08:00：上游返回 HTTP 403 的根因是账户余额 `¥0.250078` 低于该请求预扣 `¥0.262740`；管理员 `ADMIN_AI_MAX_TOKENS` 临时调为 `45000` 以降低预扣，模型和推理设置不变。充值后可恢复 `50000`。
 
 ## 安全加固 2026-08-20
 
