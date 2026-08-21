@@ -1,5 +1,10 @@
 # MizukiBot
 
+## 普通用户请求消息尾部修复 2026-08-21 21:58 +08:00
+
+- 修复 Runtime V2 主回复上下文中记忆/工具证据位于当前用户轮次之后的问题；canonical 消息顺序现在保证当前用户消息为最后一条，避免 OpenAI-compatible 网关返回“Requests ending with a model turn are not supported.”。
+- 验收：`runtimeV2MainReplyMemoryOrder`、`runtimeStreamingCoordinator`、`contextCompaction`、`reactAgentLoop` 定向测试通过；未修改模型、endpoint、工具协议或 `prompts/admin.txt`。
+
 ## 模型协议边界 2026-08-21 21:35 +08:00
 
 - 当前项目永久禁用 Gemini Native 协议；Gemini 模型名、`gemini_native`/`gemini`/`google_gemini` 兼容别名以及旧 `generateContent`/`streamGenerateContent` URL 均归一到 OpenAI-compatible Chat Completions。

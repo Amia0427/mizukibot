@@ -2081,3 +2081,9 @@
 - 外部状态：修复后的真实缓存 GIF 和 1×1 GIF 分别等待 124 秒、94 秒后被本地外层超时终止，目标网关未返回原 `#sym:500`，也未取得可声明成功的 200；待上游恢复响应后复验，不重复消耗请求。
 - 小目标已完成：本地 GIF 协议修复、回归和提交已完成；`.belt/`、`AGENT.md`、私有提示词、并行测试和本地图片未纳入，当前分支未推送远端。
 维护记录：2026-08-20 21:25 +08:00，完成运行安全加固：升级并锁定 `js-yaml 4.3.1`、`nodemailer 9.0.5` 和 MemOS MCP `1.1.2`；NapCat 反向入口新增显式开关并默认停用旧式 Bearer，远程 Web 明文请求拒绝，Compose 宿主端口保持 loopback 且 `.env` 改为只读挂载；MCP 子进程改为最小环境白名单，命令桥默认关闭；健康接口只返回 `ok`，登录限流持久化，面板新增 viewer/admin 分级与脱敏审计日志，聊天包日志改为默认关闭且显式开启时脱敏。验收：`npm audit --omit=dev --audit-level=high`、安全定向测试和 `npm run diag:security -- --json` 全部通过（8 OK / 0 WARN / 0 ERROR）。
+
+## 运行维护 2026-08-21 21:58 +08:00
+
+- 根因：Runtime V2 canonical 顺序将 `current_user_turn` 放在 `daily_journal`、`tool_evidence` 之前；记忆块使用 `assistant` 角色注入，普通用户请求因此可能以 assistant 消息结束，被 `superapi.buzz` 返回 HTTP 400。
+- 修复：将 `current_user_turn` 调整到 canonical 分段末尾；上下文内容、模型配置、endpoint、工具循环和管理员提示词均未修改。
+- 验收：`runtimeV2MainReplyMemoryOrder`、`runtimeStreamingCoordinator`、`contextCompaction`、`reactAgentLoop` 定向测试通过；本地工作区其他未提交改动未纳入本次修复。

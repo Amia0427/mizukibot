@@ -5,6 +5,8 @@ const { buildContextCompactionPlan, CANONICAL_SEGMENT_ORDER } = require('../util
 module.exports = async () => {
   const retrievedMemoryMessage = { role: 'system', content: '[RetrievedMemory]\n之前聊到 systemd 部署失败，下一步要先看日志。' };
   const taskMemoryMessage = { role: 'system', content: '[TaskMemory]\n当前任务：排查启动失败。' };
+  const dailyJournalMessage = { role: 'assistant', content: '[DailyJournal]\n昨天完成了部署排查。' };
+  const toolEvidenceMessage = { role: 'assistant', content: '[GlobalToolEvidence]\n工具查询已完成。' };
   const userTurnMessage = { role: 'user', content: '你还记得我们刚才聊到哪了吗？' };
 
   assert.ok(
@@ -29,6 +31,8 @@ module.exports = async () => {
       continuity_state: [{ role: 'system', content: '[ContinuityState]\nactive_topic=部署排查' }],
       retrieved_memory: [retrievedMemoryMessage],
       task_memory: [taskMemoryMessage],
+      daily_journal: [dailyJournalMessage],
+      tool_evidence: [toolEvidenceMessage],
       current_user_turn: [userTurnMessage]
     },
     source: 'test'
@@ -44,6 +48,11 @@ module.exports = async () => {
   assert.ok(userIndex >= 0, 'user turn should remain in compacted plan');
   assert.ok(retrievedIndex < userIndex, 'retrieved memory should appear before user turn in flattened messages');
   assert.ok(taskIndex < userIndex, 'task memory should appear before user turn in flattened messages');
+  assert.strictEqual(
+    flattened.at(-1)?.role,
+    'user',
+    'current user turn must be the final message even when assistant memory blocks are present'
+  );
 
   console.log('runtimeV2MainReplyMemoryOrder.test.js passed');
 };

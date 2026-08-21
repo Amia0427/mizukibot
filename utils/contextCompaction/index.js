@@ -20,10 +20,10 @@ const CANONICAL_SEGMENT_ORDER = Object.freeze([
   'short_term_summary',
   'recent_history',
   'assistant_only_context',
-  'current_user_turn',
   'daily_journal',
   'tool_evidence',
-  'planner_artifacts'
+  'planner_artifacts',
+  'current_user_turn'
 ]);
 
 const PRIORITY_BY_SEGMENT = Object.freeze({
