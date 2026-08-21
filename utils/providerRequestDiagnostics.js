@@ -18,8 +18,7 @@ const {
   getApiProvider,
   normalizeApiProvider,
   isOpenAICompatibleProvider,
-  isAnthropicProvider,
-  isGeminiNativeProvider
+  isAnthropicProvider
 } = require('./modelProvider');
 const {
   buildRequestCacheTrace
@@ -130,15 +129,6 @@ function getProviderPreset(provider = 'openai_compatible') {
       apiBaseUrl: 'https://api.anthropic.com/v1/messages',
       imageApiBaseUrl: 'https://api.anthropic.com/v1/messages',
       qzoneImageApiBaseUrl: 'https://api.anthropic.com/v1/messages'
-    };
-  }
-  if (normalized === 'gemini_native') {
-    return {
-      provider: normalized,
-      model: 'gemini-3-pro-preview',
-      apiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent',
-      imageApiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent',
-      qzoneImageApiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta'
     };
   }
   return {
@@ -304,21 +294,6 @@ function buildHttpDiagnosticBody(scenarioConfig = {}, options = {}) {
   };
 }
 
-function summarizeGeminiSystemInstruction(body = {}) {
-  const parts = Array.isArray(body?.systemInstruction?.parts)
-    ? body.systemInstruction.parts
-    : [];
-  const text = parts
-    .map((part) => normalizeText(part?.text))
-    .filter(Boolean)
-    .join('\n');
-  return {
-    present: Boolean(text),
-    hasGeminiRuntimeAdapter: text.includes('[GeminiRuntimeAdapter]'),
-    chars: text.length
-  };
-}
-
 function summarizeAuth(headers = {}, apiKeySource = '') {
   const entries = [
     ['Authorization', 'bearer'],
@@ -380,23 +355,8 @@ function collectAnomalies({
   if (isAnthropicProvider(provider) && !headers['x-api-key']) {
     anomalies.push('anthropic_missing_x_api_key');
   }
-  if (isGeminiNativeProvider(provider) && !headers['x-goog-api-key']) {
-    anomalies.push('gemini_native_missing_x_goog_api_key');
-  }
   if (!isOpenAICompatibleProvider(provider) && (body.prompt_cache_key || body.prompt_cache_retention)) {
     anomalies.push('non_openai_provider_has_openai_prompt_cache_fields');
-  }
-  if (isGeminiNativeProvider(provider) && cache.anthropicCacheBreakpoints > 0) {
-    anomalies.push('gemini_native_has_anthropic_cache_control');
-  }
-  if (isGeminiNativeProvider(provider)) {
-    const geminiSystem = prepared?.requestBody?.systemInstruction;
-    const systemText = (Array.isArray(geminiSystem?.parts) ? geminiSystem.parts : [])
-      .map((part) => normalizeText(part?.text))
-      .filter(Boolean)
-      .join('\n');
-    if (!systemText) anomalies.push('gemini_native_missing_system_instruction');
-    else if (!systemText.includes('[GeminiRuntimeAdapter]')) anomalies.push('gemini_native_missing_runtime_adapter_prompt');
   }
   if (isOpenAICompatibleProvider(provider) && body.prompt_cache_key && cache.anthropicCacheBreakpoints > 0) {
     anomalies.push('openai_prompt_cache_and_cache_control_both_present');
@@ -434,9 +394,7 @@ async function buildHttpScenario(name, requestUrl, requestBody, scenarioConfig, 
     headerNames: Object.keys(finalHeaders || {}).sort(),
     auth: summarizeAuth(finalHeaders, scenarioConfig.apiKeySource),
     cache,
-    geminiSystemInstruction: isGeminiNativeProvider(finalProvider)
-      ? summarizeGeminiSystemInstruction(prepared.requestBody)
-      : null,
+    geminiSystemInstruction: null,
     strippedFields,
     anomalies: collectAnomalies({
       requestedProvider: scenarioConfig.requestedProvider,
@@ -530,7 +488,10 @@ function buildQzoneImageScenario(scenarioConfig) {
     scenarioConfig.qzoneImageApiBaseUrl,
     scenarioConfig.model
   );
-  const requestBody = buildBotDiaryQzoneImageRequestBody('provider request diagnostic');
+  const requestBody = buildBotDiaryQzoneImageRequestBody(
+    'provider request diagnostic',
+    scenarioConfig.model
+  );
   const finalProvider = normalizeApiProvider(getApiProvider(requestUrl, scenarioConfig.model, { preferUnifiedResponses: true }));
   const headers = buildBotDiaryQzoneImageHeaders(scenarioConfig.apiKey, requestUrl, scenarioConfig.model);
   const prepared = {

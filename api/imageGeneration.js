@@ -1,6 +1,11 @@
 const axios = require('axios');
 const config = require('../config');
-const { getApiProvider, normalizeProviderRequestHeaders } = require('../utils/modelProvider');
+const {
+  getApiProvider,
+  ensureOpenAICompatibleChatCompletionsUrl,
+  isAnthropicProvider,
+  normalizeProviderRequestHeaders
+} = require('../utils/modelProvider');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -49,9 +54,7 @@ function resolveBotDiaryQzoneImageRequestUrl(apiBaseUrl = '', model = '') {
   const base = normalizeText(apiBaseUrl).replace(/\/+$/g, '');
   const safeModel = normalizeText(model);
   if (!base || !safeModel) return '';
-  if (/generateContent(?:$|[?#])/i.test(base)) return base;
-  if (/\/models\/[^/]+$/i.test(base)) return `${base}:generateContent`;
-  return `${base}/models/${encodeURIComponent(safeModel)}:generateContent`;
+  return ensureOpenAICompatibleChatCompletionsUrl(base, safeModel);
 }
 
 function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '', model = '') {
@@ -61,8 +64,8 @@ function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '', model = ''
     'Content-Type': 'application/json',
     Accept: 'application/json, text/plain, */*'
   };
-  if (provider === 'gemini_native') {
-    if (key) headers['x-goog-api-key'] = key;
+  if (isAnthropicProvider(provider)) {
+    if (key) headers['x-api-key'] = key;
   } else if (key) {
     headers.Authorization = `Bearer ${key}`;
   }
@@ -80,25 +83,16 @@ function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '', model = ''
   return normalizedHeaders;
 }
 
-function buildBotDiaryQzoneImageRequestBody(prompt = '') {
+function buildBotDiaryQzoneImageRequestBody(prompt = '', model = '') {
   return {
-    contents: [
+    model: normalizeText(model),
+    messages: [
       {
         role: 'user',
-        parts: [
-          {
-            text: normalizeText(prompt)
-          }
-        ]
+        content: normalizeText(prompt)
       }
     ],
-    generationConfig: {
-      responseModalities: ['IMAGE'],
-      imageConfig: {
-        aspectRatio: '16:9',
-        image_size: '2K'
-      }
-    }
+    stream: false
   };
 }
 
@@ -142,7 +136,9 @@ function extractImageSourceFromPart(part = {}) {
   );
   if (fileUrl) return fileUrl;
 
-  return extractUrlFromText(part?.text || '');
+  const text = normalizeText(part?.text || '');
+  if (/^data:image\//i.test(text)) return text;
+  return extractUrlFromText(text);
 }
 
 function extractBotDiaryQzoneImageSource(payload) {
@@ -176,6 +172,20 @@ function extractBotDiaryQzoneImageSource(payload) {
   for (const item of images) {
     const source = extractImageSourceFromPart(item);
     if (source) return source;
+  }
+
+  const choices = Array.isArray(data?.choices) ? data.choices : [];
+  for (const choice of choices) {
+    const content = choice?.message?.content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        const source = extractImageSourceFromPart(part);
+        if (source) return source;
+      }
+    } else {
+      const source = extractImageSourceFromPart({ text: content });
+      if (source) return source;
+    }
   }
 
   return '';
@@ -222,7 +232,7 @@ async function drawBotDiaryQzonePicture(prompt = '', options = {}) {
   try {
     const response = await httpClient.post(
       requestUrl,
-      buildBotDiaryQzoneImageRequestBody(textPrompt),
+      buildBotDiaryQzoneImageRequestBody(textPrompt, provider.model),
       {
         timeout: timeoutMs,
         proxy: false,

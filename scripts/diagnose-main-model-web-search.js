@@ -11,8 +11,7 @@ const {
 } = require('../utils/mainModelFallback');
 const {
   buildMainModelRequest,
-  ensureChatCompletionsUrl,
-  ensureResponsesUrl
+  ensureChatCompletionsUrl
 } = require('../api/runtimeV2/model/shared');
 const {
   resolveSafeModelEndpoint
@@ -234,8 +233,8 @@ async function postPrepared(url, body, apiKey, timeoutMs) {
   return { response, prepared };
 }
 
-async function runOpenAIResponsesSearchProbe(label, modelConfig, timeoutMs) {
-  const url = ensureResponsesUrl(modelConfig.apiBaseUrl);
+async function runOpenAIChatSearchProbe(label, modelConfig, timeoutMs) {
+  const url = ensureChatCompletionsUrl(modelConfig.apiBaseUrl);
   const body = {
     model: modelConfig.model,
     input: [
@@ -246,12 +245,12 @@ async function runOpenAIResponsesSearchProbe(label, modelConfig, timeoutMs) {
     tools: [{ type: 'web_search_preview' }],
     max_output_tokens: 420,
     stream: false,
-    __preferredProtocol: 'responses',
+    __preferredProtocol: 'chat_completions',
     __timeoutMs: timeoutMs,
     __trace: {
       source: 'diagnose_script',
       phase: 'web_search_capability_probe',
-      purpose: `${label}_openai_responses_web_search_preview`,
+      purpose: `${label}_openai_chat_web_search_preview`,
       routeType: 'diagnose'
     }
   };
@@ -418,7 +417,7 @@ async function runDiagnose(options = {}) {
     entry.probes.runtime_without_native_search = await runRuntimeMainProbe(target.label, target.modelConfig, timeoutMs, { enableNativeSearch: false });
     entry.probes.runtime_with_native_search = await runRuntimeMainProbe(target.label, target.modelConfig, timeoutMs, { enableNativeSearch: true });
     entry.probes.no_tool = entry.probes.runtime_without_native_search;
-    entry.probes.openai_responses_web_search_preview = await runOpenAIResponsesSearchProbe(target.label, target.modelConfig, timeoutMs);
+    entry.probes.openai_chat_web_search_preview = await runOpenAIChatSearchProbe(target.label, target.modelConfig, timeoutMs);
     entry.probes.anthropic_messages_web_search = await runAnthropicNativeSearchProbe(target.label, target.modelConfig, timeoutMs);
     result.targets.push(entry);
   }

@@ -212,8 +212,8 @@ module.exports = (async () => {
     assert.strictEqual(sent.length, 6);
     const providerReport = JSON.parse(sent[5].replyText);
     assert.strictEqual(providerReport.schemaVersion, 'provider_request_diagnostic_v1');
-    assert.strictEqual(providerReport.scenarios[0].finalProvider, 'gemini_native');
-    assert.strictEqual(providerReport.scenarios[0].auth.header, 'x-goog-api-key');
+    assert.strictEqual(providerReport.scenarios[0].finalProvider, 'openai_compatible');
+    assert.strictEqual(providerReport.scenarios[0].auth.header, 'Authorization');
 
     const promptAssemblyResult = await routeFlow.dispatchAdminRoute({
       route: {

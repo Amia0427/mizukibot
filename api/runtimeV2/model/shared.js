@@ -2,15 +2,11 @@ const config = require('../../../config');
 const crypto = require('crypto');
 const {
   isAnthropicProvider,
-  isGeminiModelName,
-  isGeminiNativeProvider,
   isOpenAICompatibleProvider,
+  ensureOpenAICompatibleChatCompletionsUrl,
   normalizeApiProvider,
   ensureAnthropicMessagesUrl
 } = require('../../../utils/modelProvider');
-const {
-  normalizeGeminiNativeApiBaseUrl
-} = require('../../../src/model/http/gemini-native.chunk');
 const {
   ADMIN_SHARED_FALLBACK_SCOPE,
   resolveForcedFallbackMainModelConfig,
@@ -95,46 +91,15 @@ function ensureChatCompletionsUrl(url) {
   return normalized;
 }
 
-function ensureResponsesUrl(url) {
-  const normalized = String(url || '').replace(/\/+$/, '');
-  if (/\/responses$/i.test(normalized)) return normalized;
-  if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, '/responses');
-  if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/responses');
-  if (/\/v\d+$/i.test(normalized)) return `${normalized}/responses`;
-  if (/^https?:\/\/[^/]+$/i.test(normalized)) return `${normalized}/v1/responses`;
-  return normalized;
-}
-
-function normalizeOpenAIMainApiMode(value = '') {
-  const normalized = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
-  if (normalized === 'responses' || normalized === 'response') return 'responses';
-  if (normalized === 'chat' || normalized === 'chat_completion' || normalized === 'chat_completions') {
-    return 'chat_completions';
-  }
-  return 'auto';
-}
-
 function resolveOpenAIMainProtocol(apiBaseUrl = '', options = {}) {
   if (isAnthropicProvider(options.provider)) return 'anthropic_messages';
-  if (isGeminiNativeProvider(options.provider)) return 'gemini_generate_content';
-  const mode = normalizeOpenAIMainApiMode(options.apiMode || config.OPENAI_MAIN_API_MODE);
-  if (mode === 'responses') return 'responses';
-  if (mode === 'chat_completions') return 'chat_completions';
-
-  const normalized = String(apiBaseUrl || '').replace(/\/+$/, '').toLowerCase();
-  if (/\/responses$/i.test(normalized)) return 'responses';
-  if (/\/chat\/completions$/i.test(normalized)) return 'chat_completions';
-  if (/\/messages$/i.test(normalized)) return 'chat_completions';
-  if (/\/v\d+$/i.test(normalized)) return 'chat_completions';
   return 'chat_completions';
 }
 
 function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
   const protocol = resolveOpenAIMainProtocol(apiBaseUrl, options);
   if (protocol === 'anthropic_messages') return ensureAnthropicMessagesUrl(apiBaseUrl);
-  return protocol === 'responses'
-    ? ensureResponsesUrl(apiBaseUrl)
-    : ensureChatCompletionsUrl(apiBaseUrl);
+  return ensureOpenAICompatibleChatCompletionsUrl(apiBaseUrl, options.model);
 }
 
 function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
@@ -144,16 +109,12 @@ function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
   if (options && typeof options === 'object' && String(options.provider || '').trim()) {
     return normalizeApiProvider(options.provider);
   }
-  if (isGeminiModelName(model)) return 'gemini_native';
   return 'openai_compatible';
 }
 
 function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
   if (getEndpointScopedAnthropicMessagesConfig(apiBaseUrl)) return ensureAnthropicMessagesUrl(apiBaseUrl);
   if (isAnthropicProvider(options.provider)) return ensureAnthropicMessagesUrl(apiBaseUrl);
-  if (isGeminiNativeProvider(options.provider)) {
-    return normalizeGeminiNativeApiBaseUrl(apiBaseUrl, options.model, { stream: options.stream === true });
-  }
   return ensureOpenAIMainUrl(apiBaseUrl, options);
 }
 
@@ -676,8 +637,6 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
         [endpointBeta]
       );
     }
-  } else if (isGeminiNativeProvider(options.provider)) {
-    if (apiKey) budgetedBody.__requestHeaders['x-goog-api-key'] = apiKey;
   }
 
   return applyOpenAIPromptCacheOptions(budgetedBody, protocol, effectiveConfig, options);
@@ -825,7 +784,6 @@ module.exports = {
   ensureChatCompletionsUrl,
   ensureMainModelUrl,
   ensureOpenAIMainUrl,
-  ensureResponsesUrl,
   getApiBaseUrl,
   getApiKey,
   getMainReplyDefaultMaxTokens,

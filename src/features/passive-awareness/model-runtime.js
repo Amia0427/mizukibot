@@ -167,7 +167,7 @@ function resolvePassiveAwarenessReplyProvider({ useMainReplyModel, baseUrl, mode
     return 'openai_compatible';
   }
   if (/\/messages$/i.test(normalizedBaseUrl)) return 'anthropic';
-  if (/:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalizedBaseUrl)) return 'gemini_native';
+  if (/:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalizedBaseUrl)) return 'openai_compatible';
   return '';
 }
 

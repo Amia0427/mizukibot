@@ -6,7 +6,6 @@ const {
   extractAnthropicCacheControl,
   getApiProvider,
   isAnthropicProvider,
-  isGeminiNativeProvider,
   normalizeProviderRequestHeaders,
   normalizeText,
   providerAllowsCacheControl,
@@ -16,9 +15,6 @@ const {
 } = require('./runtime-core.chunk');
 const {
   buildChatCompletionsRequestBody,
-  buildResponsesRequestBody,
-  buildResponsesUrl,
-  isResponsesUrl,
   preprocessOpenAICompatibleMessages,
   preprocessOpenAICompatibleMessagesWithoutCache,
   requestBodyLooksLikeChatCompletion
@@ -34,25 +30,12 @@ const {
 const { buildAnthropicRequestHeaders } = require('./runtime-core.chunk');
 const { sanitizeOpenAICompatibleToolWithoutCache } = require('./images.chunk');
 const {
+  ensureOpenAICompatibleChatCompletionsUrl,
   normalizeApiProvider
 } = require('../../../utils/modelProvider');
 const {
   buildBrowserLikeRequestHeaders
 } = require('../../../config/userAgentRuntime');
-const {
-  buildGeminiNativeRequestBody,
-  normalizeGeminiNativeApiBaseUrl
-} = require('./gemini-native.chunk');
-
-function shouldPreferResponsesProtocol(provider = '', url = '', requestBody = {}, originalBody = {}) {
-  if (provider !== 'openai_compatible') return false;
-  if (isResponsesUrl(url)) return true;
-  if (originalBody?.__responsesProtocolFallbackAttempted === true) return false;
-  const preferredProtocol = normalizeText(originalBody?.__preferredProtocol).toLowerCase().replace(/[-\s]+/g, '_');
-  if (preferredProtocol === 'chat' || preferredProtocol === 'chat_completion' || preferredProtocol === 'chat_completions') return false;
-  const responsesUrl = buildResponsesUrl(url);
-  return isResponsesUrl(responsesUrl) && requestBodyLooksLikeChatCompletion(requestBody);
-}
 
 function mergeHeaderListValues(...values) {
   const merged = [];
@@ -92,16 +75,6 @@ async function prepareRequest(url, body = {}) {
     const requestBody = body && typeof body === 'object'
       ? stripTopPField(stripProviderCacheFields(provider, stripInternalRequestFields({ ...body })))
       : body;
-    if (isGeminiNativeProvider(provider)) {
-      const geminiStream = requestBody?.stream === true
-        || normalizeText(requestBody?.stream).toLowerCase() === 'true';
-      return {
-        provider,
-        requestUrl: normalizeGeminiNativeApiBaseUrl(url, body?.model || config.AI_MODEL, { stream: geminiStream }),
-        requestBody: await buildGeminiNativeRequestBody(requestBody),
-        requestHeaders: internalRequestHeaders
-      };
-    }
     const shouldUseOpenAIPromptCache = Boolean(
       providerAllowsOpenAIPromptCache(provider)
       && requestBody
@@ -140,16 +113,10 @@ async function prepareRequest(url, body = {}) {
       if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
       else delete requestBody.reasoning_effort;
     }
-    const requestUrl = shouldPreferResponsesProtocol(provider, url, requestBody, body)
-      ? buildResponsesUrl(url)
-      : url;
-    const finalRequestBody = isResponsesUrl(requestUrl)
-      ? buildResponsesRequestBody(requestBody)
-      : (
-          /\/chat\/completions(?:\/)?$/i.test(String(requestUrl || '').trim()) && requestBodyLooksLikeChatCompletion(requestBody)
-            ? buildChatCompletionsRequestBody(requestBody)
-            : requestBody
-        );
+    const requestUrl = ensureOpenAICompatibleChatCompletionsUrl(url, body?.model || config.AI_MODEL);
+    const finalRequestBody = requestBodyLooksLikeChatCompletion(requestBody)
+      ? buildChatCompletionsRequestBody(requestBody)
+      : requestBody;
     return {
       provider,
       requestUrl,
@@ -285,18 +252,6 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
     if (config.ANTHROPIC_BETA) {
       headers['anthropic-beta'] = String(config.ANTHROPIC_BETA).trim();
     }
-    if (extraHeaders && typeof extraHeaders === 'object') {
-      Object.assign(headers, extraHeaders);
-    }
-    return normalizeProviderRequestHeaders(provider, headers) || {};
-  }
-
-  if (isGeminiNativeProvider(provider)) {
-    const headers = {
-      ...browserHeaders,
-      'x-goog-api-key': apiKey,
-      'Content-Type': 'application/json'
-    };
     if (extraHeaders && typeof extraHeaders === 'object') {
       Object.assign(headers, extraHeaders);
     }

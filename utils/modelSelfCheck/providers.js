@@ -57,7 +57,7 @@ function inferProviderFromExplicitEndpoint(apiBaseUrl = '') {
     return 'openai_compatible';
   }
   if (/\/messages$/i.test(normalized)) return 'anthropic';
-  if (/:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalized)) return 'gemini_native';
+  if (/:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalized)) return 'openai_compatible';
   return '';
 }
 

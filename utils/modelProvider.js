@@ -40,7 +40,6 @@ function getApiProvider(url, model = '', options = {}) {
   if (options && typeof options === 'object' && String(options.provider || '').trim()) {
     return normalizeApiProvider(options.provider);
   }
-  if (isGeminiModelName(model)) return 'gemini_native';
   if (options && typeof options === 'object' && options.preferUnifiedResponses === true) {
     if (isAnthropicApiBase(url)) return 'anthropic';
     const normalized = normalizeApiBaseUrl(url).toLowerCase();
@@ -63,7 +62,9 @@ function getApiProvider(url, model = '', options = {}) {
 function normalizeApiProvider(provider = '') {
   const normalized = String(provider || '').trim().toLowerCase();
   if (normalized === 'anthropic') return 'anthropic';
-  if (normalized === 'gemini_native' || normalized === 'gemini' || normalized === 'google_gemini') return 'gemini_native';
+  if (normalized === 'gemini_native' || normalized === 'gemini' || normalized === 'google_gemini') {
+    return 'openai_compatible';
+  }
   return 'openai_compatible';
 }
 
@@ -75,8 +76,57 @@ function isAnthropicProvider(provider = '') {
   return normalizeApiProvider(provider) === 'anthropic';
 }
 
-function isGeminiNativeProvider(provider = '') {
-  return normalizeApiProvider(provider) === 'gemini_native';
+function isGeminiNativeProvider() {
+  return false;
+}
+
+function ensureOpenAICompatibleChatCompletionsUrl(url, model = '') {
+  const raw = normalizeApiBaseUrl(url).replace(/\/+$/, '');
+  if (!raw) return raw;
+
+  const withoutQuery = raw.replace(/[?#].*$/, '');
+  if (/\/chat\/completions$/i.test(withoutQuery)) return withoutQuery;
+  if (/\/(?:responses|messages)$/i.test(withoutQuery)) {
+    return withoutQuery.replace(/\/(?:responses|messages)$/i, '/chat/completions');
+  }
+
+  const nativeBase = withoutQuery.replace(
+    /\/models\/[^/]+:(?:stream)?generatecontent$/i,
+    ''
+  );
+  if (nativeBase !== withoutQuery) {
+    return ensureOpenAICompatibleChatCompletionsUrl(nativeBase, model);
+  }
+
+  const modelPath = withoutQuery.replace(/\/models\/[^/]+$/i, '');
+  if (modelPath !== withoutQuery) {
+    return ensureOpenAICompatibleChatCompletionsUrl(modelPath, model);
+  }
+
+  try {
+    const parsed = new URL(withoutQuery);
+    const pathname = parsed.pathname.replace(/\/+$/, '');
+    const isGoogleGeminiApi = parsed.hostname.toLowerCase() === 'generativelanguage.googleapis.com';
+    if (isGoogleGeminiApi && /^\/v1beta(?:\/openai)?$/i.test(pathname)) {
+      parsed.pathname = '/v1beta/openai/chat/completions';
+      parsed.search = '';
+      return parsed.toString().replace(/\/$/, '');
+    }
+    if (/\/v\d+(?:beta)?$/i.test(pathname)) {
+      parsed.pathname = `${pathname}/chat/completions`;
+      parsed.search = '';
+      return parsed.toString().replace(/\/$/, '');
+    }
+    if (pathname === '') {
+      parsed.pathname = '/v1/chat/completions';
+      parsed.search = '';
+      return parsed.toString().replace(/\/$/, '');
+    }
+  } catch (_) {
+    return withoutQuery;
+  }
+
+  return withoutQuery;
 }
 
 const PROVIDER_HEADER_ALLOWLISTS = {
@@ -193,6 +243,7 @@ module.exports = {
   isOpenAICompatibleProvider,
   isAnthropicProvider,
   isGeminiNativeProvider,
+  ensureOpenAICompatibleChatCompletionsUrl,
   normalizeProviderRequestHeaders,
   ensureAnthropicMessagesUrl
 };

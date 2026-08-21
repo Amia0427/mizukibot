@@ -109,7 +109,7 @@ module.exports = (async () => {
     assert.strictEqual(preparedThirdPartyMessages.provider, 'anthropic');
     assert.strictEqual(preparedThirdPartyMessages.requestUrl, 'https://third-party.example/v1/messages');
 
-    const preparedGeminiNative = await httpClient.prepareRequest(
+    const preparedGeminiCompatible = await httpClient.prepareRequest(
       'https://generativelanguage.googleapis.com/v1beta',
       {
         model: 'gemini-3-pro-preview',
@@ -153,35 +153,30 @@ module.exports = (async () => {
         stream: false
       }
     );
-    assert.strictEqual(preparedGeminiNative.provider, 'gemini_native');
+    assert.strictEqual(preparedGeminiCompatible.provider, 'openai_compatible');
     assert.strictEqual(
-      preparedGeminiNative.requestUrl,
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent'
+      preparedGeminiCompatible.requestUrl,
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
     );
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestBody, 'messages'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestBody, 'prompt_cache_key'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestBody, 'prompt_cache_retention'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestBody, 'cache_control'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestBody.contents[0], 'cacheControl'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestBody.contents[0].parts[0], 'cache_control'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestBody.contents[0].parts[1], 'cache'));
-    assert.ok(preparedGeminiNative.requestBody.systemInstruction.parts[0].text.includes('[GeminiRuntimeAdapter]'));
-    assert.ok(preparedGeminiNative.requestBody.systemInstruction.parts[0].text.includes('fixture gemini prompt'));
-    assert.strictEqual(preparedGeminiNative.requestBody.tools[0].functionDeclarations[0].name, 'lookup');
+    assert.ok(Array.isArray(preparedGeminiCompatible.requestBody.messages));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiCompatible.requestBody, 'contents'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiCompatible.requestBody, 'systemInstruction'));
+    assert.ok(Object.prototype.hasOwnProperty.call(preparedGeminiCompatible.requestBody, 'prompt_cache_key'));
+    assert.ok(Object.prototype.hasOwnProperty.call(preparedGeminiCompatible.requestBody, 'prompt_cache_retention'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiCompatible.requestBody.messages[0].content[0], 'cache_control'));
     assert.ok(!Object.prototype.hasOwnProperty.call(
-      preparedGeminiNative.requestBody.tools[0].functionDeclarations[0],
+      preparedGeminiCompatible.requestBody.tools[0].function,
       'cache_control'
     ));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestHeaders || {}, 'Authorization'));
-    assert.ok(/^Mozilla\/5\.0/.test(preparedGeminiNative.requestHeaders['User-Agent']));
+    assert.strictEqual(preparedGeminiCompatible.requestHeaders.Authorization, 'Bearer bad');
+    assert.ok(/^Mozilla\/5\.0/.test(preparedGeminiCompatible.requestHeaders['User-Agent']));
     const geminiAxiosHeaders = httpClient.getAxiosOptions(
-      preparedGeminiNative.provider,
+      preparedGeminiCompatible.provider,
       'gemini-key',
       10000,
-      preparedGeminiNative.requestHeaders
+      preparedGeminiCompatible.requestHeaders
     ).headers;
     assert.strictEqual(geminiAxiosHeaders['sec-ch-ua-mobile'], '?0');
-    assert.strictEqual(preparedGeminiNative.requestHeaders['x-goog-api-key'], 'gemini-key');
 
     {
       process.env.ANTHROPIC_PROMPT_CACHE_TTL = '1h';
@@ -211,7 +206,7 @@ module.exports = (async () => {
       clearProjectCache();
     }
 
-    const preparedGeminiNativeStream = await httpClient.prepareRequest(
+    const preparedGeminiCompatibleStream = await httpClient.prepareRequest(
       'https://generativelanguage.googleapis.com/v1beta',
       {
         model: 'gemini-3-pro-preview',
@@ -220,10 +215,10 @@ module.exports = (async () => {
       }
     );
     assert.strictEqual(
-      preparedGeminiNativeStream.requestUrl,
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
+      preparedGeminiCompatibleStream.requestUrl,
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
     );
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNativeStream.requestBody, 'stream'));
+    assert.strictEqual(preparedGeminiCompatibleStream.requestBody.stream, true);
 
     clearProjectCache();
     const { buildBotDiaryQzoneImageHeaders } = require('../api/imageGeneration');
@@ -232,12 +227,14 @@ module.exports = (async () => {
       'https://generativelanguage.googleapis.com/v1beta',
       'gemini-3-pro-preview'
     );
-    assert.strictEqual(geminiImageHeaders['x-goog-api-key'], 'gemini-image-key');
-    assert.ok(!Object.prototype.hasOwnProperty.call(geminiImageHeaders, 'Authorization'));
-    assert.strictEqual(geminiImageHeaders['User-Agent'], false);
+    assert.strictEqual(geminiImageHeaders.Authorization, 'Bearer gemini-image-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(geminiImageHeaders, 'x-goog-api-key'));
+    assert.ok(/^Mozilla\/5\.0/.test(geminiImageHeaders['User-Agent']));
 
     const { drawBotDiaryQzonePicture } = require('../api/imageGeneration');
     let sentImageOptions = null;
+    let sentImageUrl = '';
+    let sentImageBody = null;
     const generatedImage = await drawBotDiaryQzonePicture('draw a cat', {
       buildProviderConfig: () => ({
         enabled: true,
@@ -246,7 +243,9 @@ module.exports = (async () => {
         apiKey: 'gemini-image-key'
       }),
       httpClient: {
-        async post(_url, _body, options = {}) {
+        async post(url, body, options = {}) {
+          sentImageUrl = url;
+          sentImageBody = body;
           sentImageOptions = options;
           return {
             data: {
@@ -265,9 +264,16 @@ module.exports = (async () => {
       }
     });
     assert.strictEqual(generatedImage, 'data:image/png;base64,aW1n');
-    assert.strictEqual(sentImageOptions.headers['x-goog-api-key'], 'gemini-image-key');
-    assert.ok(!Object.prototype.hasOwnProperty.call(sentImageOptions.headers, 'Authorization'));
-    assert.strictEqual(sentImageOptions.headers['User-Agent'], false);
+    assert.strictEqual(
+      sentImageUrl,
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+    );
+    assert.strictEqual(sentImageBody.model, 'gemini-3-pro-preview');
+    assert.ok(Array.isArray(sentImageBody.messages));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sentImageBody, 'contents'));
+    assert.strictEqual(sentImageOptions.headers.Authorization, 'Bearer gemini-image-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(sentImageOptions.headers, 'x-goog-api-key'));
+    assert.ok(/^Mozilla\/5\.0/.test(sentImageOptions.headers['User-Agent']));
 
     const openAIImageHeaders = buildBotDiaryQzoneImageHeaders(
       'openai-image-key',
@@ -363,21 +369,21 @@ module.exports = (async () => {
       stream: true,
       defaultMaxTokens: 200
     });
-    assert.strictEqual(geminiMain.provider, 'gemini_native');
-    assert.strictEqual(geminiMain.protocol, 'gemini_generate_content');
+    assert.strictEqual(geminiMain.provider, 'openai_compatible');
+    assert.strictEqual(geminiMain.protocol, 'chat_completions');
     assert.strictEqual(
       geminiMain.url,
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
     );
     assert.strictEqual(geminiMain.body.stream, true);
-    assert.strictEqual(geminiMain.body.__provider, 'gemini_native');
+    assert.strictEqual(geminiMain.body.__provider, 'openai_compatible');
     const preparedGeminiMain = await httpClient.prepareRequest(geminiMain.url, geminiMain.body);
     assert.strictEqual(
       preparedGeminiMain.requestUrl,
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
     );
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiMain.requestBody, 'stream'));
-    assert.strictEqual(preparedGeminiMain.requestBody.contents[0].parts[0].text, 'gemini main');
+    assert.strictEqual(preparedGeminiMain.requestBody.stream, true);
+    assert.strictEqual(preparedGeminiMain.requestBody.messages[0].content, 'gemini main');
 
     const explicitOpenAIWithGeminiModel = buildMainModelRequest({
       model: 'gemini-3-pro-preview',
@@ -391,6 +397,19 @@ module.exports = (async () => {
     });
     assert.strictEqual(explicitOpenAIWithGeminiModel.provider, 'openai_compatible');
     assert.strictEqual(explicitOpenAIWithGeminiModel.url, 'https://gateway.example/v1/chat/completions');
+
+    const responsesEndpoint = await httpClient.prepareRequest(
+      'https://gateway.example/v1/responses',
+      {
+        model: 'gemini-3-pro-preview',
+        input: 'responses must be normalized to chat completions',
+        stream: false
+      }
+    );
+    assert.strictEqual(responsesEndpoint.provider, 'openai_compatible');
+    assert.strictEqual(responsesEndpoint.requestUrl, 'https://gateway.example/v1/chat/completions');
+    assert.ok(Array.isArray(responsesEndpoint.requestBody.messages));
+    assert.strictEqual(responsesEndpoint.requestBody.messages[0].content, 'responses must be normalized to chat completions');
 
     delete process.env.MODEL_HTTP_USER_AGENT;
     delete process.env.MAIN_REPLY_USER_AGENT;

@@ -297,9 +297,10 @@ module.exports = (async () => {
   });
   assert.strictEqual(
     geminiStreamRequest.url,
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
+    'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
   );
   assert.strictEqual(geminiStreamRequest.body.stream, true);
+  assert.strictEqual(geminiStreamRequest.body.__provider, 'openai_compatible');
   assert.deepStrictEqual(geminiDeltas, [
     { delta: 'Gem', fullText: 'Gem' },
     { delta: 'ini', fullText: 'Gemini' }

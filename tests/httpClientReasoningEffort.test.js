@@ -33,8 +33,8 @@ module.exports = (async () => {
       stream: false
     });
     assert.strictEqual(openaiPrepared.provider, 'openai_compatible');
-    assert.strictEqual(openaiPrepared.requestUrl, 'https://example.com/v1/responses');
-    assert.deepStrictEqual(openaiPrepared.requestBody.reasoning, { effort: 'high' });
+    assert.strictEqual(openaiPrepared.requestUrl, 'https://example.com/v1/chat/completions');
+    assert.strictEqual(openaiPrepared.requestBody.reasoning_effort, 'high');
 
     const tracedPrepared = await httpClient.prepareRequest('https://example.com/v1/chat/completions', {
       model: 'gpt-5.4',
@@ -49,7 +49,7 @@ module.exports = (async () => {
     });
     assert.ok(!Object.prototype.hasOwnProperty.call(tracedPrepared.requestBody, '__trace'));
     assert.ok(!Object.prototype.hasOwnProperty.call(tracedPrepared.requestBody, '__timeoutMs'));
-    assert.strictEqual(tracedPrepared.requestUrl, 'https://example.com/v1/responses');
+    assert.strictEqual(tracedPrepared.requestUrl, 'https://example.com/v1/chat/completions');
 
     const disabledPrepared = await httpClient.prepareRequest('https://example.com/v1/chat/completions', {
       model: 'gpt-4o',
@@ -167,8 +167,8 @@ module.exports = (async () => {
       stream: false
     }, 0, 'test-key');
     assert.strictEqual(attemptCount, 2);
-    assert.deepStrictEqual(firstAttemptBody.reasoning, { effort: 'high' });
-    assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'reasoning'));
+    assert.strictEqual(firstAttemptBody.reasoning_effort, 'high');
+    assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'reasoning_effort'));
 
     attemptCount = 0;
     firstAttemptBody = null;

@@ -8,6 +8,8 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
+    process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+    process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     const httpClient = require('../api/httpClient');
 
     const prepared = await httpClient.prepareRequest('https://example.com/v1/chat/completions', {
@@ -42,10 +44,10 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(prepared.provider, 'openai_compatible');
-    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/responses');
-    assert.ok(Array.isArray(prepared.requestBody.input));
-    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody.input[0].content[0], 'cache_control'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody.input[1].content[0], 'cache_control'));
+    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/chat/completions');
+    assert.ok(Array.isArray(prepared.requestBody.messages));
+    assert.ok(Object.prototype.hasOwnProperty.call(prepared.requestBody.messages[0].content[0], 'cache_control'));
+    assert.ok(Object.prototype.hasOwnProperty.call(prepared.requestBody.messages[1].content[0], 'cache_control'));
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -68,13 +70,13 @@ module.exports = (async () => {
 
     await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
       model: 'gpt-4.1-mini',
-      input: prepared.requestBody.input,
+      messages: prepared.requestBody.messages,
       stream: false
     }, 0, 'test-key');
 
     assert.strictEqual(attemptCount, 1);
-    assert.ok(!Object.prototype.hasOwnProperty.call(firstAttemptBody.input[0].content[0], 'cache_control'));
-    assert.ok(!('cache_control' in firstAttemptBody.input[1].content[0]));
+    assert.ok(Object.prototype.hasOwnProperty.call(firstAttemptBody.messages[0].content[0], 'cache_control'));
+    assert.ok('cache_control' in firstAttemptBody.messages[1].content[0]);
 
     console.log('httpClientChatCompletionsPromptCache.test.js passed');
   } finally {

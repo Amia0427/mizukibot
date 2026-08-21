@@ -23,6 +23,8 @@ try {
   process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://example.com/admin-fallback/v1/messages';
   process.env.ADMIN_AI_FALLBACK_API_KEY = 'admin-fallback-key';
   process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED = 'false';
+  process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+  process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
   clearProjectCache();
 
   const {

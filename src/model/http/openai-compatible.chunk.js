@@ -333,7 +333,18 @@ function mapResponsesInputToChatMessages(input) {
 
 function buildChatCompletionsRequestBody(requestBody = {}) {
   const body = requestBody && typeof requestBody === 'object' ? { ...requestBody } : {};
-  if (Array.isArray(body.messages)) return body;
+  if (Array.isArray(body.messages)) {
+    delete body.contents;
+    delete body.systemInstruction;
+    delete body.system_instruction;
+    delete body.generationConfig;
+    delete body.generation_config;
+    delete body.toolConfig;
+    delete body.tool_config;
+    delete body.safetySettings;
+    delete body.safety_settings;
+    return body;
+  }
   const out = {
     model: body.model,
     messages: mapResponsesInputToChatMessages(body.input),
