@@ -1,6 +1,12 @@
 # Env Configuration
 
-更新时间：2026-08-06 23:26 +08:00
+更新时间：2026-08-21 21:03 +08:00
+
+## 管理员模型
+
+- `ADMIN_AI_MODEL=claude-opus-5`：管理员主回复模型。
+- `ADMIN_IMAGE_MODEL=claude-opus-5`：管理员多模态/图片理解模型；显式设置后优先于 `ADMIN_AI_MODEL`。
+- 验收（2026-08-21 21:07 +08:00）：配置解析、管理员主回复路由和管理员视觉路由均解析为 `claude-opus-5`；受控重启脚本报告主进程和 post-reply worker 健康；未修改 `prompts/admin.txt`。
 
 ## NapCat OneBot action
 

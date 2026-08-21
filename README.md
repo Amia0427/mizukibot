@@ -1,5 +1,10 @@
 # MizukiBot
 
+## 管理员模型切换 2026-08-21 21:03 +08:00
+
+- 管理员主回复和管理员多模态模型均已切换为 `claude-opus-5`，分别由 `ADMIN_AI_MODEL` 与 `ADMIN_IMAGE_MODEL` 控制；运行时仍沿用原管理员 API 端点和密钥。
+- 验收（2026-08-21 21:07 +08:00）：配置解析与管理员主回复、视觉路由探针均解析为 `claude-opus-5`；受控重启脚本报告主进程和 post-reply worker 健康；未修改 `prompts/admin.txt`，未推送远端。
+
 ## 安全加固 2026-08-20
 
 - 生产依赖已锁定到 `js-yaml 4.3.1`、`nodemailer 9.0.5`，MCP MemOS 包固定为 `1.1.2`，不再运行 `npx -y` 临时下载。
