@@ -67,6 +67,7 @@ function buildLearningMeta(job = {}) {
     jobId: normalizeText(job.jobId),
     routePolicyKey: normalizeText(job.routePolicyKey),
     topRouteType: normalizeText(job.topRouteType || routeMeta.topRouteType),
+    chatType: normalizeText(routeMeta.chatType || routeMeta.chat_type).toLowerCase(),
     sessionKey: normalizeText(job.sessionKey),
     groupId: normalizeText(routeMeta.groupId || routeMeta.group_id),
     sessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id || evidenceMeta.sourceSessionId),
@@ -106,6 +107,10 @@ async function processPostReplyJob(job = {}, deps = {}) {
     ...meta,
     postReplyMemoryMode: String(config.POST_REPLY_MEMORY_MODE || 'core').trim().toLowerCase() || 'core',
     learningIntent: meta.learningIntent,
+    conversationVariablesOnly: phase === 'core'
+      && meta.chatType === 'private'
+      && meta.topRouteType === 'direct_chat'
+      && meta.learningIntent !== 'explicit',
     throwOnError: true
   };
   const learningConversation = buildCoreLearningConversation(job);

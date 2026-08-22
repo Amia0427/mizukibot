@@ -104,5 +104,7 @@ module.exports = (async () => {
     await optimizePortraitImageSource('https://img.example/mizuki.png'),
     'https://img.example/mizuki.png'
   );
+  assert.strictEqual(normalizeStatusBarData({ snapshot: { character: { mood: 40 } } }).mood, '愉快');
+  assert.strictEqual(normalizeStatusBarData({ snapshot: { character: { mood: -40 } } }).mood, '低落');
   console.log('privateStatusBarTemplate.test.js passed');
 })();

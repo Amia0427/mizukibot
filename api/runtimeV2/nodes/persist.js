@@ -336,6 +336,7 @@ function createPersistNode(deps = {}) {
       || !postReplyUserCooldownMs
       || !lastPostReplyEnqueueAt
       || (now - lastPostReplyEnqueueAt) >= postReplyUserCooldownMs;
+    const routeMeta = normalizeObject(request.routeMeta, {});
     const routeGroupId = String(request.routeMeta?.groupId || request.routeMeta?.group_id || '').trim();
     const allowedPostReplyGroupIds = Array.isArray(config.POST_REPLY_WORKER_GROUP_IDS)
       ? config.POST_REPLY_WORKER_GROUP_IDS.map((item) => String(item || '').trim()).filter(Boolean)
@@ -351,8 +352,19 @@ function createPersistNode(deps = {}) {
       shouldAllowPostReplyForGroup
       || explicitPostReplyMemoryBypassGroup
     );
-    const shouldQueuePostReplyMemoryTasks = shouldRunGroupScopedPostReplyTasks
-      && (shouldLearn || shouldLearnSelfImprovementValue);
+    const routeChatType = String(routeMeta.chatType || routeMeta.chat_type || '').trim().toLowerCase();
+    const topRouteType = String(request.topRouteType || request.routeMeta?.topRouteType || '').trim().toLowerCase();
+    const shouldQueueConversationVariableTasks = Boolean(
+      config.CONVERSATION_VARIABLES_ENABLED !== false
+      && routeChatType === 'private'
+      && topRouteType === 'direct_chat'
+      && shouldLearn
+    );
+    const shouldRunPostReplyMemoryTasks = shouldRunGroupScopedPostReplyTasks || shouldQueueConversationVariableTasks;
+    const shouldQueuePostReplyMemoryTasks = shouldQueueConversationVariableTasks || (
+      shouldRunGroupScopedPostReplyTasks
+      && (shouldLearn || shouldLearnSelfImprovementValue)
+    );
     const shouldQueuePostReplyJournalTask = Boolean(shouldPersistJournal);
     const shouldEnqueuePostReplyJob = shouldPersistChatArtifacts
       && hasEnoughPostReplyContent
@@ -698,7 +710,7 @@ function createPersistNode(deps = {}) {
           finalReply,
           turns: [coreTurn],
           tasks: {
-            memoryLearning: shouldRunGroupScopedPostReplyTasks && shouldLearn,
+            memoryLearning: shouldRunPostReplyMemoryTasks && shouldLearn,
             selfImprovement: shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue,
             dailyJournal: shouldQueuePostReplyJournalTask
           }
@@ -722,7 +734,7 @@ function createPersistNode(deps = {}) {
                       sourceMessageIds: Array.from(new Set(normalizeArray(existingQueuedCoreJob.sourceMessageIds).concat(sourceMessageIds))),
                       tags: Array.from(new Set(normalizeArray(existingQueuedCoreJob.tags).concat(['runtime_v2_persist', 'core']))),
                       tasks: {
-                        memoryLearning: Boolean(existingQueuedCoreJob.tasks?.memoryLearning) || (shouldRunGroupScopedPostReplyTasks && shouldLearn),
+                        memoryLearning: Boolean(existingQueuedCoreJob.tasks?.memoryLearning) || (shouldRunPostReplyMemoryTasks && shouldLearn),
                         selfImprovement: Boolean(existingQueuedCoreJob.tasks?.selfImprovement) || (shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue),
                         dailyJournal: Boolean(existingQueuedCoreJob.tasks?.dailyJournal) || shouldQueuePostReplyJournalTask
                       },
@@ -763,7 +775,7 @@ function createPersistNode(deps = {}) {
                 mergeCount: 1,
                 availableAt: buildAggregateAvailableAt(coreTurn.createdAt, coreTurn.createdAt),
                 tasks: {
-                  memoryLearning: shouldRunGroupScopedPostReplyTasks && shouldLearn,
+                  memoryLearning: shouldRunPostReplyMemoryTasks && shouldLearn,
                   selfImprovement: shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue,
                   dailyJournal: shouldQueuePostReplyJournalTask
                 },

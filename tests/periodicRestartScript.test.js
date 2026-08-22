@@ -57,6 +57,8 @@ if (restartResult.error?.code === 'ENOENT' && process.platform !== 'win32') {
   assert.strictEqual(path.resolve(restartPlan.workingDirectory), root);
   assert.strictEqual(path.resolve(restartPlan.lockPath), path.join(root, '.mizukibot.lock'));
   assert.strictEqual(path.resolve(restartPlan.logPath), restartLog);
+  assert.strictEqual(path.resolve(restartPlan.stdoutLogPath), path.join(root, 'data', 'bot-runtime.out.log'));
+  assert.strictEqual(path.resolve(restartPlan.stderrLogPath), path.join(root, 'data', 'bot-runtime.err.log'));
   assert.match(restartResult.stdout, /Validation only; restart not executed/);
 
   const installScript = path.join(root, 'scripts', 'install-periodic-restart.ps1');

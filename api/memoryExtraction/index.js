@@ -679,6 +679,23 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
   const postReplyMemoryMode = resolvePostReplyMemoryMode(options);
   const learningIntent = resolveLearningIntent(options);
   if (postReplyMemoryMode === 'off') return;
+  if (options.conversationVariablesOnly === true) {
+    const affinityProposal = await extractAffinityProposal(userId, userText, botReply, options);
+    if (affinityProposal) {
+      applyAffinityProposal(userId, affinityProposal, {
+        eventKey: options.eventKey || options.turnId || options.jobId || options.postReplyJobId,
+        turnId: options.turnId || options.turnIds?.[options.turnIds.length - 1],
+        actorId: options.actorId,
+        userText,
+        assistantText: botReply,
+        routePolicyKey: options.routePolicyKey,
+        topRouteType: options.topRouteType,
+        groupId: options.groupId,
+        sessionId: options.sessionId
+      });
+    }
+    return;
+  }
   const participants = extractParticipantsFromText(userText, botReply, { ...options, userId });
   const entities = extractEntitiesFromConversation(userText, botReply);
   const relations = inferRelations(entities, participants);

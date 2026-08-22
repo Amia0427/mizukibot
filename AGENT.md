@@ -1,0 +1,1 @@
+任何情况下都不允许修改prompts\admin.txt

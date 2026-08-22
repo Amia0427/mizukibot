@@ -622,7 +622,7 @@ module.exports = (async () => {
       question: 'direct chat daily journal input',
       runtimeQuestionText: 'direct chat daily journal input',
       persistUserText: 'direct chat daily journal input',
-      routeMeta: {},
+      routeMeta: { chatType: 'private' },
       sessionKey: 's_direct',
       routePolicyKey: 'direct_chat/default',
       topRouteType: 'direct_chat'
@@ -636,11 +636,11 @@ module.exports = (async () => {
   });
   assert.ok(directChatQueuedJob, 'direct_chat should enqueue journal even without group allowlist');
   assert.strictEqual(directChatQueuedJob.tasks.dailyJournal, true);
-  assert.strictEqual(directChatQueuedJob.tasks.memoryLearning, false);
+  assert.strictEqual(directChatQueuedJob.tasks.memoryLearning, true);
   assert.strictEqual(directChatQueuedJob.tasks.selfImprovement, false);
   const directDecision = (directJournalResult.events || []).find((item) => item.type === 'persist_write_decision');
   assert.strictEqual(directDecision.shouldQueuePostReplyJournalTask, true);
-  assert.strictEqual(directDecision.shouldQueuePostReplyMemoryTasks, false);
+  assert.strictEqual(directDecision.shouldQueuePostReplyMemoryTasks, true);
 
   let aggregateEnqueueCount = 0;
   let aggregateMergeCount = 0;

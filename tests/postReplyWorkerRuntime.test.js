@@ -169,6 +169,25 @@ module.exports = (async () => {
 
     calls.length = 0;
     await processPostReplyJob({
+      userId: 'u_private',
+      question: 'private chat',
+      finalReply: 'private reply',
+      sessionKey: 'private-session',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        chatType: 'private',
+        sessionId: 'private-session'
+      },
+      jobId: 'private_variables_job',
+      tasks: { memoryLearning: true }
+    });
+    const privateMemoryCall = calls.find((item) => item.type === 'memory');
+    assert.ok(privateMemoryCall, 'private conversation variable learning should run');
+    assert.strictEqual(privateMemoryCall.options.conversationVariablesOnly, true);
+
+    calls.length = 0;
+    await processPostReplyJob({
       userId: 'u1',
       question: 'latest q',
       finalReply: 'latest r',

@@ -35,6 +35,7 @@ function emitEvents(events = [], request = {}) {
 function pickRouteMetaForPostReplyJob(routeMeta = {}) {
   const source = normalizeObject(routeMeta, {});
   return {
+    chatType: String(source.chatType || source.chat_type || '').trim().toLowerCase(),
     groupId: String(source.groupId || source.group_id || '').trim(),
     sessionId: String(source.sessionId || source.session_id || '').trim(),
     taskType: String(source.taskType || source.task_type || '').trim(),
