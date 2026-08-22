@@ -22,6 +22,7 @@
 !index.js
 !package.json
 !package-lock.json
+!requirements-pjsk.txt
 !.env.example
 !.env.skills.example
 
