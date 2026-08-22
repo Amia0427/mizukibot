@@ -103,7 +103,8 @@ function normalizeWarning(raw = {}, locationId = '') {
 
 function isWarningActive(warning = {}, now = Date.now()) {
   const status = normalizeText(warning.status);
-  if (/(解除|取消|失效|结束)/u.test(status)) return false;
+  const messageType = normalizeText(warning.messageType?.code || warning.raw?.messageType?.code).toLowerCase();
+  if (messageType === 'cancel' || /(解除|取消|失效|结束)/u.test(`${status} ${warning.title || ''} ${warning.text || ''}`)) return false;
   const endAt = Date.parse(normalizeText(warning.endTime));
   return !Number.isFinite(endAt) || endAt > Number(now);
 }

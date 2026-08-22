@@ -64,6 +64,10 @@ module.exports = (async () => {
   assert.strictEqual(getWarningSeverityRank(warnings[0]), 2);
   assert.strictEqual(isWarningActive(warnings[0], Date.now()), true);
   assert.strictEqual(isWarningActive({ status: '预警解除' }, Date.now()), false);
+  assert.strictEqual(isWarningActive({
+    endTime: '2099-08-07T12:00:00+08:00',
+    raw: { messageType: { code: 'cancel' } }
+  }, Date.now()), false);
 
   assert.ok(requests.every((request) => request.options.headers['X-QW-Api-Key'] === 'test-key'));
   assert.strictEqual(requests[0].options.params.location, '北京市朝阳区');

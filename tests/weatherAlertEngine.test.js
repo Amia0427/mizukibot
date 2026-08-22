@@ -102,6 +102,21 @@ module.exports = (async () => {
   await engine.scan({ now: nowValue + 20 * 60 * 1000 });
   assert.strictEqual(calls.sent.length, 0, '缺少“橙色”关键事实的模型输出不得发送');
 
+  activeWarnings['loc-a'] = [warning({
+    title: '测试区暴雨预警解除',
+    text: '测试区暴雨预警解除。',
+    endTime: '2099-08-07T12:00:00+08:00',
+    raw: { messageType: { code: 'cancel' }, text: '测试区暴雨预警解除。' }
+  })];
+  calls.model.splice(0);
+  calls.sent.splice(0);
+  await engine.scan({ now: nowValue + 25 * 60 * 1000 });
+  assert.strictEqual(calls.model.length, 0, '解除记录不得调用模型');
+  assert.strictEqual(calls.sent.length, 0, '解除记录不得发送消息');
+  assert.ok(Object.values(stateStore.getPrincipal('person-a').alerts)
+    .filter((item) => item.locationId === 'loc-a')
+    .every((item) => item.active === false));
+
   activeWarnings = {};
   nowValue += 20 * 60 * 1000;
   await engine.scan({ now: nowValue });

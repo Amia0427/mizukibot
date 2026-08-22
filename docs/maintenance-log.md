@@ -2087,3 +2087,8 @@
 - 根因：Runtime V2 canonical 顺序将 `current_user_turn` 放在 `daily_journal`、`tool_evidence` 之前；记忆块使用 `assistant` 角色注入，普通用户请求因此可能以 assistant 消息结束，被 `superapi.buzz` 返回 HTTP 400。
 - 修复：将 `current_user_turn` 调整到 canonical 分段末尾；上下文内容、模型配置、endpoint、工具循环和管理员提示词均未修改。
 - 验收：`runtimeV2MainReplyMemoryOrder`、`runtimeStreamingCoordinator`、`contextCompaction`、`reactAgentLoop` 定向测试通过；本地工作区其他未提交改动未纳入本次修复。
+## 运行维护 2026-08-22 18:28 +08:00
+
+- 根因：和风解除记录使用 `raw.messageType.code=cancel` 标识，原有效性判断只检查状态字段，可能把结束时间尚未到期的解除记录当成新的预警投递。
+- 修复：天气预警统一有效性判断识别 `cancel` 和解除文本；解除记录只落盘为非活动状态，不进入模型调用、消息发送或助手气泡追加。
+- 验收（2026-08-22 18:34 +08:00）：`weatherAlertProvider.test.js`、`weatherAlertEngine.test.js`、天气预警专项测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过；完整 `npm test` 有 644 个测试文件通过，另有既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js`、`promptCheckGovernance.test.js` 因用户文件 `prompts/ADULT.txt` 未被提示词清单引用而失败，本次未修改该文件；重启后 `/live`、`/ready` 均返回 HTTP 200。
