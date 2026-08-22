@@ -89,6 +89,22 @@ git diff --check
 
 ## 本次验收记录
 
+### 服务器部署验收（2026-08-22 15:00 +08:00）
+
+部署基准为本地 `amia/dev` 分支提交 `11c9ed0a`；服务运行于服务器 `/opt/mizukibot-870cd207` 的独立 Docker Compose 项目和数据卷。部署使用 Git 提交归档，未携带本地 `.env`、密钥、数据库、日志、上传文件、缓存、依赖目录或运行数据；服务器端配置和占位 persona 单独生成。
+
+| 验收项 | 实际结果 |
+| --- | --- |
+| `docker compose build --pull=false` | 通过；Node 依赖与锁定 PJSK wheel 安装成功 |
+| `docker compose up -d` | 通过；主服务和 post-reply worker 均启动 |
+| `curl http://127.0.0.1:3005/live` | HTTP 200，`{"ok":true}` |
+| `curl http://127.0.0.1:3005/ready` | HTTP 200，`{"ok":true}` |
+| worker readiness healthcheck | 通过，`stage=ready` |
+| 容器安全基线 | `user=node`、只读根、`cap_drop=ALL`、`no-new-privileges:true` |
+| 监听边界 | 3002/3005 仅绑定服务器 `127.0.0.1` |
+
+本次仅为部署所需的 Docker 构建上下文修复和文档更新，未修改业务逻辑、未推送远端。
+
 完成时间：2026-07-31 02:15 +08:00；主提交：`1674530`。
 
 | 命令 | 实际结果 |

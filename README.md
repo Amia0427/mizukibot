@@ -1,5 +1,13 @@
 # MizukiBot
 
+## 服务器部署验收（2026-08-22 15:00 +08:00）
+
+- 部署基准：本地分支 `amia/dev` 最新提交 `11c9ed0a`（随后仅追加本次部署文档更新）。
+- 服务器目录：`/opt/mizukibot-870cd207`；使用 Docker Compose 独立数据卷，未复用服务器其他项目的数据或容器。
+- 隐私边界：部署包来自 Git 提交归档；未上传 `.env`、密钥、数据库、日志、上传文件、缓存、依赖目录或本地运行数据。服务器端 `.env`、Web/反向入口令牌和 persona 占位文件单独生成。
+- 实际验收：Docker 镜像构建成功；`mizukibot` 与 `post-reply-worker` 均 healthy；`/live`、`/ready` 返回 HTTP 200；3002/3005 仅绑定 `127.0.0.1`；两个容器均为 `node` 用户、只读根文件系统、`cap_drop=ALL`、`no-new-privileges=true`。
+- 本次未推送远端仓库；未修改业务逻辑。
+
 ## 普通用户请求消息尾部修复 2026-08-21 21:58 +08:00
 
 - 修复 Runtime V2 主回复上下文中记忆/工具证据位于当前用户轮次之后的问题；canonical 消息顺序现在保证当前用户消息为最后一条，避免 OpenAI-compatible 网关返回“Requests ending with a model turn are not supported.”。
