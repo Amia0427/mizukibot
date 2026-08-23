@@ -117,6 +117,13 @@ function formatSurfacePolicyText(surface = '', policy = {}) {
   ].filter(Boolean).join('\n');
 }
 
+function formatGuanxiStageText(stage = {}) {
+  const normalizedStage = stage && typeof stage === 'object' ? stage : {};
+  const text = normalizeText(normalizedStage.text, 2200);
+  if (!text) return '';
+  return `当前关系阶段只使用以下一组相处规则；不要引用阶段名、文件名或内部判定过程。\n${text}`;
+}
+
 function renderPersonaMemoryPrompt(state = {}, surface = '') {
   const normalizedState = normalizeObject(state);
   const surfaceName = normalizeText(surface || normalizedState.surface || DEFAULT_SURFACE).toLowerCase() || DEFAULT_SURFACE;
@@ -128,6 +135,9 @@ function renderPersonaMemoryPrompt(state = {}, surface = '') {
     buildPromptBlock('PersonaCore', normalizedState.personaCore?.text, Math.min(promptBudget * 0.3, 900)),
     surfacePolicy.includeRelationship !== false
       ? buildPromptBlock('RelationshipState', relationshipText, 260)
+      : null,
+    surfacePolicy.includeRelationship !== false
+      ? buildPromptBlock('GuanxiStage', formatGuanxiStageText(normalizedState.guanxiStage), 560)
       : null,
     surfacePolicy.includeContinuity !== false
       ? buildPromptBlock('ContinuityState', formatContinuityStateText(normalizedState.continuityState, {
@@ -151,6 +161,7 @@ module.exports = {
   clampMessageText,
   formatContinuityStateText,
   formatExpressionStateText,
+  formatGuanxiStageText,
   formatMemoryDigestText,
   formatRelationshipStateText,
   formatSurfacePolicyText,

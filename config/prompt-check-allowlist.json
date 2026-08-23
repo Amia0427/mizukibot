@@ -114,6 +114,18 @@
       ],
       "reason": "These templates are loaded by dedicated runtime components and intentionally remain outside the main prompt manifest.",
       "review_by": "2027-01-31"
+    },
+    {
+      "id": "guanxi_stage_prompts",
+      "paths": [
+        "guanxi/01.txt",
+        "guanxi/02.txt",
+        "guanxi/03.txt",
+        "guanxi/04.txt",
+        "guanxi/05.txt"
+      ],
+      "reason": "These stage rules are selected per user relationship snapshot by the guanxi runtime loader and are not loaded as a full prompt bundle.",
+      "review_by": "2027-01-31"
     }
   ],
   "conflict_tag_reuse": [

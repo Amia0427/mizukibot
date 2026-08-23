@@ -23,6 +23,7 @@
     "prompts/persona_modules/",
     "prompts/persona_worldbook/",
     "prompts/main-reply/",
+    "prompts/guanxi/",
     "prompts/runtime/",
     "scripts/",
     "src/",

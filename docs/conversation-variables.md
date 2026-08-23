@@ -1,6 +1,6 @@
 # 对话变量系统
 
-更新 2026-08-08 14:17 +08:00。
+更新 2026-08-23 23:40 +08:00。
 
 对话变量由 `utils/conversationVariables/` 统一管理，SQLite 是当前真值。关系按用户隔离，角色的情绪、精力、压力和社交意愿使用全局状态；`favorites.json` 只作为一次性迁移输入、历史备份和故障回退，不再作为正常主读写。
 
@@ -11,6 +11,16 @@
 - `variable_overrides` 保存管理员覆盖值、锁定状态、原因、操作者和时间。
 - 关系阶段由好感、信任和熟悉度加权推导，普通用户最高为“亲密伙伴”；模型不能直接写入阶段。
 - 只有高置信度、带明确理由且属于越界、欺骗或持续伤害的提案允许关系负向变化。沉默不降低关系；短期角色状态线性回归固定基线：情绪 0、精力 60、压力 20、社交意愿 60。
+
+## 瑞希关系阶段提示词
+
+正常主回复会在每次请求读取当前用户的关系快照，并只注入一份对应阶段规则：`stranger` 使用 `prompts/guanxi/01.txt`，`acquaintance` 使用 `02.txt`，`friend` 使用 `03.txt`，`close` 使用 `04.txt`，`intimate_companion` 使用 `05.txt`。阶段内容通过动态 persona 状态注入，不进入稳定 system 前缀，也不会把五个阶段全部堆入同一次请求。
+
+阶段推进仍沿用好感、信任和熟悉度的现有综合判定；累计有效对话轮次、连续互动天数、认真回应创作、接住低落情绪、记住细节和耐心回应试探性开口只作为阶段规则中的软行为建议，没有新增独立计数变量。阶段五的坦白以现有信任度和熟悉度作为“已形成信任”的代理条件，不因单个数字或一次追问自动解锁。
+
+阶段一、二不主动铺垫家人或核心心事；阶段三开始可用“25时最初靠声音认识彼此”的设定作暗线，阶段四允许触及家庭期待与真实自我的落差，阶段五强调“不用伪装也会被喜欢”带来的确认感。管理员、被动群回复、日记和工具专用提示词不注入该阶段块。
+
+验收记录（2026-08-23 23:58 +08:00）：`node scripts/run-tests.js tests/guanxiPrompt.test.js tests/personaMemoryState.test.js tests/normalFastReplyRuntime.test.js tests/runtimeContextModuleBoundary.test.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。`node scripts/check-prompts.js` 已确认五个 `guanxi` 资产进入治理枚举，但仍被仓库原有 `prompts/ADULT.txt` 未登记阻塞；该无关资产未在本次修改。
 
 ## 运行入口
 

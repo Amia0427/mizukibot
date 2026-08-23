@@ -45,6 +45,7 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'memoryV3RelationshipFacet.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3StyleFacet.test.js'),
   path.join(__dirname, '..', 'tests', 'personaMemoryState.test.js'),
+  path.join(__dirname, '..', 'tests', 'guanxiPrompt.test.js'),
   path.join(__dirname, '..', 'tests', 'personaMemoryPersistNode.test.js'),
   path.join(__dirname, '..', 'tests', 'localKnowledge.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3IdentityFacet.test.js'),

@@ -38,6 +38,13 @@
 - `/create <提示词>` 支持群聊和私聊调用；管理员、`CREATE_AGENT_ALLOW_USER_IDS` 用户直接允许，其他用户在 `relationship.affection >= CREATE_AGENT_AFFECTION_THRESHOLD`（默认 `30`）后开放。
 - 好感度只控制授权，不绕过生图开关、provider 鉴权、额度和并发限制；普通私聊与其他命令仍使用原有白名单。
 
+## 好感度阶段提示词 2026-08-23 +08:00
+
+- 正常私聊、群聊点名主回复和正式主回复链路会按当前关系阶段只注入一份 `prompts/guanxi/01.txt`–`05.txt` 规则；关系阶段变化会进入 session prompt cache fingerprint，下一轮实时切换。
+- 阶段映射沿用 `conversationVariables` 的 `stranger`、`acquaintance`、`friend`、`close`、`intimate_companion`，不新增轮次、连续天数或行为标记变量；行为建议只作为模型理解关系过渡的软约束。
+- 阶段一、二不主动铺垫核心心事或家人；阶段三之后可反复呼应“25时靠声音认识彼此”的暗线；阶段五的核心心事仍以现有信任度和熟悉度作为信任代理，不因数值到达自动解锁。
+- 验收（2026-08-23 23:58 +08:00）：阶段选择器、正式/快速主回复、管理员与非主回复链路测试通过，`npm run lint`、`npm run typecheck`、`git diff --check` 通过；`check-prompts` 仅受仓库原有 `prompts/ADULT.txt` 未纳入治理清单阻塞，本次未修改该无关文件；未修改 `prompts/admin.txt`，未推送远端。
+
 ## 主回复提示词运行时重构 2026-08-17
 
 - 主回复提示词已统一走“注册表 -> 计划解析 -> 编译”链路：`utils/promptManifest.js` 负责模块校验，`utils/promptPlan.js` 负责启用条件与稳定排序，`utils/promptCompiler.js` 负责渲染、预算裁剪和诊断。

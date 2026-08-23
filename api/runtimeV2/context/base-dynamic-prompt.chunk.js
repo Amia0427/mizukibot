@@ -115,7 +115,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       chatHistory: options.chatHistory,
       personaModules: dynamicPromptPlan.personaModules,
       sharedShortTermContext,
-      memoryContext
+      memoryContext,
+      isAdmin: adminPromptContext || options.isAdmin === true || routeMeta.isAdmin === true,
+      promptsDir: options.promptsDir
     });
   const personaMemoryPrompt = promptMaterials?.personaMemoryPrompt && typeof promptMaterials.personaMemoryPrompt === 'object'
     ? promptMaterials.personaMemoryPrompt
@@ -357,6 +359,23 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       ))
       .filter(Boolean)
   );
+  const guanxiStagePromptText = personaMemoryPrompt.systemMessages
+    .map((message) => String(message?.content || '').trim())
+    .find((content) => content.startsWith('[GuanxiStage]')) || '';
+  if (guanxiStagePromptText) {
+    promptBlocks.push(createPromptBlock('guanxi_stage', 'Guanxi Stage', guanxiStagePromptText, {
+      stage: 'main',
+      priority: 362,
+      authority: 'persona_memory',
+      kind: 'guanxi_stage',
+      source: 'guanxi_runtime',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        blockId: 'guanxi_stage'
+      }
+    }));
+  }
   promptBlocks.push(createPromptBlock('retrieved_memory_lite', 'Retrieved Memory Lite', `[RetrievedMemoryLite] ${memoryContext.memoryForPrompt || 'none'}`, {
     stage: 'main',
     priority: 260,
@@ -678,6 +697,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   if (geminiRecentStyleGuardText) {
     baseRuntimeAddedIds.push('gemini_recent_style_guard');
   }
+  if (guanxiStagePromptText) {
+    baseRuntimeAddedIds.push('guanxi_stage');
+  }
   if (isBalancedOrMinimalPromptMode(mainReplyPromptMode) && includeOptionalContextBlocks && shortTermContinuityText) {
     baseRuntimeAddedIds.push('short_term_continuity');
   }
@@ -788,6 +810,20 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           lane: 'dynamic_context',
           meta: {
             optional: true
+          }
+        })
+      ],
+      [
+        createPromptBlock('guanxi_stage', 'Guanxi Stage', guanxiStagePromptText, {
+          stage: 'main',
+          priority: 362,
+          authority: 'persona_memory',
+          kind: 'guanxi_stage',
+          source: 'guanxi_runtime',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true,
+            blockId: 'guanxi_stage'
           }
         })
       ],

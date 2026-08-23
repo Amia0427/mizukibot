@@ -41,8 +41,9 @@ const {
   recordPersonaMemoryOutcome
 } = require('./outcomeRecorder');
 const { buildContinuityCandidates } = require('./continuityCandidates');
+const { loadGuanxiStagePrompt, shouldInjectGuanxiPrompt } = require('../guanxiPrompt');
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 
 function buildMemoryContext(...args) {
   return require('../memoryContext').buildMemoryContext(...args);
@@ -170,6 +171,13 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     : getUserAffinityState(userId);
   const variableSnapshot = conversationVariables.isEnabled()
     ? conversationVariables.getSnapshot({ userId })
+    : null;
+  const guanxiStage = variableSnapshot
+    && shouldInjectGuanxiPrompt({
+      surface,
+      isAdmin: options.isAdmin === true || routeMeta.isAdmin === true
+    })
+    ? loadGuanxiStagePrompt(variableSnapshot, { promptsDir: options.promptsDir })
     : null;
   const profile = getUserProfile(userId) || {};
   const relationshipState = buildRelationshipState({
@@ -359,6 +367,7 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     variablePromptContext: variableSnapshot
       ? conversationVariables.buildVariablePromptContext(variableSnapshot)
       : '',
+    guanxiStage,
     relationshipState,
     continuityState,
     expressionState,

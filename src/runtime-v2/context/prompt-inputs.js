@@ -189,7 +189,9 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
         chatHistory: options.chatHistory,
         personaModules: dynamicPromptPlan.personaModules,
         sharedShortTermContext,
-        memoryContext
+        memoryContext,
+        isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
+        promptsDir: options.promptsDir
       }), {
         category: 'collect',
         source: 'utils/personaMemoryState.composePersonaMemoryState',

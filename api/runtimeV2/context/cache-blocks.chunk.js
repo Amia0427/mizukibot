@@ -31,6 +31,7 @@ function buildSessionCacheFingerprint(userInfo = {}, promptMaterials = {}) {
   return hashText([
     normalizeText(userInfo?.level || ''),
     String(Number(userInfo?.points || affinity?.points || 0) || 0),
+    normalizeText(promptMaterials?.personaMemoryState?.guanxiStage?.stage),
     normalizeText(promptMaterials?.memosRecallText),
     normalizeText(promptMaterials?.openVikingRecallText || promptMaterials?.openvikingRecallText)
   ].join('|'));

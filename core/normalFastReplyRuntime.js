@@ -20,6 +20,8 @@ const {
   protectFinalOutput,
   wrapUntrustedPromptContent
 } = require('../utils/promptSecurity');
+const { loadGuanxiStagePrompt, shouldInjectGuanxiPrompt } = require('../utils/guanxiPrompt');
+const conversationVariables = require('../utils/conversationVariables');
 
 const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE = 2;
 const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST = 100;
@@ -420,12 +422,28 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
     .map((block) => mapPromptBlockToMessage(block).content)
     .filter(Boolean)
     .join('\n');
+  const isAdmin = routeMeta.isAdmin === true || (Array.isArray(runtimeConfig.ADMIN_USER_IDS) ? runtimeConfig.ADMIN_USER_IDS : [])
+    .map((item) => normalizeText(item))
+    .includes(userId);
+  const surface = routeMeta.groupId || routeMeta.group_id ? 'group_direct_chat' : 'private_chat';
+  const variableSnapshot = !isAdmin && shouldInjectGuanxiPrompt({ surface, isAdmin })
+    ? conversationVariables.getSnapshot({ userId })
+    : null;
+  const guanxiStage = variableSnapshot
+    ? loadGuanxiStagePrompt(variableSnapshot, {
+      promptsDir: deps.promptsDir || input.promptsDir || runtimeConfig.PROMPTS_DIR
+    })
+    : null;
+  const guanxiPrompt = guanxiStage
+    ? `当前关系阶段只使用以下一组相处规则；不要引用阶段名、文件名或内部判定过程。\n${guanxiStage.text}`
+    : '';
   const systemParts = [
     stableSystemPrompt,
     '你是 Mizuki。当前走普通用户快速回复链路。',
     '只根据用户本轮消息和下方轻量上下文自然回复；不要声称查了记忆、网页或工具。',
     '如果用户本轮是在评价、纠正或吐槽“你刚才/后面几段/上一条回复”，优先锚定最近一条 assistant 历史回复来接话。',
     '回答保持简洁、直接、像日常聊天；信息不足时先说明不确定。',
+    guanxiPrompt,
     fastPersonaModules.prompt,
     fastWorldbookModules.prompt
   ];

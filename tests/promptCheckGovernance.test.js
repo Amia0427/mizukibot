@@ -134,7 +134,7 @@ const currentGovernance = evaluatePromptGovernance({
   today: '2026-07-12'
 });
 assert.deepStrictEqual(currentGovernance.errors, [], 'the versioned allowlist must exactly match tracked repository assets');
-assert.strictEqual(currentGovernance.approvedAssetCount, 46);
+assert.strictEqual(currentGovernance.approvedAssetCount, 51);
 assert.strictEqual(currentGovernance.approvedConflictTagCount, 4);
 
 const packageAssets = collectPromptAssetPaths({
