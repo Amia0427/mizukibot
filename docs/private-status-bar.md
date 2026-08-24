@@ -1,6 +1,6 @@
 # QQ 私聊状态栏
 
-更新时间：2026-08-17 10:02 +08:00
+更新时间：2026-08-24 09:26 +08:00
 
 ## 行为边界
 
@@ -29,6 +29,7 @@ PRIVATE_STATUS_BAR_IMAGE_URLS={"0":"D:/waifu/zhungtailan.jpg"}
 - `core/privateStatusBar/model.js` 只发送 `messages`，不发送工具 schema，要求 `response_format=json_object`，使用有限深度 JSON 解析和严格 zod Schema，只接受 `affection_note`、`mood_note`、`inner_thought` 三个字段。
 - `core/privateStatusBar/template.js` 使用参考图同构的 `960×640` 粉白手账模板：左侧人物相框、右侧好感度/心情/心里话三块信纸和左下小贴士。好感度进度条宽度由已校验的数值计算，时间使用 `TIMEZONE` 格式化为 `YYYY-MM-DD HH:mm`，所有动态文本统一 HTML 实体转义。
 - 模板不使用省略号或固定行数裁切动态字段；好感说明、心情说明、心里话和稳定态度按内容长度选择受控字号，三张右侧卡片的空间按真实字段上限分配。
+- 右侧三块面板为 8px 圆角加左侧 4px 色条（粉/珊瑚/藕），不再使用 dashed 内框；缎带、胶带、纸夹保留手账氛围，右下角剪刀装饰已移除。心情面板按 `mood` 取愉快/平静/低落三档心形符号与配色，稳定态度长文本在面板内流式排布为 11px，小贴士只保留日期与更新时间两行。
 - 独立模型严格输出 `{"affection_note":"...","mood_note":"...","inner_thought":"..."}`；好感度、关系等级、情绪、态度和时间仍来自主模型本轮快照。`PRIVATE_STATUS_BAR_IMAGE_URLS` 按好感度阈值选择本地图片或图床图片，本地文件在机器人进程内读取为内存图片，渲染器只接受调用方提供的受信任图片槽，不开放模型直接写入 `<img>`、文件路径或 URL。
 - `core/privateStatusBar/runtime.js` 在模型、输出守卫、敏感词审查、本机渲染和 QQ 图片发送之间编排 freshness 检查；任一步失败均静默降级且不使用固定心里话兜底。
 
@@ -44,3 +45,4 @@ PRIVATE_STATUS_BAR_IMAGE_URLS={"0":"D:/waifu/zhungtailan.jpg"}
 - 2026-08-12 16:26 +08:00：真实本地立绘和本机 HTML 端点生成 `artifacts/private-status-bar/runtime-verification.png`，PNG 为 `960×640`、245,005 字节，像素检查非空；视觉复检确认四块布局完整、文字无重叠，小贴士第三行裁切已修复。
 - 2026-08-12 16:30 +08:00：旧模型别名 `deepseek-v4-flash-free` 复现 HTTP 429 `FreeUsageLimitError`；端点模型列表中的正式 ID `deepseek-ai/DeepSeek-V4-Flash` 在 `max_tokens=25000` 下成功返回严格三字段 JSON。读取用户 `1960901788` 上次会话和真实变量快照执行完整链路，QQ 消息 ID `2130555069`，`get_msg` 回读为私聊单一图片段。
 - 2026-08-12 16:40 +08:00：最终代码重启后主进程 PID `27312`、post-reply worker PID `30280` 均健康。小目标已完成：普通 QQ 私聊回复不再因“路由允许工具但实际未调用”而漏发状态栏。
+- 2026-08-24 09:26 +08:00：模板视觉精修只改 `template.js` 样式层，未动 `runtime.js` 的文本上限与 `model.js` 的三字段 schema。改动包括底纸 `#f3e7e0` 与信纸 `#fffdfb` 拉开明度差、正文与标题加深、强调粉与进度条提饱和、面板 8px 圆角加左侧 4px 色条、删除 dashed 内框与剪刀装饰、心情三档心形配色、稳定态度长文本由 9.5px 绝对定位改为 11px 流式排布、小贴士删除写死文案后高度收到 112px。`privateStatusBarTemplate`、`privateStatusBarModel`、`privateStatusBarRuntime`、`runtimeStatusDiagnostics` 四项测试通过，`67.25 / 100`、`width:67.25%`、`960px/640px`、极限用例类名等硬断言均未破。真实 HTML 渲染端点生成三张 `960×640` PNG：`refresh-happy-natural.png` 220,751 字节、`refresh-calm-natural.png` 217,477 字节、`refresh-low-limit.png` 215,436 字节；对 80/80/120 字与 120 字稳定态度的极限组合裁剪心情面板复检，文字完整无截断、无溢出、无重叠。小目标已完成。
