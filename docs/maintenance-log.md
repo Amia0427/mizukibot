@@ -2092,3 +2092,12 @@
 - 根因：和风解除记录使用 `raw.messageType.code=cancel` 标识，原有效性判断只检查状态字段，可能把结束时间尚未到期的解除记录当成新的预警投递。
 - 修复：天气预警统一有效性判断识别 `cancel` 和解除文本；解除记录只落盘为非活动状态，不进入模型调用、消息发送或助手气泡追加。
 - 验收（2026-08-22 18:34 +08:00）：`weatherAlertProvider.test.js`、`weatherAlertEngine.test.js`、天气预警专项测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过；完整 `npm test` 有 644 个测试文件通过，另有既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js`、`promptCheckGovernance.test.js` 因用户文件 `prompts/ADULT.txt` 未被提示词清单引用而失败，本次未修改该文件；重启后 `/live`、`/ready` 均返回 HTTP 200。
+
+## 运行维护 2026-08-24 09:10 +08:00
+
+- 背景：`prompts/persona/*` 与 `prompts/admin.txt` 原本以禁令列举为主，缺少角色的行为动机、接话决策和跨轮状态延续，模型容易输出结构工整但没有人味的回复；`admin.txt` 还残留 `■` 双次输出与 `[ALREADY SKIPPED PREAMBLE.]` 前缀技巧，会浪费一次输出且有漏出风险。
+- 改动：persona 五个文件按既有分工各补一段驱动层——`01_identity.txt` 增「行为驱动」（想要/害怕/默认动作与每句话的取舍）、`04_behavior.txt` 增「接话前的判断」「接话方式的变化」「被推近核心时」（按远近分层的回避梯度）、`03_boundaries.txt` 增「出戏自检」、`02_style.txt` 增「句子该长成什么样」（把黑名单反面补成正面可执行要求）、`06_state_modulation.txt` 增「状态的连续性」（状态跨轮延续与转场规则）。`admin.txt` 重写为关系与场景、优先级、不要出戏、亲密与深度、输出形式五段，用角色内动机替代双次输出技巧，并保留 `只输出角色当下会打出的消息`、`避免第三人称叙述` 两个受测试约束的格式锚点。
+- 未改动：`prompt-manifest.json` 装配顺序、`config/promptRuntime.js` 加载逻辑、`SYSTEM.txt`、`defaut.txt`、`GEMINI.txt`、persona_modules 与 worldbook 内容、任何 JS 代码，均未调整。
+- 验收（2026-08-24 09:08 +08:00）：`node tests/configPersonaPrompt.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/promptGoldenSnapshots.test.js`、`node tests/promptCompiler.test.js`、`node tests/promptSecurity.test.js`、`node tests/promptLoader.test.js`、`node tests/personaModules.test.js` 全部通过。端到端组装校验：普通用户稳定块为 `root_system_prompt, security_contract, core_baseline_patch, main_persona_system`，管理员为 `admin_system_prompt` 置顶的同序五块；新增的七个 persona 锚点均进入两侧提示词，`admin.txt` 六个锚点只出现在管理员侧、未泄漏到普通用户侧，`■` 与 `ALREADY SKIPPED PREAMBLE` 已确认消失；`{{char}}指晓山瑞希`、`角色真实性`、`真人对话特征`、`客服式表达` 等原有测试锚点全部保留。系统提示词估算 5372 tokens（管理员侧渲染 6322），相对 400k 上下文占比可忽略。
+- 既有问题：`node scripts/check-prompts.js` 与 `tests/promptCheckGovernance.test.js` 仍因用户文件 `prompts/ADULT.txt` 未被提示词清单引用而失败，与本次改动无关，本次未修改该文件。
+- 说明：`prompts/admin.txt` 与 `prompts/persona/` 均在 `.gitignore` 中，属于部署方私有资产，不进入版本库；`prompts/admin.txt` 的只读属性已在写入后恢复。小目标已完成，未推送远端。

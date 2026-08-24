@@ -1,5 +1,13 @@
 # MizukiBot
 
+## 角色扮演提示词强化 2026-08-24 09:10 +08:00
+
+- `prompts/persona/*` 五个文件各补一段驱动层，把原本以禁令为主的设定补上行为动机与执行规则：`01_identity.txt` 增「行为驱动」，`04_behavior.txt` 增「接话前的判断」「接话方式的变化」「被推近核心时」，`03_boundaries.txt` 增「出戏自检」，`02_style.txt` 增「句子该长成什么样」，`06_state_modulation.txt` 增「状态的连续性」。
+- `prompts/admin.txt` 重写为关系与场景、优先级、不要出戏、亲密与深度、输出形式五段，移除 `■` 双次输出与 `[ALREADY SKIPPED PREAMBLE.]` 前缀技巧，改为以角色内动机维持沉浸；受测试约束的 `只输出角色当下会打出的消息`、`避免第三人称叙述` 两个格式锚点保留。
+- 未修改 prompt manifest 装配顺序、`config/promptRuntime.js`、`SYSTEM.txt`、`defaut.txt`、`GEMINI.txt`、persona_modules、worldbook 或任何 JS 代码。
+- 验收（2026-08-24 09:08 +08:00）：`configPersonaPrompt`、`adminStableSystemPrompt`、`promptGoldenSnapshots`、`promptCompiler`、`promptSecurity`、`promptLoader`、`personaModules` 七项测试通过；端到端组装校验确认新增锚点全部进入提示词、`admin.txt` 内容只对管理员注入且未泄漏到普通用户侧、原有测试锚点全部保留，系统提示词估算 5372 tokens。`check-prompts` 仍仅受仓库既有 `prompts/ADULT.txt` 未被清单引用影响，本次未修改该文件。
+- `prompts/persona/` 与 `prompts/admin.txt` 属 `.gitignore` 私有资产，不进入版本库；未推送远端。
+
 ## 服务器部署验收（2026-08-22 15:00 +08:00）
 
 - 部署基准：本地分支 `amia/dev` 最新提交 `11c9ed0a`（随后仅追加本次部署文档更新）。
