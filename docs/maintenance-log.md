@@ -1,3 +1,9 @@
+## 运行维护 2026-08-24 17:47 +08:00
+
+- 根因：同一私聊会话前一条图片问答仍在处理时，后续消息命中 `PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT=1` 进入队列；原 `PRIVATE_INBOUND_QUEUE_TIMEOUT_MS=20000` 早于前序请求释放，后续消息因 `queued request timed out after 20000ms` 未进入路由和模型。
+- 修复：实现提交 `eeb51ecb` 将私聊入站队列超时统一调整为 180 秒；多用户并行、同用户串行、队列容量与通用入站超时均未修改，本地 `.env` 已同步，重启后生效。
+- 验收：`privateChatConcurrencyConfig.test.js`、`concurrencyBackpressure.test.js`、`messageHandlerInboundConcurrency.test.js`、`messageHandlerPrivateConcurrencySource.test.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 均通过；测试运行日志确认私聊控制器使用 `queueTimeoutMs: 180000`。小目标已完成，未推送远端。
+
 ## 运行维护 2026-08-21 21:35 +08:00
 
 - 实现提交 `67607faf`：Gemini Native 协议已从生产请求边界移除；Gemini 模型、历史 provider 别名、旧 `generateContent`/`streamGenerateContent` URL 和 `/responses` URL 均归一到 OpenAI-compatible Chat Completions；Anthropic 继续使用 `/v1/messages`。

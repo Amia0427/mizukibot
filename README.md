@@ -540,6 +540,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-08-24 17:47 +08:00：实现提交 `eeb51ecb` 将私聊入站队列超时从 20 秒调整为 180 秒，避免同一用户前一条图片问答耗时较长时，后续消息在拿到会话锁前被丢弃；多用户并行、同用户串行和队列长度 10 的边界保持不变。验收结果：私聊并发配置、入站并发、私聊并发来源和背压回归通过，测试运行日志确认 `queueTimeoutMs=180000`；`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。小目标已完成。
+
 更新 2026-07-09 17:48 +08:00：修复主回复 prepare 软超时 fallback 在非召回 `chat/default/direct_chat` 下构造 ambient memory context 并注入 `retrieved_memory_lite/daily_journal` 的问题；非召回普通主回复不再构造 fallback memory context，显式召回保持原记忆 fallback。验收结果：`node scripts/run-tests.js tests/runtimeV2PromptTimeoutMemoryFallback.test.js tests/chatDefaultMemoryLeakDiagnostics.test.js tests/geminiSamplingDegradationPromptGate.test.js` 通过；真实 24h 诊断仍显示修复前日志中 `candidateChatDefaultRequests=49`、`violationRequests=15`。小目标已完成。
 
 更新 2026-07-09 17:45 +08:00：新增最小本地运行时热修复 smoke：`npm run smoke:runtime-hotfixes`。该入口只串今天 5 个运行时热修复的高价值回归，覆盖被动视觉探针 decision 408 兜底、post-reply 495 最终降级收尾、notebook-answer 工具后草稿失败 checkpoint 收口、NapCat 原始包日志/Memory V3 事件写盘降频，以及 post-reply worker 记忆写入和向量巡检不再常驻全量索引。验收结果：新增脚本清单回归先红后绿；`npm run smoke:runtime-hotfixes` 本地通过。小目标已完成。
