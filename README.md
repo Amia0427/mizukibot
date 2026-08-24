@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 私聊待跟进事项 2026-08-25 12:00 +08:00
+
+- 新增 `companion_followup` 私聊工具，用于记录用户明确提出的承诺或关心事项；支持查看未完成事项、标记完成、延期、放弃和删除。事项按用户隔离，状态保存于 `COMPANION_FOLLOWUP_STATE_FILE`，默认关闭群聊访问。
+- 主动私聊上下文会读取当前用户的未完成事项，并只把逾期状态作为模型参考；主动模型不得看到或输出事项内部 ID，也不会自动修改事项状态。新增、完成、延期、放弃和删除均通过现有工具授权确认链，`list` 为只读操作。
+- 验收（2026-08-25 12:00 +08:00）：`companionFollowup.test.js`、`companionFollowupIntegration.test.js`、`privateProactiveModelConfig.test.js`、`privateProactiveEngine.test.js`、`toolPolicyRuntimeEffects.test.js`、`toolPolicyCoverage.test.js` 全部通过；总工具注册表可取得 schema/executor，授权前新增事项未落盘。完整 lint、typecheck 和差异检查待本轮最终收口时复跑；未修改 `prompts/admin.txt`，未推送远端。
+
 ## 角色扮演提示词强化 2026-08-24 09:10 +08:00
 
 - `prompts/persona/*` 五个文件各补一段驱动层，把原本以禁令为主的设定补上行为动机与执行规则：`01_identity.txt` 增「行为驱动」，`04_behavior.txt` 增「接话前的判断」「接话方式的变化」「被推近核心时」，`03_boundaries.txt` 增「出戏自检」，`02_style.txt` 增「句子该长成什么样」，`06_state_modulation.txt` 增「状态的连续性」。

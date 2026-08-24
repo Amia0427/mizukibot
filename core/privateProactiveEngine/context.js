@@ -9,6 +9,7 @@ const {
 const { getRecentDailySummaries } = require('../../utils/dailyJournal');
 const { getSessionContextSummaryStoreSnapshot } = require('../../utils/sessionContextSummaryStore');
 const { resolveShortTermSessionKey } = require('../../utils/shortTermMemory');
+const { createCompanionFollowupService } = require('../../src/features/companion-followups');
 
 function clampText(value, maxChars) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -68,6 +69,7 @@ function buildLongTermMemory(userId) {
 
 function createPrivateProactiveContextProvider(options = {}) {
   const historyLimit = Math.max(1, Number(options.historyLimit || 16) || 16);
+  const followupService = options.followupService || createCompanionFollowupService(options);
   return async function buildPrivateProactiveContext(userId, userState, now = Date.now(), target = null) {
     const affinity = getUserAffinityState(userId) || {};
     const journal = getRecentDailySummaries(userId, 3);
@@ -83,6 +85,7 @@ function createPrivateProactiveContextProvider(options = {}) {
       longTermMemory: buildLongTermMemory(userId),
       dailyJournal: clampText(journal?.text, 1800),
       groupSummaries: getRecentGroupSummaries(userId, now, 2),
+      followUps: followupService.getContext(userId, now),
       proactiveNarratives: (Array.isArray(userState?.narratives) ? userState.narratives : [])
         .slice(-6)
         .map((item) => ({ at: Number(item.at || 0) || 0, messages: item.messages }))

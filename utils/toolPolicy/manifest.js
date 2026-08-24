@@ -252,6 +252,12 @@ TOOL_POLICIES.create_scheduled_command = createPolicy({
   effect: 'external_send',
   scope: 'group'
 });
+TOOL_POLICIES.companion_followup = createPolicy({
+  risk: 'medium',
+  capability: 'local_write',
+  effect: 'local_write',
+  scope: 'user'
+});
 TOOL_POLICIES.local_howtocook_recipe_search = createPolicy({
   risk: 'medium',
   capability: 'network',
@@ -339,6 +345,13 @@ function resolveToolPolicy(toolName, args = {}) {
       };
     }
     return { policy: { ...UNKNOWN_POLICY }, reason: 'unknown_action' };
+  }
+  if (name === 'companion_followup') {
+    return resolveActionPolicy(basePolicy, action, {
+      none: ['list'],
+      local_write: ['add', 'complete', 'snooze', 'abandon'],
+      destructive: ['delete']
+    });
   }
   return { policy: { ...basePolicy }, reason: '' };
 }

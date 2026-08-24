@@ -391,6 +391,37 @@ function normalizeQqActionArgs(toolName, args = {}) {
   return { ...args };
 }
 
+function normalizeCompanionFollowupArgs(args = {}) {
+  const action = String(args.action || '').trim().toLowerCase();
+  if (!new Set(['add', 'list', 'complete', 'snooze', 'abandon', 'delete']).has(action)) {
+    throw new Error('companion_followup action 无效');
+  }
+  const next = { action };
+  if (action === 'add') {
+    const title = String(args.title || '').trim();
+    if (!title) throw new Error('companion_followup add requires title');
+    if (title.length > 160) throw new Error('companion_followup title too long');
+    next.title = title;
+    next.note = String(args.note || '').trim().slice(0, 500);
+    next.due_at = String(args.due_at || args.dueAt || '').trim();
+    return next;
+  }
+  if (action === 'list') {
+    next.include_closed = Boolean(args.include_closed);
+    return next;
+  }
+  const id = String(args.id || '').trim();
+  if (!id || id.length > 80 || /[\r\n\u0000-\u001f]/.test(id)) {
+    throw new Error('companion_followup requires a valid id');
+  }
+  next.id = id;
+  if (action === 'snooze') {
+    next.due_at = String(args.due_at || args.dueAt || args.when || '').trim();
+    if (!next.due_at) throw new Error('companion_followup snooze requires due_at');
+  }
+  return next;
+}
+
 function enforceToolPolicy(toolName, args = {}, context = {}) {
   if (
     toolName === 'notebook_reindex_folder' ||
@@ -474,6 +505,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
     toolName === 'delete_scheduled_task'
   ) {
     return normalizeQqActionArgs(toolName, args);
+  }
+
+  if (toolName === 'companion_followup') {
+    return normalizeCompanionFollowupArgs(args);
   }
 
   if (toolName === 'skill_weather') {

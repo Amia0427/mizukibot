@@ -54,6 +54,7 @@ const { renderAndSendChart, shouldSendChartImage } = require('../../src/features
 const { getPjskRuntime, isPjskEnabled } = require('../../src/features/pjsk/runtime');
 const { GROUP_PRIVATE_ONLY_REPLY, formatSubscriptionResult } = require('../../src/features/weather-alerts/commands');
 const { getWeatherAlertRuntime } = require('../../src/features/weather-alerts/runtime');
+const { createCompanionFollowupService } = require('../../src/features/companion-followups');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -77,6 +78,10 @@ const nativeYoutube = createLazyModuleProxy('nativeYoutube', () => require('../s
 const nativePpt = createLazyModuleProxy('nativePpt', () => require('../skills_native/ppt'));
 const nativeImageGenerate = createLazyModuleProxy('nativeImageGenerate', () => require('../skills_native/imageGenerate'));
 const nativeSharedLink = createLazyModuleProxy('nativeSharedLink', () => require('../skills_native/sharedLink'));
+const companionFollowups = createLazyModuleProxy(
+  'companionFollowups',
+  () => createCompanionFollowupService({ config })
+);
 
 let cachedMemoryCliRunner = undefined;
 
@@ -547,6 +552,16 @@ const TOOL_EXECUTORS = {
     const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
     const result = deleteScheduledTask(args.job_id, context);
     return result.text;
+  },
+
+  companion_followup: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    if (String(context.chatType || '').trim().toLowerCase() !== 'private') {
+      return '待跟进事项只支持私聊。';
+    }
+    const userId = String(context.userId || '').trim();
+    if (!userId) throw new Error('companion_followup requires private userId');
+    return formatCompanionFollowupResult(companionFollowups.execute(userId, args));
   },
 
   notebook_append_journal: async (args = {}) => {
@@ -1093,6 +1108,29 @@ const TOOL_EXECUTORS = {
     return minecraftAgent.stop();
   }
 };
+
+function formatCompanionFollowupResult(result = {}) {
+  const action = String(result.action || '').trim();
+  if (action === 'add') {
+    const item = result.item || {};
+    return `已记录待跟进事项：${item.title}${item.dueAt ? `，时间：${item.dueAt}` : ''}\n事项 ID：${item.id}`;
+  }
+  if (action === 'list') {
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (items.length === 0) return '当前没有未完成的待跟进事项。';
+    return ['待跟进事项：', ...items.map((item) => (
+      `- [${item.id}] ${item.title}${item.dueAt ? `（${item.dueAt}）` : ''}${item.note ? `：${item.note}` : ''}`
+    ))].join('\n');
+  }
+  if (action === 'delete') return `已删除待跟进事项：${result.id}`;
+  const item = result.item || {};
+  const labels = {
+    complete: '已完成',
+    snooze: '已延期到',
+    abandon: '已放弃'
+  };
+  return `${labels[action] || '已更新'}：${item.title}${item.dueAt && action === 'snooze' ? `（${item.dueAt}）` : ''}`;
+}
 
 // -------------------------
 // 2) Tool Schema锛堢粰妯″瀷鐪嬬殑锛?

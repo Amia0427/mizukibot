@@ -1235,6 +1235,30 @@ const skillsAndIntegrationsToolSchemas = [
   {
     type: 'function',
     function: {
+      name: 'companion_followup',
+      description: '管理当前私聊用户的待跟进事项。可以记录约定、查看未完成事项、标记完成、延期、放弃或删除。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['add', 'list', 'complete', 'snooze', 'abandon', 'delete'],
+            description: '操作类型'
+          },
+          title: { type: 'string', description: '事项标题，add 时必填' },
+          note: { type: 'string', description: '事项补充说明，add 时可选' },
+          due_at: { type: 'string', description: '一次性时间，例如明天 20:00、2小时后或 2026-08-30 09:00' },
+          id: { type: 'string', description: '事项 ID，complete/snooze/abandon/delete 时必填' },
+          include_closed: { type: 'boolean', description: 'list 时是否包含已完成、已放弃事项' }
+        },
+        required: ['action']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_qzone_auto_task',
       description: 'Create a scheduled QZone agent task for the current group; the task may publish automatically when due',
       parameters: {

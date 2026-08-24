@@ -21,6 +21,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'notebook_list_docs',
   'notebook_append_journal',
   'notebook_read_recent_journal',
+  'companion_followup',
   'create_scheduled_command',
   'list_scheduled_tasks',
   'cancel_scheduled_task'
