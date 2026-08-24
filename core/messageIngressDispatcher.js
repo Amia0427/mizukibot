@@ -69,10 +69,12 @@ function createMessageIngressDispatcher(options = {}) {
   async function runItem(item) {
     active.add(item);
     try {
-      await handleMessage(item.msg, item.meta);
+      const result = await handleMessage(item.msg, item.meta);
       completed += 1;
+      item.resolve?.(result);
     } catch (error) {
       failed += 1;
+      item.reject?.(error);
       if (logger && typeof logger.error === 'function') {
         logger.error('[message-ingress] async job failed', {
           id: item.id,
@@ -96,7 +98,7 @@ function createMessageIngressDispatcher(options = {}) {
     resolveIdleWaiters();
   }
 
-  function enqueue(msg, meta = {}) {
+  function enqueueItem(msg, meta = {}, deferred = null) {
     if (!accepting) {
       dropped += 1;
       if (logger && typeof logger.warn === 'function') {
@@ -104,6 +106,9 @@ function createMessageIngressDispatcher(options = {}) {
           source: meta?.source || ''
         });
       }
+      deferred?.reject(Object.assign(new Error('message ingress dispatcher stopped'), {
+        code: 'MESSAGE_INGRESS_STOPPED'
+      }));
       return false;
     }
 
@@ -117,6 +122,9 @@ function createMessageIngressDispatcher(options = {}) {
           queued: queue.length
         });
       }
+      deferred?.reject(Object.assign(new Error('message ingress queue full'), {
+        code: 'MESSAGE_INGRESS_QUEUE_FULL'
+      }));
       return false;
     }
 
@@ -126,10 +134,27 @@ function createMessageIngressDispatcher(options = {}) {
       meta: {
         ...(meta && typeof meta === 'object' ? meta : {}),
         enqueuedAt: Date.now()
-      }
+      },
+      resolve: deferred?.resolve,
+      reject: deferred?.reject
     });
     scheduleDrain();
     return true;
+  }
+
+  function enqueue(msg, meta = {}) {
+    return enqueueItem(msg, meta);
+  }
+
+  function dispatch(msg, meta = {}) {
+    let resolve;
+    let reject;
+    const promise = new Promise((nextResolve, nextReject) => {
+      resolve = nextResolve;
+      reject = nextReject;
+    });
+    enqueueItem(msg, meta, { resolve, reject });
+    return promise;
   }
 
   function waitForIdle(timeoutMs = 0) {
@@ -153,6 +178,11 @@ function createMessageIngressDispatcher(options = {}) {
     accepting = false;
     if (options.drain === false) {
       dropped += queue.length;
+      for (const item of queue) {
+        item.reject?.(Object.assign(new Error('message ingress queue discarded'), {
+          code: 'MESSAGE_INGRESS_DISCARDED'
+        }));
+      }
       queue.length = 0;
       resolveIdleWaiters();
       return buildSnapshot();
@@ -162,6 +192,7 @@ function createMessageIngressDispatcher(options = {}) {
   }
 
   return {
+    dispatch,
     enqueue,
     stop,
     waitForIdle,

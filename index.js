@@ -32,6 +32,8 @@ const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
 const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTmpCleanup');
 const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer');
 const { createMessageIngressDispatcher } = require('./core/messageIngressDispatcher');
+const { createPrivateMessageRecoveryRuntime } = require('./core/privateMessageRecoveryRuntime');
+const { createPrivateMessageRecoveryStore } = require('./utils/privateMessageRecoveryStore');
 const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
 const { maybeSendRestartResultFeedback } = require('./utils/restartResultFeedback');
 const { flushAllHotStoresSync } = require('./utils/jsonHotStore');
@@ -71,6 +73,18 @@ let messageIngressDispatcher = null;
 let mainRuntimeHeartbeatTimer = null;
 const mainRuntimeStartedAt = new Date();
 const runtimeReadiness = createRuntimeReadiness();
+
+function readPreviousRuntimeCheckpointMs() {
+  try {
+    const state = JSON.parse(fs.readFileSync(RUNTIME_STATE_FILE, 'utf8'));
+    const timestamp = Date.parse(state.heartbeatAt || state.startedAt || '');
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+const previousRuntimeCheckpointMs = readPreviousRuntimeCheckpointMs();
 
 function configureNodeProcessReports() {
   try {
@@ -437,6 +451,9 @@ let dailyJournalSummaryStarted = false;
 let dailyJournalSummaryRuntime = null;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
+const privateMessageRecoveryStore = createPrivateMessageRecoveryStore({
+  filePath: config.PRIVATE_MESSAGE_RESTART_RECOVERY_STATE_FILE
+});
 const platformRuntime = createPlatformRuntime(config, { qqActionClient: napcatActionClient });
 const platformActionClient = platformRuntime.actionClient;
 setPlatformAdminResolver((userId) => platformRuntime.identityStore.isAdminPrincipal(userId));
@@ -542,16 +559,20 @@ messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
   })
   : null;
 
-async function acceptIncomingMessage(msg, source = '') {
+async function acceptIncomingMessage(msg, source = '', options = {}) {
   if (messageIngressDispatcher) {
-    messageIngressDispatcher.enqueue(msg, { source });
+    if (options.waitForCompletion && typeof messageIngressDispatcher.dispatch === 'function') {
+      await messageIngressDispatcher.dispatch(msg, { source });
+      return true;
+    }
+    if (messageIngressDispatcher.enqueue(msg, { source }) === false) return false;
     return true;
   }
   await platformMessageProcessor.run(msg, handleIncomingMessage);
   return true;
 }
 
-async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = prepareNapCatEventPacket) {
+async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = prepareNapCatEventPacket, options = {}) {
   if (maimaiCommandHandler.shouldHandle(msg?.raw_message)) {
     await maimaiCommandHandler.handle(msg);
     return false;
@@ -562,8 +583,7 @@ async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = pre
   const prepared = normalized
     ? mergeQqLegacyMessage(msg, platformRuntime.registry.prepareInbound(normalized))
     : msg;
-  await acceptIncomingMessage(prepared, source);
-  return true;
+  return acceptIncomingMessage(prepared, source, options);
 }
 const napcatLogFollower = createNapcatLogFollower({
   sendWithRetry,
@@ -582,6 +602,43 @@ const napcatLogFollower = createNapcatLogFollower({
     }
   }, retries, waitMs)
 });
+const privateMessageRecoveryRuntime = createPrivateMessageRecoveryRuntime({
+  store: privateMessageRecoveryStore,
+  actionClient: napcatActionClient,
+  botQq: config.BOT_QQ,
+  enabled: config.PRIVATE_MESSAGE_RESTART_RECOVERY_ENABLED,
+  maxLookbackMs: config.PRIVATE_MESSAGE_RESTART_RECOVERY_LOOKBACK_MS,
+  overlapMs: config.PRIVATE_MESSAGE_RESTART_RECOVERY_OVERLAP_MS,
+  recentContactLimit: config.PRIVATE_MESSAGE_RESTART_RECOVERY_CONTACT_LIMIT,
+  historyCount: config.PRIVATE_MESSAGE_RESTART_RECOVERY_HISTORY_COUNT,
+  dispatchMessage: (message) => acceptNapCatIncomingMessage(
+    message,
+    'napcat_restart_recovery',
+    prepareNapCatEventPacket,
+    { waitForCompletion: true }
+  )
+});
+let privateMessageRecoveryTimer = null;
+
+function schedulePrivateMessageRecovery(attempt = 1) {
+  if (!config.PRIVATE_MESSAGE_RESTART_RECOVERY_ENABLED || shuttingDown || privateMessageRecoveryTimer) return;
+  const delayMs = attempt === 1
+    ? 1000
+    : Math.min(5 * 60 * 1000, 5000 * (2 ** Math.min(attempt - 2, 6)));
+  privateMessageRecoveryTimer = setTimeout(() => {
+    privateMessageRecoveryTimer = null;
+    void privateMessageRecoveryRuntime.recover({
+      fallbackSinceMs: previousRuntimeCheckpointMs
+    }).catch((error) => {
+      console.warn('[private-message-recovery] failed; retry scheduled', {
+        attempt,
+        error: error?.message || error
+      });
+      schedulePrivateMessageRecovery(attempt + 1);
+    });
+  }, delayMs);
+  privateMessageRecoveryTimer.unref?.();
+}
 
 const schedulerRuntime = getSchedulerRuntime({
   sendGroupMessage: async (target, message, meta = {}) => {
@@ -761,11 +818,21 @@ function startNapCatTransport() {
   }
 
   httpReverseServer = startNapCatHttpReverseServer({
-    handleMessage: async (msg) => {
+    acceptMessage: config.PRIVATE_MESSAGE_RESTART_RECOVERY_ENABLED
+      ? (msg) => privateMessageRecoveryStore.claim(msg)
+      : undefined,
+    handleMessage: async (msg, acceptance) => {
       if (shuttingDown) return;
       try {
-        await acceptNapCatIncomingMessage(msg, 'napcat_http_reverse');
+        await acceptNapCatIncomingMessage(
+          msg,
+          'napcat_http_reverse',
+          prepareNapCatEventPacket,
+          { waitForCompletion: acceptance?.tracked === true }
+        );
+        if (acceptance?.tracked) privateMessageRecoveryStore.complete(msg);
       } catch (e) {
+        if (acceptance?.tracked) privateMessageRecoveryStore.fail(msg, e);
         console.error('[HTTP reverse message error]', e);
       }
     }
@@ -836,6 +903,13 @@ const mainProcessLifecycle = createMainProcessLifecycle({
     { name: 'tick', run: () => tickRuntime?.stop?.() },
     { name: 'daily_journal_summary', run: () => dailyJournalSummaryRuntime?.stop?.() },
     { name: 'napcat_follower', run: () => napcatLogFollower.stop() },
+    {
+      name: 'private_message_recovery',
+      run: () => {
+        if (privateMessageRecoveryTimer) clearTimeout(privateMessageRecoveryTimer);
+        privateMessageRecoveryTimer = null;
+      }
+    },
     { name: 'resource_snapshots', run: () => resourceSnapshotLoop?.stop?.() }
   ],
   drainWorkers: [
@@ -956,6 +1030,7 @@ async function startMainProcess() {
     waitForServerListening(httpReverseServer)
   ]);
   runtimeReadiness.markReady('startup_complete');
+  schedulePrivateMessageRecovery();
   scheduleRestartResultFeedback();
   recordMainRuntimeState('initialized', {
     mode: config.NAPCAT_HTTP_REVERSE_ENABLED === false ? 'disabled' : 'http_reverse'

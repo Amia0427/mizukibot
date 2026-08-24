@@ -137,6 +137,7 @@ function isValidEvent(payload) {
 
 function createNapCatHttpReverseServer(options = {}) {
   const handleMessage = options.handleMessage || (() => {});
+  const acceptMessage = options.acceptMessage || (() => ({ accepted: true }));
   const secret = String(options.secret ?? config.NAPCAT_HTTP_REVERSE_SECRET ?? '').trim();
   if (!secret) {
     throw new Error('NAPCAT_HTTP_REVERSE_SECRET is required');
@@ -177,17 +178,27 @@ function createNapCatHttpReverseServer(options = {}) {
       return res.status(authResult.status).json({ error: authResult.error });
     }
 
-    return rateLimit(req, res, () => {
+    return rateLimit(req, res, async () => {
       const msg = req.body;
       if (!isValidEvent(msg)) {
         return res.status(400).json({ error: 'invalid payload' });
       }
 
+      let acceptance;
+      try {
+        acceptance = await acceptMessage(msg);
+      } catch (error) {
+        console.error('[HTTP reverse message persistence error]', error?.message || error);
+        return res.status(503).json({ error: 'message persistence failed' });
+      }
+
       res.status(204).end();
+
+      if (acceptance?.accepted === false) return;
 
       setImmediate(async () => {
         try {
-          await handleMessage(msg);
+          await handleMessage(msg, acceptance);
         } catch (e) {
           console.error('[HTTP reverse message handler error]', e?.message || e);
         }

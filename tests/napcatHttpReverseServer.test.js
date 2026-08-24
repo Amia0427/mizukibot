@@ -54,9 +54,16 @@ module.exports = (async () => {
       /NAPCAT_HTTP_REVERSE_SECRET is required/
     );
     const handled = [];
+    const accepted = [];
     const server = startNapCatHttpReverseServer({
-      handleMessage(msg) {
-        handled.push(msg);
+      acceptMessage(msg) {
+        accepted.push(msg.message_id);
+        if (msg.message_id === 2) throw new Error('simulated persistence failure');
+        if (msg.message_id === 3) return { accepted: false, tracked: true };
+        return { accepted: true, tracked: true };
+      },
+      handleMessage(msg, acceptance) {
+        handled.push({ msg, acceptance });
       }
     });
 
@@ -99,7 +106,27 @@ module.exports = (async () => {
 
     await new Promise((resolve) => setImmediate(resolve));
     assert.strictEqual(handled.length, 1);
-    assert.strictEqual(handled[0].message_id, 1);
+    assert.deepStrictEqual(accepted, [1]);
+    assert.strictEqual(handled[0].msg.message_id, 1);
+    assert.strictEqual(handled[0].acceptance.tracked, true);
+
+    const persistenceFailureBody = JSON.stringify({ post_type: 'message', message_id: 2 });
+    const persistenceFailureRes = await fetch(`http://127.0.0.1:${address.port}/`, {
+      method: 'POST',
+      headers: createSignedHeaders('reverse-test-secret', now, 'persistence-fail01', persistenceFailureBody),
+      body: persistenceFailureBody
+    });
+    assert.strictEqual(persistenceFailureRes.status, 503);
+
+    const duplicateBody = JSON.stringify({ post_type: 'message', message_id: 3 });
+    const duplicateRes = await fetch(`http://127.0.0.1:${address.port}/`, {
+      method: 'POST',
+      headers: createSignedHeaders('reverse-test-secret', now, 'duplicate-message1', duplicateBody),
+      body: duplicateBody
+    });
+    assert.strictEqual(duplicateRes.status, 204);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(handled.length, 1, 'declined duplicate must not be dispatched');
 
     const replayRes = await fetch(`http://127.0.0.1:${address.port}/`, {
       method: 'POST',

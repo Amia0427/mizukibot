@@ -40,6 +40,12 @@ module.exports = (async () => {
   }
   assert.strictEqual(dispatcher.getSnapshot().completed, 3);
 
+  const dispatched = createMessageIngressDispatcher({
+    handleMessage: async (msg) => `done:${msg.id}`
+  });
+  assert.strictEqual(await dispatched.dispatch({ id: 'waited' }), 'done:waited');
+  await dispatched.stop({ drain: true, timeoutMs: 1000 });
+
   const full = createMessageIngressDispatcher({
     maxActive: 1,
     maxQueueLength: 1,
@@ -55,9 +61,13 @@ module.exports = (async () => {
   await delay(0);
   assert.strictEqual(full.enqueue({ id: 2 }), true);
   assert.strictEqual(full.enqueue({ id: 3 }), false, 'queue full should drop without throwing');
-  assert.strictEqual(full.getSnapshot().dropped, 1);
+  await assert.rejects(
+    () => full.dispatch({ id: 4 }),
+    (error) => error?.code === 'MESSAGE_INGRESS_QUEUE_FULL'
+  );
+  assert.strictEqual(full.getSnapshot().dropped, 2);
   await full.stop({ drain: false });
-  assert.strictEqual(full.getSnapshot().dropped, 2, 'stop without drain should count discarded queued work');
+  assert.strictEqual(full.getSnapshot().dropped, 3, 'stop without drain should count discarded queued work');
 
   console.log('messageIngressDispatcher.test.js passed');
 })().catch((error) => {

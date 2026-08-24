@@ -28,6 +28,9 @@ module.exports = (async () => {
     const { __test } = require('../index');
     const enqueued = [];
     __test.setMessageIngressDispatcherForTest({
+      async dispatch(message, meta) {
+        enqueued.push({ message, meta, waited: true });
+      },
       enqueue(message, meta) {
         enqueued.push({ message, meta });
       }
@@ -40,9 +43,16 @@ module.exports = (async () => {
       meta: { source: 'direct_test' }
     });
 
+    await __test.acceptIncomingMessage(directMessage, 'waited_test', { waitForCompletion: true });
+    assert.deepStrictEqual(enqueued[1], {
+      message: directMessage,
+      meta: { source: 'waited_test' },
+      waited: true
+    });
+
     const napcatMessage = { post_type: 'message', message_id: 'napcat_1' };
     assert.strictEqual(await __test.acceptNapCatIncomingMessage(napcatMessage, 'napcat_ws', () => false), true);
-    assert.deepStrictEqual(enqueued[1], {
+    assert.deepStrictEqual(enqueued[2], {
       message: napcatMessage,
       meta: { source: 'napcat_ws' }
     });
