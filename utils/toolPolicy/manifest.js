@@ -165,6 +165,7 @@ assignPolicy(TOOL_POLICIES, [
 
 assignPolicy(TOOL_POLICIES, [
   'memory_cli',
+  'companion_review',
   'self_improvement_recent',
   'self_improvement_search',
   'self_improvement_patterns',

@@ -6,6 +6,12 @@
 - 主动私聊上下文会读取当前用户的未完成事项，并只把逾期状态作为模型参考；主动模型不得看到或输出事项内部 ID，也不会自动修改事项状态。新增、完成、延期、放弃和删除均通过现有工具授权确认链，`list` 为只读操作。
 - 验收（2026-08-25 12:00 +08:00）：`companionFollowup.test.js`、`companionFollowupIntegration.test.js`、`privateProactiveModelConfig.test.js`、`privateProactiveEngine.test.js`、`toolPolicyRuntimeEffects.test.js`、`toolPolicyCoverage.test.js` 全部通过；总工具注册表可取得 schema/executor，授权前新增事项未落盘。完整 lint、typecheck 和差异检查待本轮最终收口时复跑；未修改 `prompts/admin.txt`，未推送远端。
 
+## 私聊陪伴回顾 2026-08-25 00:55 +08:00
+
+- 新增只读 `companion_review` 私聊工具，支持按需查看今天、昨天或最近七天的相处记录，并附带当前未完成的关心事项；不会自动定时推送。
+- 回顾复用 Daily Journal 的 Profile Journal SQLite 主读与历史文件回退，按用户隔离，群聊不可访问，不输出日志或事项内部 ID。
+- 验收（2026-08-25 00:55 +08:00）：领域、真实 SQLite 用户隔离、工具注册、companion 白名单和工具策略定向测试全部通过；`npm run lint` 检查 904 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。
+
 ## 角色扮演提示词强化 2026-08-24 09:10 +08:00
 
 - `prompts/persona/*` 五个文件各补一段驱动层，把原本以禁令为主的设定补上行为动机与执行规则：`01_identity.txt` 增「行为驱动」，`04_behavior.txt` 增「接话前的判断」「接话方式的变化」「被推近核心时」，`03_boundaries.txt` 增「出戏自检」，`02_style.txt` 增「句子该长成什么样」，`06_state_modulation.txt` 增「状态的连续性」。

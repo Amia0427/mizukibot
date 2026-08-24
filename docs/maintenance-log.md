@@ -2113,3 +2113,10 @@
 - 根因：天气预警每小时扫描一次仍过于频繁，接近消息骚扰。
 - 改动：预警扫描从固定间隔改为北京时间每天 10:00 和 21:00 两个固定扫描点，启动时不再立即扫描，扫描完成后按下一个扫描点重新计时；配置 `WEATHER_ALERT_SCAN_INTERVAL_MINUTES` 替换为 `WEATHER_ALERT_SCAN_TIMES=10:00,21:00`。
 - 验收（2026-08-24 14:46 +08:00）：`weatherAlertSchedule.test.js`、天气预警专项测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过；重启后 `/live`、`/ready` 均返回 HTTP 200。
+
+## 运行维护 2026-08-25 00:55 +08:00
+
+- 小目标：为私聊用户增加按需的今日、昨日和最近七天陪伴回顾。
+- 改动：新增只读 `companion_review` 工具，复用 Daily Journal 的 Profile Journal SQLite 主读与历史文件回退，并附带当前用户未完成事项；不新增定时推送或模型调用。
+- 边界：仅当前私聊用户可访问，群聊直接拒绝，输出不包含 Journal 或事项内部 ID。
+- 验收：`companionReview.test.js`、`companionReviewIntegration.test.js`、`companionTools.test.js`、`toolPolicyCoverage.test.js`、`toolPolicyRuntimeEffects.test.js` 已通过；`npm run lint` 检查 904 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。

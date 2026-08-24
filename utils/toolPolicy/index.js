@@ -422,6 +422,14 @@ function normalizeCompanionFollowupArgs(args = {}) {
   return next;
 }
 
+function normalizeCompanionReviewArgs(args = {}) {
+  const range = String(args.range || '').trim().toLowerCase();
+  if (!new Set(['today', 'yesterday', 'week']).has(range)) {
+    throw new Error('companion_review range 无效');
+  }
+  return { range };
+}
+
 function enforceToolPolicy(toolName, args = {}, context = {}) {
   if (
     toolName === 'notebook_reindex_folder' ||
@@ -509,6 +517,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
   if (toolName === 'companion_followup') {
     return normalizeCompanionFollowupArgs(args);
+  }
+
+  if (toolName === 'companion_review') {
+    return normalizeCompanionReviewArgs(args);
   }
 
   if (toolName === 'skill_weather') {

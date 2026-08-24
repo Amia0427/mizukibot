@@ -22,6 +22,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'notebook_append_journal',
   'notebook_read_recent_journal',
   'companion_followup',
+  'companion_review',
   'create_scheduled_command',
   'list_scheduled_tasks',
   'cancel_scheduled_task'
@@ -34,6 +35,7 @@ const COMPANION_SAFE_READ_TOOLS = Object.freeze([
   'get_current_time',
   'get_context_stats',
   'memory_cli',
+  'companion_review',
   'notebook_search',
   'notebook_list_docs',
   'url_safety_check',

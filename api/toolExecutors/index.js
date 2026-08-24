@@ -55,6 +55,7 @@ const { getPjskRuntime, isPjskEnabled } = require('../../src/features/pjsk/runti
 const { GROUP_PRIVATE_ONLY_REPLY, formatSubscriptionResult } = require('../../src/features/weather-alerts/commands');
 const { getWeatherAlertRuntime } = require('../../src/features/weather-alerts/runtime');
 const { createCompanionFollowupService } = require('../../src/features/companion-followups');
+const { createCompanionReviewService } = require('../../src/features/companion-review');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -81,6 +82,10 @@ const nativeSharedLink = createLazyModuleProxy('nativeSharedLink', () => require
 const companionFollowups = createLazyModuleProxy(
   'companionFollowups',
   () => createCompanionFollowupService({ config })
+);
+const companionReviews = createLazyModuleProxy(
+  'companionReviews',
+  () => createCompanionReviewService({ config, followupService: companionFollowups })
 );
 
 let cachedMemoryCliRunner = undefined;
@@ -562,6 +567,16 @@ const TOOL_EXECUTORS = {
     const userId = String(context.userId || '').trim();
     if (!userId) throw new Error('companion_followup requires private userId');
     return formatCompanionFollowupResult(companionFollowups.execute(userId, args));
+  },
+
+  companion_review: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    if (String(context.chatType || '').trim().toLowerCase() !== 'private') {
+      return '陪伴回顾只支持私聊。';
+    }
+    const userId = String(context.userId || '').trim();
+    if (!userId) throw new Error('companion_review requires private userId');
+    return formatCompanionReviewResult(companionReviews.execute(userId, args));
   },
 
   notebook_append_journal: async (args = {}) => {
@@ -1130,6 +1145,25 @@ function formatCompanionFollowupResult(result = {}) {
     abandon: '已放弃'
   };
   return `${labels[action] || '已更新'}：${item.title}${item.dueAt && action === 'snooze' ? `（${item.dueAt}）` : ''}`;
+}
+
+function formatCompanionReviewResult(result = {}) {
+  const labels = { today: '今日回顾', yesterday: '昨日回顾', week: '最近七天回顾' };
+  const lines = [`${labels[result.range] || '陪伴回顾'}（${result.startDay}${result.endDay !== result.startDay ? ` 至 ${result.endDay}` : ''}）`];
+  const reviews = Array.isArray(result.reviews) ? result.reviews : [];
+  if (reviews.length === 0) {
+    lines.push('这段时间还没有可回顾的聊天记录。');
+  } else {
+    for (const review of reviews) lines.push(`\n${review.day}\n${review.text}`);
+  }
+  const followUps = Array.isArray(result.followUps) ? result.followUps : [];
+  if (followUps.length > 0) {
+    lines.push('\n还在关心的事：');
+    for (const item of followUps) {
+      lines.push(`- ${item.title}${item.dueAt ? `（${item.dueAt}）` : ''}${item.note ? `：${item.note}` : ''}`);
+    }
+  }
+  return lines.join('\n');
 }
 
 // -------------------------

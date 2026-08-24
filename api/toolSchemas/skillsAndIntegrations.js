@@ -1259,6 +1259,25 @@ const skillsAndIntegrationsToolSchemas = [
   {
     type: 'function',
     function: {
+      name: 'companion_review',
+      description: '回顾当前私聊用户今天、昨天或最近七天的相处记录和未完成事项。仅在用户主动要求回顾时调用。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          range: {
+            type: 'string',
+            enum: ['today', 'yesterday', 'week'],
+            description: '回顾范围：今天、昨天或最近七天'
+          }
+        },
+        required: ['range']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_qzone_auto_task',
       description: 'Create a scheduled QZone agent task for the current group; the task may publish automatically when due',
       parameters: {
