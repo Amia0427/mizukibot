@@ -1,6 +1,6 @@
 # QQ 私聊重启续传
 
-更新时间：2026-08-25 01:04 +08:00
+更新时间：2026-08-25 01:07 +08:00
 
 ## 解决范围
 
@@ -64,3 +64,7 @@ git diff --check
 `npm run lint` 检查 904 个文件。另对真实 NapCat 执行了只读 `get_recent_contact` 和 `get_friend_msg_history`，确认返回容器与恢复逻辑使用的字段一致；未发送消息，也未重启机器人。
 
 `npm test` 已执行两次。确认轮失败 4 项：`agentPrompts.test.js`、`checkPromptsIntegration.test.js`、`promptCheckGovernance.test.js` 均由仓库既有 `prompts/ADULT.txt` 未登记到 prompt manifest/allowlist 引起；`memoryPromptContextRegression.test.js` 在并行全量测试中报提示词模块重复，单独复跑退出 0。上述文件不属于本目标，按最小改动要求未修改提示词或治理清单。
+
+## 完成记录
+
+2026-08-25 01:07 +08:00，该小目标已完成，功能提交为 `2057898e`。提交仅包含本目标的 14 个实现、测试和文档文件，未推送远端。

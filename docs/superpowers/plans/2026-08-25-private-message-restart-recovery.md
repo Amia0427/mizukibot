@@ -59,4 +59,4 @@
 - [x] Document scope, configuration, state file, and operational limits with a `2026-08-25` timestamp.
 - [x] Run syntax, focused tests, ingress smoke tests, and lint for touched files.
 - [x] Record the actual acceptance commands and results.
-- [ ] Commit only the files changed for this goal.
+- [x] Commit only the files changed for this goal (`2057898e`).
