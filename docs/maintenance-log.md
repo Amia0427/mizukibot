@@ -2120,3 +2120,4 @@
 - 改动：新增只读 `companion_review` 工具，复用 Daily Journal 的 Profile Journal SQLite 主读与历史文件回退，并附带当前用户未完成事项；不新增定时推送或模型调用。
 - 边界：仅当前私聊用户可访问，群聊直接拒绝，输出不包含 Journal 或事项内部 ID。
 - 验收：`companionReview.test.js`、`companionReviewIntegration.test.js`、`companionTools.test.js`、`toolPolicyCoverage.test.js`、`toolPolicyRuntimeEffects.test.js` 已通过；`npm run lint` 检查 904 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。
+- 小目标已完成：功能提交 `20daefbc` 仅包含陪伴回顾相关服务、工具注册、测试和文档；未纳入并行开发中的私聊重启续传改动，未推送远端。
