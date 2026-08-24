@@ -22,6 +22,7 @@ const CRITICAL_WARNING_FIELDS = Object.freeze([
   'certainty',
   'text'
 ]);
+const DEFAULT_SCAN_TIMES = ['10:00', '21:00'];
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -62,6 +63,40 @@ function zonedDateTimeToEpoch(parts, timeZone) {
   const actual = getZonedParts(targetAsUtc, timeZone);
   const actualAsUtc = Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, actual.second || 0);
   return targetAsUtc + (targetAsUtc - actualAsUtc);
+}
+
+function parseScanTimes(value = DEFAULT_SCAN_TIMES) {
+  const rawItems = Array.isArray(value) ? value : String(value || '').split(/[,，\s]+/u);
+  const times = [];
+  for (const raw of rawItems) {
+    const match = /^(\d{1,2}):(\d{2})$/u.exec(String(raw || '').trim());
+    if (!match) continue;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour > 23 || minute > 59) continue;
+    const key = hour * 60 + minute;
+    if (!times.some((item) => item.key === key)) times.push({ hour, minute, key });
+  }
+  times.sort((a, b) => a.key - b.key);
+  return times.length > 0 ? times : parseScanTimes(DEFAULT_SCAN_TIMES);
+}
+
+function nextScheduledScanAt(timestamp, scanTimes, timeZone = 'Asia/Shanghai', atOrAfter = false) {
+  const times = parseScanTimes(scanTimes);
+  const local = getZonedParts(timestamp, timeZone);
+  const minuteOfDay = local.hour * 60 + local.minute;
+  const candidate = atOrAfter
+    ? times.find((item) => item.key >= minuteOfDay)
+    : times.find((item) => item.key > minuteOfDay);
+  const target = candidate || times[0];
+  const parts = { ...local, hour: target.hour, minute: target.minute, second: 0 };
+  if (!candidate) {
+    const nextDay = new Date(Date.UTC(local.year, local.month - 1, local.day + 1));
+    parts.year = nextDay.getUTCFullYear();
+    parts.month = nextDay.getUTCMonth() + 1;
+    parts.day = nextDay.getUTCDate();
+  }
+  return zonedDateTimeToEpoch(parts, timeZone);
 }
 
 function quietHoursState(timestamp, timeZone = 'Asia/Shanghai') {
@@ -222,7 +257,7 @@ function createWeatherAlertEngine(options = {}) {
   const runtimeConfig = options.config || {};
   const enabled = runtimeConfig.WEATHER_ALERT_ENABLED === true;
   const timeZone = runtimeConfig.TIMEZONE || 'Asia/Shanghai';
-  const intervalMs = Math.max(1, Number(runtimeConfig.WEATHER_ALERT_SCAN_INTERVAL_MINUTES) || 5) * 60 * 1000;
+  const scanTimes = parseScanTimes(runtimeConfig.WEATHER_ALERT_SCAN_TIMES);
   const provider = options.provider;
   const stateStore = options.stateStore;
   const now = typeof options.now === 'function' ? options.now : () => Date.now();
@@ -400,13 +435,15 @@ function createWeatherAlertEngine(options = {}) {
 
     const results = [];
     for (const principalId of principalIds) results.push(await deliverPrincipal(principalId, timestamp));
+    const nextScanAt = running ? nextScheduledScanAt(now(), scanTimes, timeZone) : 0;
     stateStore.updateRuntime((runtime) => {
       runtime.lastScanAt = timestamp;
-      runtime.nextScanAt = running ? timestamp + intervalMs : 0;
+      runtime.nextScanAt = nextScanAt;
       runtime.lastError = failedLocations
         .map((item) => `${item.locationId}: ${item.error}`)
         .join('; ');
     });
+    if (running) scheduleNextScan(nextScanAt);
     return {
       scannedPrincipals: principalIds.length,
       queriedLocations: warningsByLocation.size,
@@ -424,6 +461,7 @@ function createWeatherAlertEngine(options = {}) {
         runtime.lastScanAt = timestamp;
         runtime.lastError = normalizeText(error?.message || error);
       }, { flushNow: true });
+      if (running) scheduleNextScan(nextScheduledScanAt(now(), scanTimes, timeZone));
       throw error;
     }).finally(() => {
       scanPromise = null;
@@ -434,17 +472,24 @@ function createWeatherAlertEngine(options = {}) {
   function start() {
     if (!enabled || running) return false;
     running = true;
-    void scan({ now: now() }).catch((error) => console.error('[weather-alert] scan failed:', error?.message || error));
-    timer = setInterval(() => {
-      void scan({ now: now() }).catch((error) => console.error('[weather-alert] scan failed:', error?.message || error));
-    }, intervalMs);
-    timer.unref?.();
+    const nextScanAt = nextScheduledScanAt(now(), scanTimes, timeZone, true);
+    stateStore.updateRuntime((runtime) => { runtime.nextScanAt = nextScanAt; }, { flushNow: true });
+    scheduleNextScan(nextScanAt);
     return true;
+  }
+
+  function scheduleNextScan(nextScanAt) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      void scan({ now: now() }).catch((error) => console.error('[weather-alert] scan failed:', error?.message || error));
+    }, Math.max(1, nextScanAt - now()));
+    timer.unref?.();
   }
 
   async function stop() {
     running = false;
-    if (timer) clearInterval(timer);
+    if (timer) clearTimeout(timer);
     timer = null;
     if (scanPromise) await scanPromise.catch(() => {});
     stateStore.updateRuntime((runtime) => { runtime.nextScanAt = 0; }, { flushNow: true });
@@ -460,6 +505,8 @@ module.exports = {
   alertFacts,
   buildWeatherAlertPrompt,
   createWeatherAlertEngine,
+  nextScheduledScanAt,
+  parseScanTimes,
   quietHoursState,
   regionNames,
   shouldDelayWarning,

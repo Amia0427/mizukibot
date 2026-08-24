@@ -2101,3 +2101,9 @@
 - 验收（2026-08-24 09:08 +08:00）：`node tests/configPersonaPrompt.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/promptGoldenSnapshots.test.js`、`node tests/promptCompiler.test.js`、`node tests/promptSecurity.test.js`、`node tests/promptLoader.test.js`、`node tests/personaModules.test.js` 全部通过。端到端组装校验：普通用户稳定块为 `root_system_prompt, security_contract, core_baseline_patch, main_persona_system`，管理员为 `admin_system_prompt` 置顶的同序五块；新增的七个 persona 锚点均进入两侧提示词，`admin.txt` 六个锚点只出现在管理员侧、未泄漏到普通用户侧，`■` 与 `ALREADY SKIPPED PREAMBLE` 已确认消失；`{{char}}指晓山瑞希`、`角色真实性`、`真人对话特征`、`客服式表达` 等原有测试锚点全部保留。系统提示词估算 5372 tokens（管理员侧渲染 6322），相对 400k 上下文占比可忽略。
 - 既有问题：`node scripts/check-prompts.js` 与 `tests/promptCheckGovernance.test.js` 仍因用户文件 `prompts/ADULT.txt` 未被提示词清单引用而失败，与本次改动无关，本次未修改该文件。
 - 说明：`prompts/admin.txt` 与 `prompts/persona/` 均在 `.gitignore` 中，属于部署方私有资产，不进入版本库；`prompts/admin.txt` 的只读属性已在写入后恢复。小目标已完成，未推送远端。
+
+## 运行维护 2026-08-24 14:46 +08:00
+
+- 根因：天气预警每小时扫描一次仍过于频繁，接近消息骚扰。
+- 改动：预警扫描从固定间隔改为北京时间每天 10:00 和 21:00 两个固定扫描点，启动时不再立即扫描，扫描完成后按下一个扫描点重新计时；配置 `WEATHER_ALERT_SCAN_INTERVAL_MINUTES` 替换为 `WEATHER_ALERT_SCAN_TIMES=10:00,21:00`。
+- 验收（2026-08-24 14:46 +08:00）：`weatherAlertSchedule.test.js`、天气预警专项测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过；重启后 `/live`、`/ready` 均返回 HTTP 200。
