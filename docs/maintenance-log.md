@@ -2143,3 +2143,10 @@
 - 边界：自动记忆关闭时跳过隐式画像、每轮 `turn_summary` 和 enrich 长期学习；显式“请记住”、私聊 conversation variables、短期上下文和 Daily Journal 继续工作。工具仅允许当前私聊用户访问，不开放跨用户或群聊管理。
 - 验收（2026-08-25 11:15 +08:00）：九项记忆中心、工具策略、Memory V3 和 post-reply 回归全部通过；`npm run lint` 检查 908 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。`npm run check:prompts` 唯一失败为既有私有文件 `prompts/ADULT.txt` 未被 manifest 或 allowlist 引用，本阶段未修改提示词资产。
 - 小目标已完成（2026-08-25 11:20 +08:00）：功能提交 `20bfb51b` 仅包含用户可控记忆中心、自动记忆边界、对应测试和文档；未纳入 `.codex/config.toml`，未推送远端。
+
+## 运行维护 2026-08-25 11:40 +08:00
+
+- 小目标：为 QQ 私聊增加用户明确要求时才发送的原生语音回复。
+- 改动：新增 `companion_voice_reply` 工具和独立 OpenAI-compatible `/audio/speech` TTS 客户端，MP3 以 OneBot `record` Base64 消息段发给当前私聊用户；工具按外部发送副作用显式确认。
+- 边界：默认关闭，单条最多 300 字；普通回复、群聊、主动私聊和微信不自动转语音。音频不落临时文件，TTS 或 QQ 发送失败不重试，直接保留原文作为主回复文字回退。
+- 验收（2026-08-25 11:40 +08:00）：八项语音、平台权限、工具策略和 NapCat 相邻回归全部通过；`npm run lint` 检查 912 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。`npm run check:prompts` 唯一失败为既有私有文件 `prompts/ADULT.txt` 未被 manifest 或 allowlist 引用，本阶段未修改提示词资产。

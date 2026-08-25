@@ -215,6 +215,25 @@ async function sendPrivateMessage(userId = '', message = '', options = {}) {
   };
 }
 
+async function sendPrivateVoiceMessage(userId = '', audio = null, options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const targetUserId = normalizeText(userId);
+  const buffer = Buffer.isBuffer(audio) ? audio : Buffer.from(audio || []);
+  if (!targetUserId) throw new Error('userId is required');
+  if (!buffer.length) throw new Error('voice audio is required');
+  await actionClient.callAction('send_private_msg', {
+    user_id: targetUserId,
+    message: [{
+      type: 'record',
+      data: { file: `base64://${buffer.toString('base64')}` }
+    }]
+  });
+  return {
+    success: true,
+    reason: 'private voice sent'
+  };
+}
+
 function splitTextIntoFixedChunks(text = '', maxChars = REASONING_FORWARD_NODE_MAX_CHARS) {
   const raw = String(text || '');
   const limit = Math.max(500, Math.floor(Number(maxChars) || REASONING_FORWARD_NODE_MAX_CHARS));
@@ -619,6 +638,7 @@ module.exports = {
   sendPrivatePoke,
   sendPrivateImageMessage,
   sendPrivateMessage,
+  sendPrivateVoiceMessage,
   sendPrivateForwardMessage,
   sendReasoningForwardMessage,
   setMessageEmojiLike,

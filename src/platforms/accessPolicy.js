@@ -1,7 +1,8 @@
 const QQ_ONLY_TOOLS = new Set([
   'publish_qzone',
   'qzone_draft',
-  'create_qzone_auto_task'
+  'create_qzone_auto_task',
+  'companion_voice_reply'
 ]);
 
 function isQqPlatform(value) {

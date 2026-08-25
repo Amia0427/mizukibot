@@ -462,6 +462,13 @@ function normalizeCompanionMemoryArgs(args = {}) {
   return next;
 }
 
+function normalizeCompanionVoiceArgs(args = {}) {
+  const text = String(args.text || '').replace(/\s+/g, ' ').trim();
+  if (!text) throw new Error('companion_voice_reply requires text');
+  if (text.length > 300) throw new Error('companion_voice_reply text too long');
+  return { text };
+}
+
 function enforceToolPolicy(toolName, args = {}, context = {}) {
   if (
     toolName === 'notebook_reindex_folder' ||
@@ -553,6 +560,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
   if (toolName === 'companion_memory') {
     return normalizeCompanionMemoryArgs(args);
+  }
+
+  if (toolName === 'companion_voice_reply') {
+    return normalizeCompanionVoiceArgs(args);
   }
 
   if (toolName === 'companion_review') {

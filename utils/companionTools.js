@@ -24,6 +24,7 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'companion_followup',
   'companion_memory',
   'companion_review',
+  'companion_voice_reply',
   'create_scheduled_command',
   'list_scheduled_tasks',
   'cancel_scheduled_task'

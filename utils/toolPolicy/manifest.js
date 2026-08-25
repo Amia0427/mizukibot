@@ -265,6 +265,12 @@ TOOL_POLICIES.companion_memory = createPolicy({
   effect: 'local_write',
   scope: 'user'
 });
+TOOL_POLICIES.companion_voice_reply = createPolicy({
+  risk: 'medium',
+  capability: 'network',
+  effect: 'external_send',
+  scope: 'user'
+});
 TOOL_POLICIES.local_howtocook_recipe_search = createPolicy({
   risk: 'medium',
   capability: 'network',

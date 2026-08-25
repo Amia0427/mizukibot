@@ -57,6 +57,7 @@ const { getWeatherAlertRuntime } = require('../../src/features/weather-alerts/ru
 const { createCompanionFollowupService } = require('../../src/features/companion-followups');
 const { createCompanionReviewService } = require('../../src/features/companion-review');
 const { getCompanionMemoryService } = require('../../src/features/companion-memory');
+const { getCompanionVoiceService } = require('../../src/features/companion-voice');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -91,6 +92,10 @@ const companionReviews = createLazyModuleProxy(
 const companionMemories = createLazyModuleProxy(
   'companionMemories',
   () => getCompanionMemoryService()
+);
+const companionVoices = createLazyModuleProxy(
+  'companionVoices',
+  () => getCompanionVoiceService()
 );
 
 let cachedMemoryCliRunner = undefined;
@@ -592,6 +597,19 @@ const TOOL_EXECUTORS = {
     const userId = String(context.userId || '').trim();
     if (!userId) throw new Error('companion_memory requires private userId');
     return formatCompanionMemoryResult(await companionMemories.execute(userId, args));
+  },
+
+  companion_voice_reply: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    const chatType = String(context.chatType || '').trim().toLowerCase();
+    const platform = String(context.platform || 'qq').trim().toLowerCase();
+    if (chatType !== 'private' || platform !== 'qq') return '语音回复只支持 QQ 私聊。';
+    const userId = String(context.userId || '').trim();
+    if (!userId) throw new Error('companion_voice_reply requires private userId');
+    const result = await companionVoices.reply(userId, args.text);
+    return result.sent
+      ? '语音已发送，不要重复输出同一段文字。'
+      : `语音未发送，请直接用文字回复：${result.fallbackText}`;
   },
 
   notebook_append_journal: async (args = {}) => {

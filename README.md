@@ -39,6 +39,12 @@
 - 长期记忆继续以 Memory V3 事件为真值；`legacy_compat` 模式下更正或遗忘会同步归档同 ID 的旧镜像，避免旧主读再次召回。
 - 设置默认保存到 `DATA_DIR/companion-memory-settings.json`，可通过 `COMPANION_MEMORY_SETTINGS_FILE` 覆盖。
 
+## QQ 私聊按需语音 2026-08-25 11:40 +08:00
+
+- 新增 `companion_voice_reply` 工具，仅在 QQ 私聊用户明确要求语音、朗读或“说给我听”时调用；普通回复、群聊和主动私聊仍保持文字，不自动转语音。
+- 功能默认关闭。启用后通过独立 OpenAI-compatible `/audio/speech` 端点生成不超过 300 字的 MP3，再用现有 NapCat OneBot `record` 消息段直接发送，不创建临时音频文件。
+- TTS 生成或 QQ 发送失败时不重试语音，主回复会直接使用同一段文字回退；工具按外部发送副作用执行显式确认。
+
 ## 角色扮演提示词强化 2026-08-24 09:10 +08:00
 
 - `prompts/persona/*` 五个文件各补一段驱动层，把原本以禁令为主的设定补上行为动机与执行规则：`01_identity.txt` 增「行为驱动」，`04_behavior.txt` 增「接话前的判断」「接话方式的变化」「被推近核心时」，`03_boundaries.txt` 增「出戏自检」，`02_style.txt` 增「句子该长成什么样」，`06_state_modulation.txt` 增「状态的连续性」。

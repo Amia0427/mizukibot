@@ -1302,6 +1302,25 @@ const skillsAndIntegrationsToolSchemas = [
   {
     type: 'function',
     function: {
+      name: 'companion_voice_reply',
+      description: '给当前 QQ 私聊用户发送一条原生语音。仅在用户明确要求语音、朗读或说给我听时调用；不要主动把普通回复转成语音。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          text: {
+            type: 'string',
+            maxLength: 300,
+            description: '要用语音说出的完整短回复，最多 300 字'
+          }
+        },
+        required: ['text']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_qzone_auto_task',
       description: 'Create a scheduled QZone agent task for the current group; the task may publish automatically when due',
       parameters: {
