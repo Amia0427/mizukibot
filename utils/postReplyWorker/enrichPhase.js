@@ -87,6 +87,36 @@ function trimTurnsForEnrichBudget(turns = [], options = {}) {
   };
 }
 
+async function maintainDailyJournal(job = {}, meta = {}) {
+  const {
+    maybeCompactJournalByTurnThreshold,
+    maybeSegmentJournalByThreshold
+  } = getDailyJournalModule();
+  const latestTurn = normalizeTurnItems(job.turns).slice(-1)[0] || {};
+  const targetDay = normalizeText(latestTurn.createdAt).slice(0, 10);
+  if (!targetDay) return;
+  const compactJournal = config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED !== false
+    && typeof maybeCompactJournalByTurnThreshold === 'function'
+    ? maybeCompactJournalByTurnThreshold
+    : maybeSegmentJournalByThreshold;
+  const journalOptions = {
+    sessionKey: meta.sessionKey,
+    routePolicyKey: meta.routePolicyKey,
+    topRouteType: meta.topRouteType,
+    routeMeta: normalizeObject(job.routeMeta, {}),
+    continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
+    contextStats: normalizeObject(job.contextStats, {}),
+    groupId: meta.groupId,
+    channelId: meta.channelId,
+    taskType: meta.taskType
+  };
+  if (compactJournal === maybeCompactJournalByTurnThreshold) {
+    await compactJournal(job.userId, journalOptions);
+  } else {
+    await compactJournal(job.userId, targetDay, journalOptions);
+  }
+}
+
 function buildCoreLearningTurns(job = {}) {
   const turns = normalizeTurnItems(job.turns)
     .map((item, index) => {
@@ -336,10 +366,14 @@ function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {
 
 async function runEnrichPhase(job = {}, meta = {}) {
   const { extractPostReplyEnrichment } = getMemoryExtractionModule();
-  const {
-    maybeCompactJournalByTurnThreshold,
-    maybeSegmentJournalByThreshold
-  } = getDailyJournalModule();
+  if (meta.autoMemoryEnabled === false) {
+    await maintainDailyJournal(job, meta);
+    return {
+      skipped: true,
+      reason: 'auto_memory_disabled',
+      writes: { accepted: 0, dropped: 0, maxWrites: 0 }
+    };
+  }
   const { storeExtractedSelfImprovementItems } = getSelfImprovementModule();
   const { applyAffinityProposal } = getMemoryModule();
   const { addTaskMemoryWithVectorBackfill } = getTaskMemoryModule();
@@ -559,33 +593,7 @@ async function runEnrichPhase(job = {}, meta = {}) {
     });
   }
 
-  const latestTurn = normalizeTurnItems(job.turns).slice(-1)[0] || {};
-  const latestTurnCreatedAt = normalizeText(latestTurn.createdAt);
-  const targetDay = latestTurnCreatedAt
-    ? String(latestTurnCreatedAt).slice(0, 10)
-    : '';
-  if (targetDay) {
-    const compactJournal = config.DAILY_JOURNAL_TURN_COMPACTION_ENABLED !== false
-      && typeof maybeCompactJournalByTurnThreshold === 'function'
-      ? maybeCompactJournalByTurnThreshold
-      : maybeSegmentJournalByThreshold;
-    const journalOptions = {
-      sessionKey: meta.sessionKey,
-      routePolicyKey: meta.routePolicyKey,
-      topRouteType: meta.topRouteType,
-      routeMeta: normalizeObject(job.routeMeta, {}),
-      continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
-      contextStats: normalizeObject(job.contextStats, {}),
-      groupId: meta.groupId,
-      channelId: meta.channelId,
-      taskType: meta.taskType
-    };
-    if (compactJournal === maybeCompactJournalByTurnThreshold) {
-      await compactJournal(job.userId, journalOptions);
-    } else {
-      await compactJournal(job.userId, targetDay, journalOptions);
-    }
-  }
+  await maintainDailyJournal(job, meta);
   const gateStats = gate.getStats();
   const result = {
     budget: {
@@ -610,6 +618,7 @@ async function runEnrichPhase(job = {}, meta = {}) {
 module.exports = {
   buildCoreLearningConversation,
   buildCoreLearningEvidence,
+  maintainDailyJournal,
   trimTurnsForEnrichBudget,
   runEnrichPhase
 };

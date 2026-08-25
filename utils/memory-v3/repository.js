@@ -10,7 +10,7 @@ const {
 const { appendMemoryEvent } = require('./events');
 const { canonicalizeText, normalizeText } = require('./helpers');
 const { queryMemory: queryMemoryV3 } = require('./query');
-const { loadMemoryNodes } = require('./storage');
+const { loadMemoryNodes, loadMemoryNodesForUser } = require('./storage');
 const {
   isLegacyMemoryWritable,
   isLegacyMemoryShadowEnabled,
@@ -245,6 +245,7 @@ async function writeMemoryBatch(candidates = [], context = {}) {
     };
     const writeResult = await appendVersionedMemoryUpdate(toVersionedEvent(patched, context), {
       now: context.now,
+      enableVersionedUpdate: context.enableVersionedUpdate,
       scheduleEmbeddingBackfill: false
     });
     if (!writeResult.ok) {
@@ -302,7 +303,72 @@ async function queryMemory(request = {}) {
   };
 }
 
+function findActiveMemoryNode(memoryId = '', userId = '') {
+  const id = normalizeText(memoryId);
+  const ownerId = normalizeText(userId);
+  return loadMemoryNodesForUser(ownerId).find((node) => (
+    normalizeText(node.id || node.nodeId) === id
+    && normalizeText(node.userId) === ownerId
+    && normalizeText(node.status || 'active').toLowerCase() !== 'archived'
+  )) || null;
+}
+
+async function archiveMemory(memoryId = '', context = {}) {
+  const userId = normalizeText(context.userId);
+  const node = findActiveMemoryNode(memoryId, userId);
+  const now = Number(context.now || Date.now()) || Date.now();
+  const mode = resolveMemoryStorageMode(context.storageMode || config.MEMORY_STORAGE_MODE);
+  if (!node) {
+    const legacyMirror = isLegacyMemoryWritable(mode)
+      ? require('./legacyCompat').archiveLegacyMemory(memoryId, { now, reason: context.reason, userId })
+      : { ok: true, skipped: true, reason: 'storage_mode' };
+    return legacyMirror.archived
+      ? { ok: true, alreadyArchived: true, legacyMirror }
+      : { ok: false, reason: 'not_found', legacyMirror };
+  }
+  const event = await appendMemoryEvent({
+    id: normalizeText(node.id || node.nodeId),
+    type: 'memory_archived',
+    ts: now,
+    userId,
+    sessionKey: normalizeText(node.sessionKey),
+    groupId: normalizeText(node.groupId),
+    channelId: normalizeText(node.channelId),
+    sessionId: normalizeText(node.sessionId),
+    routePolicyKey: normalizeText(node.routePolicyKey),
+    topRouteType: normalizeText(node.topRouteType),
+    scopeType: normalizeText(node.scopeType || 'personal').toLowerCase() || 'personal',
+    source: normalizeText(context.source || 'companion_memory'),
+    sourceKind: 'manual',
+    status: 'archived',
+    confidence: Number(node.confidence || 0) || 0,
+    importance: Number(node.importance || 0) || 0,
+    memoryKind: normalizeText(node.memoryKind || node.type || 'fact'),
+    semanticSlot: normalizeText(node.semanticSlot || node.fieldKey || 'fact'),
+    conflictKey: normalizeText(node.conflictKey),
+    canonicalKey: normalizeText(node.canonicalKey || canonicalizeText(node.text)).toLowerCase(),
+    text: normalizeText(node.text),
+    payload: {
+      type: normalizeText(node.type || node.memoryKind || 'fact'),
+      fieldKey: normalizeText(node.fieldKey || node.semanticSlot || 'fact'),
+      archivedReason: normalizeText(context.reason || 'user_forgotten'),
+      lifecycleStatus: 'not_recallable'
+    }
+  }, { flushNow: true });
+  const materialized = require('./materializer').materializeMemoryViews({
+    force: true,
+    scheduleEmbeddingBackfill: false,
+    source: 'companion_memory_archive'
+  });
+  const legacyMirror = isLegacyMemoryWritable(mode)
+    ? require('./legacyCompat').archiveLegacyMemory(event.id, { now, reason: context.reason, userId })
+    : { ok: true, skipped: true, reason: 'storage_mode' };
+  return { ok: materialized?.ok !== false && legacyMirror.ok !== false, event, materialized, legacyMirror };
+}
+
 module.exports = {
+  archiveMemory,
+  findActiveMemoryNode,
   queryMemory,
   writeMemoryBatch
 };

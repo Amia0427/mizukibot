@@ -32,7 +32,29 @@ async function mirrorLegacyMemories(items = []) {
   }
 }
 
+function archiveLegacyMemory(memoryId, options = {}) {
+  const id = normalizeText(memoryId);
+  const userId = normalizeText(options.userId);
+  if (!id) return { ok: false, reason: 'invalid_id' };
+  const vectorMemory = getLegacyVectorMemory();
+  const library = vectorMemory.loadLibrary();
+  const item = library.items.find((candidate) => (
+    normalizeText(candidate?.id) === id
+    && normalizeText(candidate?.userId) === userId
+  ));
+  if (!item) return { ok: true, skipped: true, reason: 'not_found' };
+  item.status = 'archived';
+  item.updatedAt = Number(options.now || Date.now()) || Date.now();
+  item.meta = {
+    ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
+    archivedReason: normalizeText(options.reason || 'user_forgotten')
+  };
+  vectorMemory.saveLibrary(library);
+  return { ok: true, archived: true, id };
+}
+
 module.exports = {
+  archiveLegacyMemory,
   mirrorLegacyMemories,
   retrieveLegacyMemories,
   retrieveLegacyMemoriesAsync

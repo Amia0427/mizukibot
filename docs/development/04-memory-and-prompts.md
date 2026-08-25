@@ -1,6 +1,6 @@
 # 记忆与提示词
 
-本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-08-08 14:17 +08:00。
+本文面向需要修改对话连续性、用户档案、日记、Memory V3、向量召回、prompt 资产或上下文预算的开发者。它把“存了什么”“怎样召回”“哪些证据能进入模型”分开说明。最后核验：2026-08-25 11:15 +08:00。
 
 关系阶段、边界、态度和角色短期状态不属于 Memory V3 事实召回，统一由 [`../../utils/conversationVariables/index.js`](../../utils/conversationVariables/index.js) 从 SQLite 快照提供。完整变量定义、提案门槛、迁移和控制台接口见 [`../conversation-variables.md`](../conversation-variables.md)。
 
@@ -15,6 +15,7 @@
 | 短期连续性 | [`../../utils/shortTermMemory/index.js`](../../utils/shortTermMemory/index.js) | `utils/shortTermMemory/` | session key、最近轮次、压缩、重启恢复、连续性 delta |
 | 每日日记 | [`../../utils/dailyJournal/index.js`](../../utils/dailyJournal/index.js) | `utils/dailyJournal/` | 原始轮次、segment、4-day/monthly rollup 与按日期召回 |
 | Memory V3 | [`../../utils/memory-v3/repository.js`](../../utils/memory-v3/repository.js) | `utils/memory-v3/` | 统一业务读写、事件、物化投影、packet、版本更新与治理 |
+| 用户记忆管理 | [`../../src/features/companion-memory/index.js`](../../src/features/companion-memory/index.js) | `src/features/companion-memory/` | 私聊用户查看、保存、更正、遗忘自己的长期记忆并控制自动记忆 |
 | 旧向量兼容入口 | [`../../utils/vectorMemory.js`](../../utils/vectorMemory.js) | [`../../src/memory/vector/index.js`](../../src/memory/vector/index.js) | `legacy_compat` 镜像/主读、`v3_shadow` 对照和迁移读取；不是新业务入口 |
 | LanceDB | [`../../utils/lancedbMemoryStore/index.js`](../../utils/lancedbMemoryStore/index.js) | `utils/lancedbMemoryStore/` | Memory V3 可见节点的在线向量索引、分区、同步和搜索 |
 | Prompt manifest | [`../../prompts/prompt-manifest.json`](../../prompts/prompt-manifest.json) | [`../../config/promptRuntime.js`](../../config/promptRuntime.js) | 稳定系统 prompt 资产、阶段、优先级、预算和冲突 |
@@ -95,6 +96,20 @@ Memory V3 采用事件日志 + 可重建投影：
 - packet 把召回结果变成受预算约束的 prompt 片段。
 
 不要直接编辑 projection 文件“修记忆”。投影应能从事件重建；需要纠正时写版本更新/归档事件，或使用已有 changeset/governance 能力。
+
+### 用户可控记忆中心
+
+`companion_memory` 是当前私聊用户管理长期记忆的产品入口，动作包括 `list`、`remember`、`correct`、`forget`、`settings` 和 `set_auto`。工具执行器从当前私聊上下文取得 `userId`，领域服务不会接受调用者指定另一个用户；群聊调用直接拒绝。`list/settings` 是只读操作，`remember/correct/set_auto` 进入本地写入确认，`forget` 进入破坏性确认。
+
+查看记忆读取当前用户的 Memory V3 active node；保存走 `writeMemoryBatch()`，更正写入替代版本后归档旧 node，遗忘通过 `archiveMemory()` 追加归档事件。它们都不直接修改 projection、embedding cache 或 LanceDB。`legacy_compat` 下，归档会按同一记忆 ID 和用户同步归档旧镜像；否则旧主读可能在 V3 已遗忘后再次返回原内容。
+
+自动记忆偏好按用户保存到 `COMPANION_MEMORY_SETTINGS_FILE`，默认开启。关闭后统一跳过：
+
+- post-reply 隐式画像与事实提取；
+- 每轮 `turn_summary` 长期写入；
+- enrich phase 的长期学习。
+
+关闭自动记忆不等于停止所有上下文和记录。私聊 `conversationVariablesOnly`、用户明确“请记住”的显式写入、短期会话状态、Daily Journal 原始轮次、分段与压缩继续运行。修改开关判定时必须同时验证这些保留路径，不能把隐式长期学习开关扩大为整条 post-reply worker 的总开关。
 
 ### Vector 与 LanceDB
 

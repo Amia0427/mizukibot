@@ -1,5 +1,7 @@
 const { appendMemoryEvent, normalizeMemoryEvent, loadMemoryEvents } = require('./events');
 const {
+  archiveMemory,
+  findActiveMemoryNode,
   queryMemory,
   writeMemoryBatch
 } = require('./repository');
@@ -105,6 +107,8 @@ module.exports = {
   loadMemoryEvents,
   materializeMemoryViews,
   materializeMemoryViewsAsync,
+  archiveMemory,
+  findActiveMemoryNode,
   queryMemory,
   writeMemoryBatch,
   applyStrictArchiveRun,

@@ -56,6 +56,7 @@ const { GROUP_PRIVATE_ONLY_REPLY, formatSubscriptionResult } = require('../../sr
 const { getWeatherAlertRuntime } = require('../../src/features/weather-alerts/runtime');
 const { createCompanionFollowupService } = require('../../src/features/companion-followups');
 const { createCompanionReviewService } = require('../../src/features/companion-review');
+const { getCompanionMemoryService } = require('../../src/features/companion-memory');
 
 const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('../skills_assistant'));
 const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('../minecraftAgent'));
@@ -86,6 +87,10 @@ const companionFollowups = createLazyModuleProxy(
 const companionReviews = createLazyModuleProxy(
   'companionReviews',
   () => createCompanionReviewService({ config, followupService: companionFollowups })
+);
+const companionMemories = createLazyModuleProxy(
+  'companionMemories',
+  () => getCompanionMemoryService()
 );
 
 let cachedMemoryCliRunner = undefined;
@@ -577,6 +582,16 @@ const TOOL_EXECUTORS = {
     const userId = String(context.userId || '').trim();
     if (!userId) throw new Error('companion_review requires private userId');
     return formatCompanionReviewResult(companionReviews.execute(userId, args));
+  },
+
+  companion_memory: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    if (String(context.chatType || '').trim().toLowerCase() !== 'private') {
+      return '记忆中心只支持私聊。';
+    }
+    const userId = String(context.userId || '').trim();
+    if (!userId) throw new Error('companion_memory requires private userId');
+    return formatCompanionMemoryResult(await companionMemories.execute(userId, args));
   },
 
   notebook_append_journal: async (args = {}) => {
@@ -1164,6 +1179,19 @@ function formatCompanionReviewResult(result = {}) {
     }
   }
   return lines.join('\n');
+}
+
+function formatCompanionMemoryResult(result = {}) {
+  if (result.action === 'list') {
+    const items = Array.isArray(result.items) ? result.items : [];
+    if (items.length === 0) return '当前没有可管理的长期记忆。';
+    return ['长期记忆：', ...items.map((item) => `- [${item.id}] ${item.text}`)].join('\n');
+  }
+  if (result.action === 'remember') return `已记住：${result.item.text}\n记忆 ID：${result.item.id}`;
+  if (result.action === 'correct') return `已更正为：${result.item.text}\n记忆 ID：${result.item.id}`;
+  if (result.action === 'forget') return '这条长期记忆已经忘记。';
+  const enabled = result.autoMemoryEnabled !== false;
+  return enabled ? '自动长期记忆已开启。' : '自动长期记忆已关闭；短期上下文和陪伴回顾不受影响。';
 }
 
 // -------------------------

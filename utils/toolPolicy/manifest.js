@@ -259,6 +259,12 @@ TOOL_POLICIES.companion_followup = createPolicy({
   effect: 'local_write',
   scope: 'user'
 });
+TOOL_POLICIES.companion_memory = createPolicy({
+  risk: 'medium',
+  capability: 'local_write',
+  effect: 'local_write',
+  scope: 'user'
+});
 TOOL_POLICIES.local_howtocook_recipe_search = createPolicy({
   risk: 'medium',
   capability: 'network',
@@ -352,6 +358,13 @@ function resolveToolPolicy(toolName, args = {}) {
       none: ['list'],
       local_write: ['add', 'complete', 'snooze', 'abandon'],
       destructive: ['delete']
+    });
+  }
+  if (name === 'companion_memory') {
+    return resolveActionPolicy(basePolicy, action, {
+      none: ['list', 'settings'],
+      local_write: ['remember', 'correct', 'set_auto'],
+      destructive: ['forget']
     });
   }
   return { policy: { ...basePolicy }, reason: '' };

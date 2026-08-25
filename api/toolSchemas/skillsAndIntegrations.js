@@ -1259,6 +1259,30 @@ const skillsAndIntegrationsToolSchemas = [
   {
     type: 'function',
     function: {
+      name: 'companion_memory',
+      description: '管理当前私聊用户自己的长期记忆。仅在用户主动要求查看、记住、更正、忘记或调整自动记忆时调用。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'remember', 'correct', 'forget', 'settings', 'set_auto'],
+            description: '操作类型'
+          },
+          id: { type: 'string', description: '记忆 ID，correct/forget 时必填' },
+          text: { type: 'string', description: '要明确保存或更正后的记忆内容' },
+          query: { type: 'string', description: 'list 时可选的文字筛选' },
+          limit: { type: 'number', description: 'list 返回条数，最多 50' },
+          enabled: { type: 'boolean', description: 'set_auto 时设置是否允许自动长期记忆' }
+        },
+        required: ['action']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'companion_review',
       description: '回顾当前私聊用户今天、昨天或最近七天的相处记录和未完成事项。仅在用户主动要求回顾时调用。',
       parameters: {

@@ -430,6 +430,38 @@ function normalizeCompanionReviewArgs(args = {}) {
   return { range };
 }
 
+function normalizeCompanionMemoryArgs(args = {}) {
+  const action = String(args.action || '').trim().toLowerCase();
+  if (!new Set(['list', 'remember', 'correct', 'forget', 'settings', 'set_auto']).has(action)) {
+    throw new Error('companion_memory action 无效');
+  }
+  if (action === 'list') {
+    return {
+      action,
+      limit: Math.max(1, Math.min(50, Number(args.limit || 20) || 20)),
+      query: String(args.query || '').trim().slice(0, 200)
+    };
+  }
+  if (action === 'settings') return { action };
+  if (action === 'set_auto') {
+    if (typeof args.enabled !== 'boolean') throw new Error('companion_memory set_auto requires enabled');
+    return { action, enabled: args.enabled };
+  }
+  const next = { action };
+  if (action === 'correct' || action === 'forget') {
+    next.id = String(args.id || '').trim();
+    if (!next.id || next.id.length > 100 || /[\r\n\u0000-\u001f]/.test(next.id)) {
+      throw new Error('companion_memory requires a valid id');
+    }
+  }
+  if (action === 'remember' || action === 'correct') {
+    next.text = String(args.text || '').replace(/\s+/g, ' ').trim();
+    if (!next.text) throw new Error('companion_memory requires text');
+    if (next.text.length > 1000) throw new Error('companion_memory text too long');
+  }
+  return next;
+}
+
 function enforceToolPolicy(toolName, args = {}, context = {}) {
   if (
     toolName === 'notebook_reindex_folder' ||
@@ -517,6 +549,10 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
   if (toolName === 'companion_followup') {
     return normalizeCompanionFollowupArgs(args);
+  }
+
+  if (toolName === 'companion_memory') {
+    return normalizeCompanionMemoryArgs(args);
   }
 
   if (toolName === 'companion_review') {

@@ -60,6 +60,10 @@ function getProfileMaintenanceModule() {
   return require('../memory-v3/profileMaintenance');
 }
 
+function getCompanionMemoryService() {
+  return require('../../src/features/companion-memory/runtime').getCompanionMemoryService();
+}
+
 function buildLearningMeta(job = {}) {
   const routeMeta = normalizeObject(job.routeMeta, {});
   const evidenceMeta = buildCoreLearningEvidence(job);
@@ -103,6 +107,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
   const meta = buildLearningMeta(runnableEnrichJob);
   const pressureMode = normalizeText(job.postReplyPressureMode).toLowerCase();
   const coreMinimalUnderPressure = phase === 'core' && pressureMode === 'minimal';
+  const autoMemoryEnabled = getCompanionMemoryService().isAutoMemoryEnabled(job.userId);
   const workerTaskOptions = {
     ...meta,
     postReplyMemoryMode: String(config.POST_REPLY_MEMORY_MODE || 'core').trim().toLowerCase() || 'core',
@@ -192,6 +197,19 @@ async function processPostReplyJob(job = {}, deps = {}) {
   if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning') && recapJob) {
     currentJob = skipTask('memoryLearning', 'learnSomethingNew', 'recap_query');
   }
+  const keepConversationVariables = meta.chatType === 'private'
+    && meta.topRouteType === 'direct_chat'
+    && meta.learningIntent !== 'explicit';
+  if (
+    phase === 'core'
+    && tasks.memoryLearning
+    && !isTaskCompleted(currentJob, 'memoryLearning')
+    && !autoMemoryEnabled
+    && !keepConversationVariables
+    && meta.learningIntent !== 'explicit'
+  ) {
+    currentJob = skipTask('memoryLearning', 'learnSomethingNew', 'auto_memory_disabled');
+  }
   if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning')) {
     const { learnSomethingNew } = getMemoryExtractionModule();
     currentJob = await runTask('memoryLearning', async () => {
@@ -248,7 +266,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
       );
     });
   }
-  if (phase === 'core' && config.MEMORY_V3_ENABLED) {
+  if (phase === 'core' && config.MEMORY_V3_ENABLED && autoMemoryEnabled) {
     if (!isTaskCompleted(currentJob, 'memoryEvent')) {
       const { appendVersionedMemoryUpdate } = getMemoryV3Module();
       currentJob = await runTask('memoryEvent', async () => {
@@ -391,12 +409,28 @@ async function processPostReplyJob(job = {}, deps = {}) {
       });
     }
   }
+  if (phase === 'core' && config.MEMORY_V3_ENABLED && !autoMemoryEnabled) {
+    for (const [taskKey, step] of [
+      ['memoryEvent', 'appendVersionedMemoryUpdate'],
+      ['materialize', 'scheduleMaterializeMemoryViews'],
+      ['vectorMaintenance', 'runVectorMaintenance'],
+      ['memoryQualityAudit', 'runMemoryQualityAudit'],
+      ['profileMaintenance', 'runProfileMaintenance']
+    ]) {
+      if (!isTaskCompleted(currentJob, taskKey)) {
+        currentJob = skipTask(taskKey, step, 'auto_memory_disabled');
+      }
+    }
+  }
   if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {
     if (!recapFiltered.job) {
       currentJob = skipTask('enrich', 'runEnrichPhase', 'recap_query');
     } else {
       currentJob = await runTask('enrich', async () => {
-        const result = await runEnrichPhase(runnableEnrichJob, meta);
+        const result = await runEnrichPhase(runnableEnrichJob, {
+          ...meta,
+          autoMemoryEnabled
+        });
         return recapFiltered.skippedCount > 0
           ? {
               ...normalizeObject(result, {}),

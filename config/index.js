@@ -188,6 +188,7 @@ module.exports = {
   PRIVATE_PROACTIVE_MAX_UNANSWERED_BATCHES: Math.max(1, Math.floor(pickNum('PRIVATE_PROACTIVE_MAX_UNANSWERED_BATCHES', 2))),
   PRIVATE_PROACTIVE_STATE_FILE: pick('PRIVATE_PROACTIVE_STATE_FILE', path.join(DATA_DIR, 'private-proactive-state.json')),
   COMPANION_FOLLOWUP_STATE_FILE: pick('COMPANION_FOLLOWUP_STATE_FILE', path.join(DATA_DIR, 'companion-followups.json')),
+  COMPANION_MEMORY_SETTINGS_FILE: pick('COMPANION_MEMORY_SETTINGS_FILE', path.join(DATA_DIR, 'companion-memory-settings.json')),
   COMPANION_ROOM_ENABLED: pickBool('COMPANION_ROOM_ENABLED', false),
   COMPANION_ROOM_STATE_FILE: pick('COMPANION_ROOM_STATE_FILE', path.join(DATA_DIR, 'companion-room-state.json')),
   COMPANION_ROOM_DEFAULT_DURATION_MINUTES: companionRoomDefaultDuration,
