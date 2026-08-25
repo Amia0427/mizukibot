@@ -2121,3 +2121,10 @@
 - 边界：仅当前私聊用户可访问，群聊直接拒绝，输出不包含 Journal 或事项内部 ID。
 - 验收：`companionReview.test.js`、`companionReviewIntegration.test.js`、`companionTools.test.js`、`toolPolicyCoverage.test.js`、`toolPolicyRuntimeEffects.test.js` 已通过；`npm run lint` 检查 904 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。
 - 小目标已完成：功能提交 `20daefbc` 仅包含陪伴回顾相关服务、工具注册、测试和文档；未纳入并行开发中的私聊重启续传改动，未推送远端。
+
+## 运行维护 2026-08-25 01:09 +08:00
+
+- 小目标：在现有共处房间中增加围绕具体内容的共读、共看和共听活动。
+- 改动：房间与共同回忆新增内容类型、标题和显式进度，开始、状态、节点模型和结束回忆复用现有计时与发送链路；旧状态继续兼容。
+- 边界：不新增媒体下载、播放、网页抓取或独立定时器；模型被明确禁止声称自己实际读取、观看或播放了媒体。
+- 验收：六项 companion-room 测试和两项 tick 相邻回归已通过；`npm run lint` 检查 904 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。

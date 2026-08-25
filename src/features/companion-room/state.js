@@ -1,8 +1,9 @@
 const fs = require('fs');
 const { createJsonHotStore } = require('../../../utils/jsonHotStore');
 
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 const MAX_MEMORIES_PER_USER = 100;
+const CONTENT_TYPES = new Set(['read', 'watch', 'listen']);
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -35,6 +36,9 @@ function normalizeRoom(value = {}, now = Date.now(), restoreActive = false) {
   return {
     id: String(value.id || `room-${startedAt}`).trim(),
     activityType: value.activityType === 'relax' ? 'relax' : 'focus',
+    contentType: CONTENT_TYPES.has(value.contentType) ? value.contentType : '',
+    contentTitle: String(value.contentTitle || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+    contentProgress: String(value.contentProgress || '').replace(/\s+/g, ' ').trim().slice(0, 200),
     durationMinutes,
     durationMs,
     density: ['quiet', 'occasional', 'chatty'].includes(value.density) ? value.density : 'occasional',
@@ -54,6 +58,9 @@ function normalizeMemory(value = {}) {
   return {
     id: String(value.id || '').trim(),
     activityType: value.activityType === 'relax' ? 'relax' : 'focus',
+    contentType: CONTENT_TYPES.has(value.contentType) ? value.contentType : '',
+    contentTitle: String(value.contentTitle || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+    progress: String(value.progress || '').replace(/\s+/g, ' ').trim().slice(0, 200),
     startedAt: Number(value.startedAt || 0) || 0,
     endedAt: Number(value.endedAt || 0) || 0,
     durationMinutes: Math.max(0, Number(value.durationMinutes || 0) || 0),
@@ -142,6 +149,9 @@ function createCompanionRoomStateStore(filePath, options = {}) {
         memory = normalizeMemory({
           id: room.id,
           activityType: room.activityType,
+          contentType: room.contentType,
+          contentTitle: room.contentTitle,
+          progress: room.contentProgress,
           startedAt: room.startedAt,
           endedAt,
           durationMinutes: Math.max(1, Math.round(elapsedMs(room, endedAt) / 60000)),
@@ -163,6 +173,8 @@ function createCompanionRoomStateStore(filePath, options = {}) {
         room = normalizeRoom({
           id: `room-${now()}`,
           activityType: input.activityType,
+          contentType: input.contentType,
+          contentTitle: input.contentTitle,
           durationMinutes: input.durationMinutes,
           density: input.density,
           status: 'active',
@@ -213,6 +225,9 @@ function createCompanionRoomStateStore(filePath, options = {}) {
     }),
     recordUserNote: (userId, note) => updateRoom(userId, (room) => {
       room.lastUserNote = String(note || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    }),
+    recordProgress: (userId, progress) => updateRoom(userId, (room) => {
+      room.contentProgress = String(progress || '').replace(/\s+/g, ' ').trim().slice(0, 200);
     }),
     reload() {
       hotStore.invalidate();

@@ -7,7 +7,14 @@ const { createCompanionRoomModelClient } = require('./model');
 const { createCompanionRoomStateStore } = require('./state');
 
 const PLUGIN_COMMAND_PATTERN = /^\/陪伴插件\s+(开启|关闭|状态|重载)\s*$/u;
-const USAGE = '用法：/陪伴 开始 专注|放松 [15|30|45|60|120分钟]，也可以切换、暂停、继续、结束、查看状态或回忆。';
+const USAGE = '用法：/陪伴 开始 专注|放松 [15|30|45|60|120分钟]，或 /陪伴 开始 共读|共看|共听 <标题> [时长]；可用 /陪伴 进度 <内容> 记录进度。';
+
+function contentLabel(contentType) {
+  if (contentType === 'read') return '读';
+  if (contentType === 'watch') return '看';
+  if (contentType === 'listen') return '听';
+  return '';
+}
 
 function activityLabel(activityType) {
   return activityType === 'relax' ? '放松' : '专注';
@@ -33,14 +40,20 @@ function formatRoomStatus(room, elapsedMs = 0) {
   if (!room) return '现在没有进行中的共处房间。';
   const elapsedMinutes = Math.max(0, Math.floor(elapsedMs / 60000));
   const status = room.status === 'paused' ? '已暂停' : '进行中';
-  return `${activityLabel(room.activityType)}房间${status}，已进行约 ${elapsedMinutes}/${room.durationMinutes} 分钟，当前是${densityLabel(room.density)}。`;
+  const content = room.contentType && room.contentTitle
+    ? `，一起${contentLabel(room.contentType)}《${room.contentTitle}》${room.contentProgress ? `，进度：${room.contentProgress}` : ''}`
+    : '';
+  return `${activityLabel(room.activityType)}房间${status}，已进行约 ${elapsedMinutes}/${room.durationMinutes} 分钟，当前是${densityLabel(room.density)}${content}。`;
 }
 
 function formatMemories(memories = []) {
   if (!memories.length) return '还没有共同回忆。';
   return memories.map((memory) => {
     const note = memory.userNote || '这次没有留下成果备注';
-    return `${memory.id}｜${activityLabel(memory.activityType)} ${memory.durationMinutes} 分钟｜你：${note}｜瑞希：${memory.botNote}`;
+    const content = memory.contentType && memory.contentTitle
+      ? `｜一起${contentLabel(memory.contentType)}《${memory.contentTitle}》${memory.progress ? `（${memory.progress}）` : ''}`
+      : '';
+    return `${memory.id}｜${activityLabel(memory.activityType)} ${memory.durationMinutes} 分钟${content}｜你：${note}｜瑞希：${memory.botNote}`;
   }).join('\n');
 }
 
@@ -104,13 +117,18 @@ function createCompanionRoomRuntime(options = {}) {
     const density = selectDensity(snapshot, parsed.activityType);
     const room = stateStore.createRoom(userId, {
       activityType: parsed.activityType,
+      contentType: parsed.contentType,
+      contentTitle: parsed.contentTitle,
       durationMinutes: parsed.durationMinutes || Number(config.COMPANION_ROOM_DEFAULT_DURATION_MINUTES) || 45,
       density
     });
+    const content = room.contentType && room.contentTitle
+      ? `一起${contentLabel(room.contentType)}《${room.contentTitle}》`
+      : `${activityLabel(room.activityType)}房间`;
     return {
       handled: true,
       code: 'started',
-      replyText: `好，我们开一个 ${room.durationMinutes} 分钟的${activityLabel(room.activityType)}房间。我会${densityLabel(room.density)}，想换节奏随时告诉我。`,
+      replyText: `好，我们用 ${room.durationMinutes} 分钟${content}。我会${densityLabel(room.density)}，想换节奏随时告诉我。`,
       room
     };
   }
@@ -134,6 +152,11 @@ function createCompanionRoomRuntime(options = {}) {
     }
     if (parsed.action === 'usage') return { handled: true, code: 'usage', replyText: USAGE };
     if (!room) return { handled: true, code: 'room_not_found', replyText: '现在没有进行中的共处房间。' };
+    if (parsed.action === 'progress') {
+      if (!room.contentType) return { handled: true, code: 'progress_unavailable', replyText: '当前房间没有共读、共看或共听内容。' };
+      const updated = stateStore.recordProgress(userId, parsed.progress);
+      return { handled: true, code: 'progress_updated', replyText: `记下了：${updated.contentProgress}`, room: updated };
+    }
     if (parsed.action === 'pause') {
       if (room.status === 'paused') return { handled: true, code: 'already_paused', replyText: '房间已经暂停着。' };
       const paused = stateStore.pauseRoom(userId, 'user');

@@ -14,15 +14,24 @@ assert.strictEqual(protectCompanionMessage('我把杯子里的水喝完啦，还
 
 module.exports = (async () => {
   let capturedOptions = null;
+  let capturedMessages = null;
   const generate = createCompanionRoomModelClient({
-    async requestAssistantMessage(_messages, options) {
+    async requestAssistantMessage(messages, options) {
+      capturedMessages = messages;
       capturedOptions = options;
       return { content: '我也刚把手边的一小段整理好。' };
     }
   });
-  assert.strictEqual(await generate({ phase: 'midpoint', userId: 'user-1', room: { activityType: 'focus' } }), '我也刚把手边的一小段整理好。');
+  assert.strictEqual(await generate({
+    phase: 'midpoint',
+    userId: 'user-1',
+    room: { activityType: 'focus', contentType: 'read', contentTitle: '三体', contentProgress: '第 3 章' }
+  }), '我也刚把手边的一小段整理好。');
   assert.strictEqual(capturedOptions.disableTools, true);
   assert.deepStrictEqual(capturedOptions.allowedTools, []);
+  assert.ok(capturedMessages[0].content.includes('不要声称你实际读取、观看或播放了媒体'));
+  assert.ok(capturedMessages[1].content.includes('三体'));
+  assert.ok(capturedMessages[1].content.includes('第 3 章'));
 
   const fallback = createCompanionRoomModelClient({
     async requestAssistantMessage() { throw new Error('model unavailable'); }

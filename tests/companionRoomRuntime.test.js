@@ -17,7 +17,7 @@ function createMemoryStore() {
     listRooms: () => [...rooms.entries()].map(([userId, room]) => ({ userId, ...room })),
     createRoom(userId, input) {
       if (rooms.has(userId)) return { code: 'room_exists', ...rooms.get(userId) };
-      const room = { id: `room-${++sequence}`, status: 'active', startedAt: 0, resumedAt: 0, activeElapsedMs: 0, totalPausedMs: 0, pausedAt: 0, pauseReason: '', activityType: input.activityType, durationMinutes: input.durationMinutes, durationMs: input.durationMinutes * 60000, density: input.density, sentNodes: [], lastUserNote: '' };
+      const room = { id: `room-${++sequence}`, status: 'active', startedAt: 0, resumedAt: 0, activeElapsedMs: 0, totalPausedMs: 0, pausedAt: 0, pauseReason: '', activityType: input.activityType, contentType: input.contentType || '', contentTitle: input.contentTitle || '', contentProgress: '', durationMinutes: input.durationMinutes, durationMs: input.durationMinutes * 60000, density: input.density, sentNodes: [], lastUserNote: '' };
       rooms.set(userId, room);
       return { ...room };
     },
@@ -25,8 +25,9 @@ function createMemoryStore() {
     pauseRoom(userId) { return this.updateRoom(userId, (room) => { room.status = 'paused'; room.activeElapsedMs = room.elapsedMs || room.activeElapsedMs; room.pausedAt = 1; }); },
     resumeRoom(userId) { return this.updateRoom(userId, (room) => { room.status = 'active'; room.pausedAt = 0; }); },
     recordUserNote(userId, note) { return this.updateRoom(userId, (room) => { room.lastUserNote = note; }); },
+    recordProgress(userId, progress) { return this.updateRoom(userId, (room) => { room.contentProgress = progress; }); },
     markNodeSent(userId, node) { return this.updateRoom(userId, (room) => { room.sentNodes.push(node); }); },
-    completeRoom(userId, input) { const room = rooms.get(userId); rooms.delete(userId); const memory = { id: room.id, activityType: room.activityType, durationMinutes: room.durationMinutes, userNote: input.userNote || room.lastUserNote, botNote: input.botNote, completion: input.completion }; memories.set(userId, [memory, ...(memories.get(userId) || [])]); return memory; },
+    completeRoom(userId, input) { const room = rooms.get(userId); rooms.delete(userId); const memory = { id: room.id, activityType: room.activityType, contentType: room.contentType, contentTitle: room.contentTitle, progress: room.contentProgress, durationMinutes: room.durationMinutes, userNote: input.userNote || room.lastUserNote, botNote: input.botNote, completion: input.completion }; memories.set(userId, [memory, ...(memories.get(userId) || [])]); return memory; },
     listMemories: (userId) => memories.get(userId) || [],
     deleteMemory(userId, id) { const list = memories.get(userId) || []; memories.set(userId, list.filter((item) => item.id !== id)); return list.length !== memories.get(userId).length; },
     updateMemory(userId, id, note) { const memory = (memories.get(userId) || []).find((item) => item.id === id); if (!memory) return null; memory.userNote = note; return memory; }
@@ -58,6 +59,24 @@ module.exports = (async () => {
   const defaultDuration = await runtime.handleUserMessage({ chatType: 'private', userId: 'default-duration', rawText: '陪我放松一下' });
   assert.strictEqual(defaultDuration.room.durationMinutes, 60);
 
+  const contentStarted = await runtime.handleUserMessage({ chatType: 'private', userId: 'content-user', rawText: '/陪伴 开始 共听 世界计划音乐 30分钟' });
+  assert.strictEqual(contentStarted.room.contentType, 'listen');
+  assert.strictEqual(contentStarted.room.contentTitle, '世界计划音乐');
+  assert.match(contentStarted.replyText, /一起听《世界计划音乐》/);
+  const progress = await runtime.handleUserMessage({ chatType: 'private', userId: 'content-user', rawText: '/陪伴 进度 听到第 5 首' });
+  assert.strictEqual(progress.code, 'progress_updated');
+  assert.strictEqual(store.getRoom('content-user').contentProgress, '听到第 5 首');
+  const contentStatus = await runtime.handleUserMessage({ chatType: 'private', userId: 'content-user', rawText: '/陪伴 状态' });
+  assert.match(contentStatus.replyText, /世界计划音乐/);
+  assert.match(contentStatus.replyText, /听到第 5 首/);
+  const contentEnded = await runtime.handleUserMessage({ chatType: 'private', userId: 'content-user', rawText: '/陪伴 结束' });
+  assert.strictEqual(phases.at(-1), 'summary');
+  assert.strictEqual(store.listMemories('content-user').length, 0);
+  contentEnded.afterReplySent();
+  const contentMemory = await runtime.handleUserMessage({ chatType: 'private', userId: 'content-user', rawText: '/陪伴 回忆' });
+  assert.match(contentMemory.replyText, /一起听《世界计划音乐》/);
+  assert.match(contentMemory.replyText, /听到第 5 首/);
+
   const densityChanged = await runtime.handleUserMessage({ chatType: 'private', userId: 'user-1', rawText: '多陪我聊聊' });
   assert.strictEqual(densityChanged.code, 'density_updated');
 
@@ -68,7 +87,7 @@ module.exports = (async () => {
   const storeRoom = store.getRoom('user-1');
   store.updateRoom('user-1', (room) => { room.elapsedMs = room.durationMs * 0.5; });
   await runtime.tick();
-  assert.deepStrictEqual(phases, ['midpoint']);
+  assert.deepStrictEqual(phases.slice(-2), ['summary', 'midpoint']);
   assert.strictEqual(sent.length, 1);
   await runtime.tick();
   assert.strictEqual(sent.length, 1, 'same node must not be sent twice');

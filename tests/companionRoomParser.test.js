@@ -16,6 +16,31 @@ assert.deepStrictEqual(parseCompanionRoomMessage('陪我放松一下', { chatTyp
 assert.strictEqual(parseCompanionRoomMessage('/陪伴 开始 专注 60分钟', { chatType: 'private' }).durationMinutes, 60);
 assert.strictEqual(parseCompanionRoomMessage('/陪伴 开始 专注 15', { chatType: 'private' }).durationMinutes, 15);
 assert.strictEqual(parseCompanionRoomMessage('/陪伴 开始 放松 2小时', { chatType: 'private' }).durationMinutes, 120);
+assert.deepStrictEqual(parseCompanionRoomMessage('/陪伴 开始 共读 三体 30分钟', { chatType: 'private' }), {
+  matched: true,
+  action: 'start',
+  activityType: 'focus',
+  contentType: 'read',
+  contentTitle: '三体',
+  durationMinutes: 30
+});
+assert.deepStrictEqual(parseCompanionRoomMessage('陪我共看《葬送的芙莉莲》半小时', { chatType: 'private' }), {
+  matched: true,
+  action: 'start',
+  activityType: 'relax',
+  contentType: 'watch',
+  contentTitle: '葬送的芙莉莲',
+  durationMinutes: 30
+});
+assert.strictEqual(parseCompanionRoomMessage('陪我一起听 初音未来演唱会', { chatType: 'private' }).contentType, 'listen');
+assert.deepStrictEqual(parseCompanionRoomMessage('/陪伴 进度 看到第 3 章', { chatType: 'private' }), {
+  matched: true,
+  action: 'progress',
+  progress: '看到第 3 章'
+});
+assert.strictEqual(parseCompanionRoomMessage('/陪伴 开始 共读 30分钟', { chatType: 'private' }).action, 'usage');
+assert.strictEqual(parseCompanionRoomMessage('/陪伴 开始 共读 三体 20分钟', { chatType: 'private' }).action, 'usage');
+assert.strictEqual(parseCompanionRoomMessage('陪我共读三体20分钟', { chatType: 'private' }).action, 'usage');
 assert.strictEqual(parseCompanionRoomMessage('/陪伴 开始 专注 20分钟', { chatType: 'private' }).action, 'usage');
 assert.strictEqual(parseCompanionRoomMessage('陪我学习20分钟', { chatType: 'private' }).action, 'usage');
 assert.strictEqual(parseCompanionRoomMessage('暂停陪伴', { chatType: 'private' }).action, 'pause');
@@ -37,6 +62,7 @@ assert.deepStrictEqual(parseCompanionRoomMessage('/陪伴 切换 放松', { chat
 assert.strictEqual(parseCompanionRoomMessage('切换到专注', { chatType: 'private' }).action, 'switch');
 assert.strictEqual(parseCompanionRoomMessage('今天学习了半小时', { chatType: 'private' }).matched, false);
 assert.strictEqual(parseCompanionRoomMessage('陪我学习一下怎么配置环境', { chatType: 'private' }).matched, false);
+assert.strictEqual(parseCompanionRoomMessage('一起看起来不错', { chatType: 'private' }).matched, false);
 assert.strictEqual(parseCompanionRoomMessage('陪我学习半小时', { chatType: 'group' }).matched, false);
 
 console.log('companionRoomParser.test.js passed');
