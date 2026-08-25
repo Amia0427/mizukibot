@@ -25,4 +25,9 @@
 ## Chunk 3: 验收
 
 - [x] 覆盖用户隔离、动作授权、兼容模式、开关持久化和 post-reply 行为。
-- [ ] 更新 README 与记忆开发文档，运行项目门禁并提交。
+- [x] 更新 README 与记忆开发文档，运行项目门禁并提交。
+
+## 完成记录
+
+- 2026-08-25 11:20 +08:00：实现提交 `20bfb51b` 已完成；九项定向回归、lint、typecheck、差异检查和暂存密钥扫描通过。
+- `npm run check:prompts` 仅受既有私有 `prompts/ADULT.txt` 未被 manifest 或 allowlist 引用阻塞，本目标未修改提示词资产。

@@ -2142,3 +2142,4 @@
 - 改动：新增 `companion_memory` 工具、用户级自动记忆设置和动作级授权；所有长期记忆写入及归档继续以 Memory V3 事件为真值，`legacy_compat` 下同步归档同 ID、同用户的旧镜像。
 - 边界：自动记忆关闭时跳过隐式画像、每轮 `turn_summary` 和 enrich 长期学习；显式“请记住”、私聊 conversation variables、短期上下文和 Daily Journal 继续工作。工具仅允许当前私聊用户访问，不开放跨用户或群聊管理。
 - 验收（2026-08-25 11:15 +08:00）：九项记忆中心、工具策略、Memory V3 和 post-reply 回归全部通过；`npm run lint` 检查 908 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。`npm run check:prompts` 唯一失败为既有私有文件 `prompts/ADULT.txt` 未被 manifest 或 allowlist 引用，本阶段未修改提示词资产。
+- 小目标已完成（2026-08-25 11:20 +08:00）：功能提交 `20bfb51b` 仅包含用户可控记忆中心、自动记忆边界、对应测试和文档；未纳入 `.codex/config.toml`，未推送远端。
