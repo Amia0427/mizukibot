@@ -275,6 +275,51 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(sentImageOptions.headers, 'x-goog-api-key'));
     assert.ok(/^Mozilla\/5\.0/.test(sentImageOptions.headers['User-Agent']));
 
+    const nestedOpenAIImage = await drawBotDiaryQzonePicture('draw a cat', {
+      buildProviderConfig: () => ({
+        enabled: true,
+        model: 'gpt-image-2',
+        apiBaseUrl: 'https://image.example/v1',
+        apiKey: 'image-key'
+      }),
+      httpClient: {
+        async post() {
+          return {
+            data: {
+              choices: [{
+                message: {
+                  content: [{
+                    type: 'image_url',
+                    image_url: { url: 'data:image/png;base64,ZmFrZQ==' }
+                  }]
+                }
+              }]
+            }
+          };
+        }
+      }
+    });
+    assert.strictEqual(nestedOpenAIImage, 'data:image/png;base64,ZmFrZQ==');
+
+    await assert.rejects(
+      () => drawBotDiaryQzonePicture('draw a cat', {
+        buildProviderConfig: () => ({
+          enabled: true,
+          model: 'gpt-image-2',
+          apiBaseUrl: 'https://image.example/v1',
+          apiKey: 'image-key'
+        }),
+        httpClient: {
+          async post() {
+            const error = new Error('Request failed');
+            error.response = { data: { error: 'invalid_api_key' } };
+            throw error;
+          }
+        }
+      }),
+      /invalid_api_key/
+    );
+
     const openAIImageHeaders = buildBotDiaryQzoneImageHeaders(
       'openai-image-key',
       'https://example.com/v1/images/generations'

@@ -1069,7 +1069,7 @@ const skillsAndIntegrationsToolSchemas = [
     type: 'function',
     function: {
       name: 'skill_image_generate_pro',
-      description: 'Generate or edit images with Nano Banana Pro. Requires GEMINI_API_KEY',
+      description: 'Generate or edit images with Nano Banana Pro. Requires a configured image provider API key',
       parameters: {
         type: 'object',
         properties: {
@@ -1077,7 +1077,7 @@ const skillsAndIntegrationsToolSchemas = [
           filename: { type: 'string', description: 'Output filename or absolute output path' },
           input_image: { type: 'string', description: 'Optional input image path for editing' },
           resolution: { type: 'string', description: '1K|2K|4K' },
-          api_key: { type: 'string', description: 'Optional override for GEMINI_API_KEY' }
+          api_key: { type: 'string', description: 'Optional override for the configured image provider API key' }
         },
         required: ['prompt']
       }

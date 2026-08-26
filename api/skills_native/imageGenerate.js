@@ -1,3 +1,4 @@
+const fs = require('fs/promises');
 const path = require('path');
 const { drawBotDiaryQzonePicture } = require('../imageGeneration');
 
@@ -18,10 +19,25 @@ function resolveImageApiBaseUrl() {
   return normalizeText(process.env.BOT_DIARY_QZONE_IMAGE_PROVIDER_API_BASE_URL || '');
 }
 
-function ensurePngName(filename = '') {
+function imageExtensionFromSource(source = '') {
+  const match = String(source || '').match(/^data:image\/([^;,]+);base64,/i);
+  const mimeSubtype = normalizeText(match?.[1]).toLowerCase();
+  if (mimeSubtype === 'jpeg') return 'jpg';
+  return mimeSubtype || 'png';
+}
+
+function ensureImageName(filename = '', extension = 'png') {
   const text = normalizeText(filename);
-  if (!text) return `image-${Date.now()}.png`;
-  return /\.png$/i.test(text) ? text : `${text}.png`;
+  if (!text) return `image-${Date.now()}.${extension}`;
+  return /\.(?:png|jpe?g|webp|gif)$/i.test(text) ? text : `${text}.${extension}`;
+}
+
+async function persistInlineImage(source = '', outputPath = '') {
+  const match = String(source || '').match(/^data:image\/[^;,]+;base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) return false;
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.writeFile(outputPath, Buffer.from(match[1].replace(/\s+/g, ''), 'base64'));
+  return true;
 }
 
 async function generateImage({
@@ -35,11 +51,10 @@ async function generateImage({
   if (!normalizedPrompt) return 'Missing prompt.';
   const resolvedApiKey = resolveImageApiKey(api_key);
   if (!resolvedApiKey) {
-    return 'Missing GEMINI_API_KEY or BOT_DIARY_QZONE_IMAGE_PROVIDER_API_KEY. Nano Banana Pro skill is unavailable.';
+    return 'Missing configured image provider API key. Nano Banana Pro skill is unavailable.';
   }
 
   const outputDir = path.join(dataDir, 'skill_cache', 'nano-banana-pro');
-  const outputPath = path.join(outputDir, ensurePngName(filename || `image-${Date.now()}`));
   let result = '';
   try {
     result = await drawBotDiaryQzonePicture(normalizedPrompt, {
@@ -60,6 +75,9 @@ async function generateImage({
     return 'Image generation returned no image.';
   }
 
+  const outputPath = path.join(outputDir, ensureImageName(filename, imageExtensionFromSource(result)));
+  await persistInlineImage(result, outputPath);
+
   return JSON.stringify({
     prompt: normalizedPrompt,
     resolution: normalizeText(resolution) || '1K',
@@ -70,5 +88,6 @@ async function generateImage({
 }
 
 module.exports = {
-  generateImage
+  generateImage,
+  persistInlineImage
 };

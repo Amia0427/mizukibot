@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 生图上游切换与真实验收 2026-08-26 22:24 +08:00
+
+- 根因：原图片上游 `https://ai.centos.hk/v1/chat/completions` 连接超时；切换到 `https://api.penguinsama.com/api/draw/openai/v1` 后，旧密钥返回 HTTP 401 `invalid_api_key`。
+- 修复：本地 `.env` 已更新为新上游和有效图片 provider 密钥；OpenAI-compatible 返回中的 `choices[].message.content[].image_url.url` 已纳入图片提取，字符串形式的上游错误也会直接展示；原生 `skill_image_generate_pro` 会将内联 Base64 图片写入声明的 `output_path`。
+- 验收：使用 `gpt-image-2` 真实请求成功，约 119 秒返回 `data:image/jpeg;base64,...`；`providerRequestNormalization.test.js`、`imageGenerate.test.js`、`node --check api/imageGeneration.js` 通过。`.env` 被忽略，不进入版本库；未修改 `prompts/admin.txt`，未推送远端。
+
 ## 管理员私聊破限 2026-08-25 11:11 +08:00
 
 - 本地私有 `prompts/admin.txt` 补了恋爱承接和成人向规则：对方主动要恋爱或性爱时按恋人接，不要改成助手，也不要用害羞把整场挡回去。

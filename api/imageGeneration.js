@@ -108,6 +108,12 @@ function extractUrlFromText(value = '') {
   return normalizeText(match ? match[0] : '');
 }
 
+function extractImageUrlValue(value) {
+  if (typeof value === 'string') return normalizeText(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  return normalizeText(value.url || value.uri || value.fileUri || value.file_uri);
+}
+
 function extractImageSourceFromPart(part = {}) {
   const inlineData = part?.inlineData || part?.inline_data || {};
   const inlineBase64 = normalizeText(
@@ -131,10 +137,14 @@ function extractImageSourceFromPart(part = {}) {
     || fileData?.url
     || part?.fileUri
     || part?.file_uri
-    || part?.url
-    || part?.image_url
   );
   if (fileUrl) return fileUrl;
+
+  const imageUrl = extractImageUrlValue(part?.image_url);
+  if (imageUrl) return imageUrl;
+
+  const directUrl = extractImageUrlValue(part?.url);
+  if (directUrl) return directUrl;
 
   const text = normalizeText(part?.text || '');
   if (/^data:image\//i.test(text)) return text;
@@ -183,7 +193,9 @@ function extractBotDiaryQzoneImageSource(payload) {
         if (source) return source;
       }
     } else {
-      const source = extractImageSourceFromPart({ text: content });
+      const source = extractImageSourceFromPart(
+        content && typeof content === 'object' ? content : { text: content }
+      );
       if (source) return source;
     }
   }
@@ -203,6 +215,7 @@ function describeBotDiaryQzoneImageFailure(payload) {
 
   const errorMessage = normalizeText(
     data?.error?.message
+    || (typeof data?.error === 'string' ? data.error : '')
     || data?.message
     || data?.detail
   );

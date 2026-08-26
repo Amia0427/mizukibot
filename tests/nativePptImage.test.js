@@ -19,7 +19,7 @@ module.exports = (async () => {
   assert.ok(String(pptGen).includes('BAIDU_API_KEY') || String(pptGen).includes('not configured'));
 
   const imageGen = await nativeImage.generateImage({ prompt: 'a cat' }, 'D:\\waifu\\data');
-  assert.ok(String(imageGen).includes('GEMINI_API_KEY') || String(imageGen).includes('unavailable'));
+  assert.ok(String(imageGen).includes('image provider API key') || String(imageGen).includes('unavailable'));
 
   if (oldBaidu !== undefined) process.env.BAIDU_API_KEY = oldBaidu;
   if (oldGemini !== undefined) process.env.GEMINI_API_KEY = oldGemini;

@@ -2151,3 +2151,8 @@
 - 边界：默认关闭，单条最多 300 字；普通回复、群聊、主动私聊和微信不自动转语音。音频不落临时文件，TTS 或 QQ 发送失败不重试，直接保留原文作为主回复文字回退。
 - 验收（2026-08-25 11:40 +08:00）：八项语音、平台权限、工具策略和 NapCat 相邻回归全部通过；`npm run lint` 检查 912 个文件，`npm run typecheck` 与 `git diff --check` 均退出 0。`npm run check:prompts` 唯一失败为既有私有文件 `prompts/ADULT.txt` 未被 manifest 或 allowlist 引用，本阶段未修改提示词资产。
 - 小目标已完成（2026-08-25 11:34 +08:00）：功能提交 `3d1a0901` 仅包含 QQ 私聊按需语音、平台边界、对应测试和文档；未纳入 `.codex/config.toml` 与本地 `.learnings`，未推送远端。
+## 运行维护 2026-08-26 22:24 +08:00
+
+- 根因：原图片 provider `https://ai.centos.hk/v1/chat/completions` 在本机真实请求中返回 `ETIMEDOUT`；切换用户提供的新上游后，旧图片密钥返回 HTTP 401 `invalid_api_key`。新密钥更新后鉴权通过，`gpt-image-2` 真实生成约 119 秒返回 JPEG 内联数据。
+- 修复：本地 `.env` 的 `BOT_DIARY_QZONE_IMAGE_PROVIDER_API_BASE_URL` 更新为 `https://api.penguinsama.com/api/draw/openai/v1`，并更新用户提供的新密钥；图片响应解析支持 OpenAI-compatible 的嵌套 `image_url.url`，字符串错误直接保留；原生图片工具将 Base64 data URL 写入 `output_path`。
+- 验收：`node tests/providerRequestNormalization.test.js`、`node tests/imageGenerate.test.js`、`node --check api/imageGeneration.js` 通过；真实返回前缀为 `data:image/jpeg;base64,`。`.env` 未纳入提交，未修改 `prompts/admin.txt`，未推送远端。
