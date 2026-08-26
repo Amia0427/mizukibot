@@ -922,3 +922,8 @@ data/       本地运行数据，默认不提交
 维护记录：2026-08-13 23:56 +08:00，实现提交 `aeab4a2a` 已修复私聊“查看思维链”请求被正常拒绝句误判为不安全回复的问题：用户出口与记忆污染两层规则均改为只识别带明确内容分隔符的实际泄漏格式。验收结果：真实日志 `req_f5da852772869f3d` 确认此前为固定回退文案误发；两组守卫、私聊流式链路及相邻 reasoning 回归通过，`npm run lint`、`npm run typecheck`、`git diff --check` 通过。完整 `npm test` 运行 166.8 秒后仅有既有 `weatherAlertProvider.test.js:65` 失败，原因是固定 `2026-08-07` 到期时间相对当前日期已过期，单独复跑可复现，本轮未修改天气模块。小目标已完成。
 维护记录：2026-08-16 10:50 +08:00，实现提交 `05ddbead` 已在 OpenAI-compatible 请求边界把内联、缓存和远程 GIF 首帧转为 JPEG，原始缓存不改写；图片专项、892 文件 lint、typecheck、diff check 和 188.9 秒完整测试均通过。目标模型两次实时验收均因上游超时未取得 200，但未再返回原 `#sym:500`，当前分支未推送远端。
 维护记录：2026-08-17 10:27 +08:00，请求 `req_a38fbfa5d6c77f9` 的上游流式调用连续三次返回 HTTP 502，状态码随后被 `generic_model_failure` 通用兜底抹掉并发送固定文案；提交 `c0bad30c` 已改为在私聊与主回复失败时直接回复 `HTTP XXX`，非 HTTP 错误保持原行为，`replyFailure` 与 Runtime V2 两项聚焦测试均通过，小目标已完成。
+## 普通用户备用模型启用 2026-08-26 21:41 +08:00
+
+- 已启用普通用户主回复备用模型：`AI_FALLBACK_ENABLED=true`；当前备用模型为 `gemini-3.7-flash`，失败阈值为 3 次，冷却时间为 600000 毫秒（10 分钟）。
+- 备用模型使用独立的 `AI_FALLBACK_API_BASE_URL`、`AI_FALLBACK_PROVIDER` 和 `AI_FALLBACK_API_KEY`；管理员 `ADMIN_AI_FALLBACK_ENABLED` 保持关闭，不受本次修改影响。
+- 验收：配置解析应显示普通用户 fallback `enabled=true`、`configured=true`、`active=false`；备用网关真实可用性需在触发故障切换时再验证。本次仅修改本地 `.env` 和文档，未推送远端。
