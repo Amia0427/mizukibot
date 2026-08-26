@@ -22,6 +22,8 @@
 
 验收记录（2026-08-23 23:58 +08:00）：`node scripts/run-tests.js tests/guanxiPrompt.test.js tests/personaMemoryState.test.js tests/normalFastReplyRuntime.test.js tests/runtimeContextModuleBoundary.test.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。`node scripts/check-prompts.js` 已确认五个 `guanxi` 资产进入治理枚举，但仍被仓库原有 `prompts/ADULT.txt` 未登记阻塞；该无关资产未在本次修改。
 
+复验记录（2026-08-26 21:55 +08:00）：正式动态链路和紧凑回退分支已跳过 persona 状态中重复的 `[GuanxiStage]` 消息，阶段规则仍以独立动态块注入一次；阶段接入、快速回复和运行时边界测试通过。
+
 ## 运行入口
 
 主接口位于 `utils/conversationVariables/index.js`：`getSnapshot`、`applyProposal`、`getEvents`、`setOverride` 和 `clearOverride`。模型提案统一为 `relationship` 与 `character` 两组增量，旧 `affinity` 字段仍可被兼容解析，但不再拥有独立写入权威。

@@ -436,6 +436,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   }
   promptBlocks.push(
     ...personaMemoryPrompt.systemMessages
+      .filter((message) => !String(message?.content || '').trim().startsWith('[GuanxiStage]'))
       .map((message, index) => createPromptBlock(
         `persona_memory_${index + 1}`,
         `Persona Memory ${index + 1}`,
@@ -925,7 +926,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           }
         })
       ],
-      ...personaMemoryPrompt.systemMessages.map((message, index) => createPromptBlock(
+      ...personaMemoryPrompt.systemMessages
+        .filter((message) => !String(message?.content || '').trim().startsWith('[GuanxiStage]'))
+        .map((message, index) => createPromptBlock(
         `persona_memory_compact_${index + 1}`,
         `Persona Memory Compact ${index + 1}`,
         message?.content,
@@ -940,7 +943,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
             blockId: 'persona_memory'
           }
         }
-      )).filter(Boolean),
+        )).filter(Boolean),
       [
         createPromptBlock('retrieved_memory_compact', 'Retrieved Memory Compact', `[RetrievedMemoryLite] ${trimTextByTokenBudget(memoryContext.memoryForPrompt, Math.floor(promptBudget * 0.18), 'tail')}`, {
           stage: 'main',

@@ -137,6 +137,7 @@ module.exports = (async () => {
   assert.strictEqual(firstFormal.personaMemoryState.guanxiStage.stage, 'stranger');
   const firstFormalText = getMessagesText(firstFormal.promptSegments.systemPrompt);
   assert.ok(firstFormalText.includes('[GuanxiStage]'));
+  assert.strictEqual((firstFormalText.match(/\[GuanxiStage\]/g) || []).length, 1);
   assert.ok(firstFormalText.includes('阶段一：初次认识的网友'));
   assert.ok(!firstFormalText.includes('阶段三：密友'));
 
