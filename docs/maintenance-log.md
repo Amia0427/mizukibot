@@ -4,6 +4,7 @@
 - 修复：本地 `.env` 已更新为 `https://api.penguinsama.com/api/draw/openai/v1`、`CREATE_AGENT_PROTOCOL=images`、`CREATE_AGENT_RESPONSE_FORMAT=b64_json` 和 ASCII 尺寸 `1024x1024`；`/create` 遇到上游明确要求 `b64_json` 时会自动重试，并将模型未开放错误映射为明确用户提示。示例配置、README 和 `docs/create-agent.md` 已同步。
 - 自动验收：`node scripts\\run-tests.js tests\\createAgentExecutor.test.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 均通过；新增回归覆盖中文 `response_format` 错误到 `b64_json` 的请求重试和模型未开放提示。
 - 真实验收：同一密钥请求上游 `/models` 成功并返回包含 `gpt-image-2` 的列表；使用 `gpt-image-2`、`response_format=b64_json` 直连 `/images/generations` 仍返回模型未开放，未伪造生图成功结果。待供应商为该密钥开放模型或提供可用模型名后，再复验完整图片落盘和发送链路。
+- 小目标已完成（2026-08-27 +08:00）：本地请求格式与错误提示修复提交 `658cd6c7` 已完成；当前剩余问题是供应商侧模型权限，未推送远端。
 
 ## 运行维护 2026-08-25 11:11 +08:00
 
