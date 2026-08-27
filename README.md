@@ -95,7 +95,12 @@
 ## `/create` 好感度解锁 2026-08-20 +08:00
 
 - `/create <提示词>` 支持群聊和私聊调用；管理员、`CREATE_AGENT_ALLOW_USER_IDS` 用户直接允许，其他用户在 `relationship.affection >= CREATE_AGENT_AFFECTION_THRESHOLD`（默认 `30`）后开放。
+
 - 好感度只控制授权，不绕过生图开关、provider 鉴权、额度和并发限制；普通私聊与其他命令仍使用原有白名单。
+
+## 生图上游配置 2026-08-27 +08:00
+
+`/create` 当前使用 PenguinSama 的 OpenAI-compatible Images 接口：`CREATE_AGENT_API_BASE_URL=https://api.penguinsama.com/api/draw/openai/v1`、`CREATE_AGENT_PROTOCOL=images`、`CREATE_AGENT_RESPONSE_FORMAT=b64_json`。配置模型前应先确认该模型已对当前密钥开放；上游 `/models` 返回模型列表不等同于生成权限已开通。
 
 ## 好感度阶段提示词 2026-08-23 +08:00
 

@@ -117,10 +117,25 @@ function isImageGenerationParameterCompatibilityError(error = null) {
   if (message.includes('compression less than 100 is not supported for png output format')) return true;
   if (message.includes('png output format') && message.includes('compression')) return true;
   if (message.includes('output compression')) return true;
+  if (message.includes('response_format') && message.includes('b64_json')) return true;
   if (param.includes('style') || param.includes('background') || param.includes('output_format') || param.includes('response_format')) {
     return true;
   }
   return false;
+}
+
+function isB64JsonResponseFormatCompatibilityError(error = null) {
+  const status = Number(error?.response?.status || 0) || 0;
+  if (status !== 400) return false;
+
+  const payload = error?.response?.data;
+  const message = String(
+    payload?.error?.message
+    || payload?.message
+    || summarizePayloadShape(payload)
+    || ''
+  ).trim().toLowerCase();
+  return message.includes('response_format') && message.includes('b64_json');
 }
 
 async function postImageGenerationWithCompatibilityFallback(requestUrl = '', prompt = '', runtimeConfig = {}, deps = {}, options = {}) {
@@ -167,6 +182,15 @@ async function postImageGenerationWithCompatibilityFallback(requestUrl = '', pro
       }));
       if (!isImageGenerationParameterCompatibilityError(error)) {
         throw error;
+      }
+      if (isB64JsonResponseFormatCompatibilityError(error)
+        && String(runtimeConfig.responseFormat || '').trim().toLowerCase() !== 'b64_json') {
+        const b64JsonBodies = buildImageGenerationRequestBodyVariants(
+          prompt,
+          { ...runtimeConfig, responseFormat: 'b64_json' },
+          options
+        );
+        requestBodies.splice(index + 1, requestBodies.length - index - 1, ...b64JsonBodies);
       }
       if (index >= requestBodies.length - 1) {
         throw error;
@@ -1019,6 +1043,7 @@ module.exports = {
   isCreateAgentUserAllowed,
   normalizeAffectionThreshold,
   isImageGenerationParameterCompatibilityError,
+  isB64JsonResponseFormatCompatibilityError,
   normalizeCreateAgentBaseUrl,
   normalizeCreateAgentProtocol,
   normalizeIdList,

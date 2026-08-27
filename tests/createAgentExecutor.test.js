@@ -75,6 +75,7 @@ module.exports = (async () => {
       isCreateAgentAccessAllowed,
       isCreateAgentAffectionAllowed,
       isImageGenerationParameterCompatibilityError,
+      isB64JsonResponseFormatCompatibilityError,
       isRuntimeStateStale,
       normalizeCreateAgentBaseUrl,
       normalizeCreateAgentProtocol,
@@ -126,6 +127,20 @@ module.exports = (async () => {
               type: 'invalid_request_error',
               param: 'tools[0].style',
               code: 'unknown_parameter'
+            }
+          }
+        }
+      }),
+      true
+    );
+    assert.strictEqual(
+      isB64JsonResponseFormatCompatibilityError({
+        response: {
+          status: 400,
+          data: {
+            error: {
+              message: 'response_format 仅支持 b64_json',
+              type: 'invalid_request_error'
             }
           }
         }
@@ -423,6 +438,41 @@ module.exports = (async () => {
       imageResult: { kind: 'b64_json', value: pngBase64, eventType: '' },
       requestUrl: 'https://mynav.website/v1/images/generations',
       streamMode: false
+    });
+
+    const b64JsonCompatibilityBodies = [];
+    const b64JsonCompatibilityResult = await postImageGenerationWithCompatibilityFallback(
+      'https://mynav.website/v1/images/generations',
+      'draw a fox with b64 fallback',
+      { ...runtimeConfig, responseFormat: 'url' },
+      {
+        httpClient: {
+          async post(url, body) {
+            b64JsonCompatibilityBodies.push(body);
+            if (body.response_format !== 'b64_json') {
+              const error = new Error('bad request');
+              error.response = {
+                status: 400,
+                data: {
+                  error: {
+                    message: 'response_format 仅支持 b64_json',
+                    type: 'invalid_request_error'
+                  }
+                }
+              };
+              throw error;
+            }
+            return { data: { data: [{ b64_json: pngBase64 }] } };
+          }
+        }
+      },
+      {}
+    );
+    assert.strictEqual(b64JsonCompatibilityBodies.length, 2);
+    assert.strictEqual(b64JsonCompatibilityBodies[0].response_format, 'url');
+    assert.strictEqual(b64JsonCompatibilityBodies[1].response_format, 'b64_json');
+    assert.deepStrictEqual(b64JsonCompatibilityResult.response.data, {
+      data: [{ b64_json: pngBase64 }]
     });
 
     await assert.rejects(
@@ -965,6 +1015,26 @@ module.exports = (async () => {
     });
     assert.strictEqual(unsupportedModel.ok, false);
     assert.strictEqual(unsupportedModel.replyText, '当前生图供应商不支持 gpt-image-2');
+
+    const unavailableModel = await executeCreateCommand({
+      prompt: 'unavailable model case',
+      chatType: 'group',
+      groupId: 'g8b',
+      senderId: 'u8b'
+    }, {
+      config: {
+        ...runtimeConfig,
+        quotaFile: path.join(tempRoot, 'quota-unavailable.json'),
+        runtimeFile: path.join(tempRoot, 'runtime-unavailable.json'),
+        errorLogFile: path.join(tempRoot, 'errors-unavailable.log')
+      },
+      generateImage: async () => {
+        throw new Error('http_error status=400 body={"error":{"message":"该模型不存在或未开放，请重新拉取模型列表"}}');
+      },
+      sendGroupImageMessage: async () => ({ success: true })
+    });
+    assert.strictEqual(unavailableModel.ok, false);
+    assert.strictEqual(unavailableModel.replyText, '当前生图模型未开放 gpt-image-2，请检查模型名称或供应商权限');
 
     const authFailure = await executeCreateCommand({
       prompt: 'auth failure',

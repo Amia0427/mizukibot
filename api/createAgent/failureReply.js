@@ -16,6 +16,9 @@ function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
   if (lower.includes('unknown provider for model')) {
     return `当前生图供应商不支持 ${providerModel || '该模型'}`;
   }
+  if (lower.includes('该模型不存在或未开放') || lower.includes('model does not exist or is not available')) {
+    return `当前生图模型未开放 ${providerModel || '该模型'}，请检查模型名称或供应商权限`;
+  }
   if (lower.includes('chat completions endpoint returned html')) return '当前生图接口路径不兼容，供应商返回了网页页面';
   if (lower.includes('file not found') && lower.includes('resource is valid for 2 hours')) {
     return '生图临时资源已失效，请重试或更换提示词';

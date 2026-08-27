@@ -1,3 +1,10 @@
+## 运行维护 2026-08-27 +08:00
+
+- 根因：本地 `/create` 配置仍使用 `CREATE_AGENT_RESPONSE_FORMAT=url`，新 PenguinSama Images 上游返回 `response_format 仅支持 b64_json`；随后将请求改为 `b64_json` 后，真实生成接口又返回 `该模型不存在或未开放，请重新拉取模型列表`，说明当前密钥的模型开放状态仍未满足生成要求。
+- 修复：本地 `.env` 已更新为 `https://api.penguinsama.com/api/draw/openai/v1`、`CREATE_AGENT_PROTOCOL=images`、`CREATE_AGENT_RESPONSE_FORMAT=b64_json` 和 ASCII 尺寸 `1024x1024`；`/create` 遇到上游明确要求 `b64_json` 时会自动重试，并将模型未开放错误映射为明确用户提示。示例配置、README 和 `docs/create-agent.md` 已同步。
+- 自动验收：`node scripts\\run-tests.js tests\\createAgentExecutor.test.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 均通过；新增回归覆盖中文 `response_format` 错误到 `b64_json` 的请求重试和模型未开放提示。
+- 真实验收：同一密钥请求上游 `/models` 成功并返回包含 `gpt-image-2` 的列表；使用 `gpt-image-2`、`response_format=b64_json` 直连 `/images/generations` 仍返回模型未开放，未伪造生图成功结果。待供应商为该密钥开放模型或提供可用模型名后，再复验完整图片落盘和发送链路。
+
 ## 运行维护 2026-08-25 11:11 +08:00
 
 - 小目标：修改本地私有 `prompts/admin.txt`，让管理员私聊能谈恋爱并生成成人向内容。
