@@ -5,6 +5,7 @@
 - 自动验收：`node scripts\\run-tests.js tests\\createAgentExecutor.test.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 均通过；新增回归覆盖中文 `response_format` 错误到 `b64_json` 的请求重试和模型未开放提示。
 - 真实验收：同一密钥请求上游 `/models` 成功并返回包含 `gpt-image-2` 的列表；使用 `gpt-image-2`、`response_format=b64_json` 直连 `/images/generations` 仍返回模型未开放，未伪造生图成功结果。待供应商为该密钥开放模型或提供可用模型名后，再复验完整图片落盘和发送链路。
 - 小目标已完成（2026-08-27 +08:00）：本地请求格式与错误提示修复提交 `658cd6c7` 已完成；当前剩余问题是供应商侧模型权限，未推送远端。
+- 后续真实验收（2026-08-27 +08:00）：逐个测试 `/models` 返回的 6 个模型，`nano-banana-pro`、`nano-banana-2`、`flux-2-pro`、`flux-2-klein-4b`、`grok-imagine` 和 `gpt-image-2` 均返回 `HTTP 200` 与 `data[0].b64_json`；`gpt-image-2` 使用项目完整参数（尺寸、质量、风格、背景、PNG 输出、压缩和 `b64_json`）再次返回成功。此前“模型未开放”是上游暂时性或权限状态变化，当前无需切换模型。
 
 ## 运行维护 2026-08-27 11:00 +08:00
 

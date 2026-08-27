@@ -102,6 +102,8 @@
 
 `/create` 当前使用 PenguinSama 的 OpenAI-compatible Images 接口：`CREATE_AGENT_API_BASE_URL=https://api.penguinsama.com/api/draw/openai/v1`、`CREATE_AGENT_PROTOCOL=images`、`CREATE_AGENT_RESPONSE_FORMAT=b64_json`。配置模型前应先确认该模型已对当前密钥开放；上游 `/models` 返回模型列表不等同于生成权限已开通。
 
+2026-08-27 真实验收：`nano-banana-pro`、`nano-banana-2`、`flux-2-pro`、`flux-2-klein-4b`、`grok-imagine` 和 `gpt-image-2` 均成功返回 `HTTP 200` 与 `data[0].b64_json`；`gpt-image-2` 使用项目完整参数再次生成成功。
+
 ## 好感度阶段提示词 2026-08-23 +08:00
 
 - 正常私聊、群聊点名主回复和正式主回复链路会按当前关系阶段只注入一份 `prompts/guanxi/01.txt`–`05.txt` 规则；关系阶段变化会进入 session prompt cache fingerprint，下一轮实时切换。
