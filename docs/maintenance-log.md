@@ -6,6 +6,14 @@
 - 真实验收：同一密钥请求上游 `/models` 成功并返回包含 `gpt-image-2` 的列表；使用 `gpt-image-2`、`response_format=b64_json` 直连 `/images/generations` 仍返回模型未开放，未伪造生图成功结果。待供应商为该密钥开放模型或提供可用模型名后，再复验完整图片落盘和发送链路。
 - 小目标已完成（2026-08-27 +08:00）：本地请求格式与错误提示修复提交 `658cd6c7` 已完成；当前剩余问题是供应商侧模型权限，未推送远端。
 
+## 运行维护 2026-08-27 11:00 +08:00
+
+- 根因：入口 dispatcher、通用入站 controller、私聊入站 controller 和前台 controller 都存在队列满或等待超时即拒绝的路径；多用户突发时消息未进入路由和回复。
+- 修复：正常运行期队列只排队不丢弃，active 并发仍由 global/lane 控制，同一 `sessionKey` 仍串行；默认通用/私聊 global/general 并发提升为 16，移除队列长度与等待超时配置接线。停机 `drain: false` 的未开始任务清理保持不变。
+- 验收：入口 dispatcher、并发背压、私聊入站突发 8 条、私聊/群聊/前台并发、私聊新鲜度、NapCat WebSocket/HTTP 入口 smoke 全部通过；`npm run lint`（912 个文件）、`npm run typecheck` 和 `git diff --check` 通过。
+- 完整回归：`npm test` 退出 1，仅有既有 `agentPrompts.test.js` 断言，以及私有 `prompts/ADULT.txt` 未被 manifest/allowlist 引用的提示词检查失败；本次未修改提示词资产。
+- 边界：本次未修改 `prompts/admin.txt`，未推送远端；当前本地 `.env` 的通用和私聊 global/general 并发均已调整为 16。
+
 ## 运行维护 2026-08-25 11:11 +08:00
 
 - 小目标：修改本地私有 `prompts/admin.txt`，让管理员私聊能谈恋爱并生成成人向内容。

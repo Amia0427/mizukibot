@@ -12,13 +12,16 @@ module.exports = (async () => {
     queueTimeoutMs: 25
   });
   const lock = await foreground.acquire({ userId: 'u1', sessionKey: 'u1', lane: 'general', messageId: 'm1' });
-  const queued = foreground.acquire({ userId: 'u2', sessionKey: 'u2', lane: 'general', messageId: 'm2' });
-  await assert.rejects(
-    foreground.acquire({ userId: 'u3', sessionKey: 'u3', lane: 'general', messageId: 'm3' }),
-    /queue is full/
-  );
-  await assert.rejects(queued, /timed out/);
+  const queued = [
+    foreground.acquire({ userId: 'u2', sessionKey: 'u2', lane: 'general', messageId: 'm2' }),
+    foreground.acquire({ userId: 'u3', sessionKey: 'u3', lane: 'general', messageId: 'm3' })
+  ];
+  await new Promise((resolve) => setTimeout(resolve, 40));
   lock.release();
+  const secondLock = await queued[0];
+  secondLock.release();
+  const thirdLock = await queued[1];
+  thirdLock.release();
 
   const inbound = createInboundConcurrencyController({
     globalLimit: 1,
@@ -26,17 +29,23 @@ module.exports = (async () => {
     adminLimit: 0,
     perUserLimit: 1,
     maxQueueLength: 2,
-    queueTimeoutMs: 0
+    queueTimeoutMs: 25
   });
   const first = await inbound.acquire({ userId: 'same', sessionKey: 'same', lane: 'general', messageId: 'a' });
-  const sameSessionQueued = inbound.acquire({ userId: 'same', sessionKey: 'same', lane: 'general', messageId: 'b' });
-  const otherSessionQueued = inbound.acquire({ userId: 'other', sessionKey: 'other', lane: 'general', messageId: 'c' });
+  const queuedInbound = [
+    inbound.acquire({ userId: 'same', sessionKey: 'same', lane: 'general', messageId: 'b' }),
+    inbound.acquire({ userId: 'other', sessionKey: 'other', lane: 'general', messageId: 'c' }),
+    inbound.acquire({ userId: 'third', sessionKey: 'third', lane: 'general', messageId: 'd' })
+  ];
+  await new Promise((resolve) => setTimeout(resolve, 40));
   first.release();
-  const other = await otherSessionQueued;
+  const other = await queuedInbound[1];
   assert.strictEqual(other.requestId.includes('other'), true, 'fair queue should let another eligible session run first');
   other.release();
-  const same = await sameSessionQueued;
+  const same = await queuedInbound[0];
   same.release();
+  const third = await queuedInbound[2];
+  third.release();
 
   const adminInbound = createInboundConcurrencyController({
     globalLimit: 2,

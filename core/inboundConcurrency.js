@@ -24,8 +24,6 @@ function createInboundConcurrencyController(options = {}) {
   const generalLimit = normalizeNonNegativeInt(options.generalLimit, 2);
   const adminLimit = normalizeNonNegativeInt(options.adminLimit, 1);
   const perUserLimit = normalizePositiveInt(options.perUserLimit, 1);
-  const maxQueueLength = normalizeNonNegativeInt(options.maxQueueLength, 0);
-  const queueTimeoutMs = normalizeNonNegativeInt(options.queueTimeoutMs, 0);
   let nextGeneralSessionCursor = 0;
 
   const laneLimits = {
@@ -63,14 +61,8 @@ function createInboundConcurrencyController(options = {}) {
       activeGeneral: activeByLane.general,
       activeAdmin: activeByLane.admin,
       queuedGeneral: queues.general.length,
-      queuedAdmin: queues.admin.length,
-      maxQueueLength,
-      queueTimeoutMs
+      queuedAdmin: queues.admin.length
     };
-  }
-
-  function clearQueuedRequest(item) {
-    if (item?.timer) clearTimeout(item.timer);
   }
 
   function hasLaneCapacity(lane) {
@@ -176,14 +168,12 @@ function createInboundConcurrencyController(options = {}) {
           continue;
         }
         const item = queue.splice(i, 1)[0];
-        clearQueuedRequest(item);
         if (lane === 'general') nextGeneralSessionCursor = i;
         return item;
       }
     }
     if (fallback) {
       const item = queue.splice(fallback.index, 1)[0];
-      clearQueuedRequest(item);
       if (lane === 'general') nextGeneralSessionCursor = fallback.index;
       return item;
     }
@@ -227,24 +217,11 @@ function createInboundConcurrencyController(options = {}) {
       return reserveSlot(normalized);
     }
 
-    if (maxQueueLength > 0 && queues[normalized.lane].length >= maxQueueLength) {
-      throw new Error(`[inbound-concurrency] ${normalized.lane} queue is full`);
-    }
-
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const queued = {
         ...normalized,
-        resolve,
-        reject,
-        timer: null
+        resolve
       };
-      if (queueTimeoutMs > 0) {
-        queued.timer = setTimeout(() => {
-          const index = queues[normalized.lane].indexOf(queued);
-          if (index >= 0) queues[normalized.lane].splice(index, 1);
-          reject(new Error(`[inbound-concurrency] queued request timed out after ${queueTimeoutMs}ms`));
-        }, queueTimeoutMs);
-      }
       queues[normalized.lane].push(queued);
       console.log('[inbound-concurrency] queued', {
         lane: normalized.lane,

@@ -23,7 +23,6 @@ function createMessageIngressDispatcher(options = {}) {
     ? options.handleMessage
     : async () => {};
   const maxActive = normalizePositiveInt(options.maxActive, 64);
-  const maxQueueLength = normalizeNonNegativeInt(options.maxQueueLength, 200);
   const logger = options.logger || console;
   const queue = [];
   const active = new Set();
@@ -39,7 +38,6 @@ function createMessageIngressDispatcher(options = {}) {
     return {
       accepting,
       maxActive,
-      maxQueueLength,
       queued: queue.length,
       active: active.size,
       dropped,
@@ -108,22 +106,6 @@ function createMessageIngressDispatcher(options = {}) {
       }
       deferred?.reject(Object.assign(new Error('message ingress dispatcher stopped'), {
         code: 'MESSAGE_INGRESS_STOPPED'
-      }));
-      return false;
-    }
-
-    if (maxQueueLength > 0 && queue.length >= maxQueueLength) {
-      dropped += 1;
-      if (logger && typeof logger.warn === 'function') {
-        logger.warn('[message-ingress] async queue full; drop message', {
-          source: meta?.source || '',
-          maxQueueLength,
-          active: active.size,
-          queued: queue.length
-        });
-      }
-      deferred?.reject(Object.assign(new Error('message ingress queue full'), {
-        code: 'MESSAGE_INGRESS_QUEUE_FULL'
       }));
       return false;
     }

@@ -22,15 +22,13 @@ module.exports = (() => {
     process.env.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY = 'not-a-number';
     process.env.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY = 'not-a-number';
     process.env.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT = 'not-a-number';
-    process.env.PRIVATE_INBOUND_QUEUE_TIMEOUT_MS = 'not-a-number';
 
     let config = reloadConfig();
 
-    assert.strictEqual(config.PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY, 3);
-    assert.strictEqual(config.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY, 3);
+    assert.strictEqual(config.PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY, 16);
+    assert.strictEqual(config.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY, 16);
     assert.strictEqual(config.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY, 1);
     assert.strictEqual(config.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT, 1);
-    assert.strictEqual(config.PRIVATE_INBOUND_QUEUE_TIMEOUT_MS, 180000);
 
     process.env.INBOUND_GLOBAL_MAX_CONCURRENCY = '20';
     process.env.INBOUND_GENERAL_MAX_CONCURRENCY = '20';
@@ -40,7 +38,6 @@ module.exports = (() => {
     process.env.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY = '15';
     process.env.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY = '15';
     process.env.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT = '3';
-    process.env.PRIVATE_INBOUND_QUEUE_TIMEOUT_MS = '240000';
 
     config = reloadConfig();
 
@@ -52,7 +49,6 @@ module.exports = (() => {
     assert.strictEqual(config.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY, 15);
     assert.strictEqual(config.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY, 15);
     assert.strictEqual(config.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT, 3);
-    assert.strictEqual(config.PRIVATE_INBOUND_QUEUE_TIMEOUT_MS, 240000);
 
     console.log('privateChatConcurrencyConfig.test.js passed');
   } finally {

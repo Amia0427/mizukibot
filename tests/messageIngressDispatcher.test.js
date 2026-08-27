@@ -46,7 +46,7 @@ module.exports = (async () => {
   assert.strictEqual(await dispatched.dispatch({ id: 'waited' }), 'done:waited');
   await dispatched.stop({ drain: true, timeoutMs: 1000 });
 
-  const full = createMessageIngressDispatcher({
+  const noDrop = createMessageIngressDispatcher({
     maxActive: 1,
     maxQueueLength: 1,
     logger: {
@@ -57,17 +57,36 @@ module.exports = (async () => {
       await delay(50);
     }
   });
-  assert.strictEqual(full.enqueue({ id: 1 }), true);
+  assert.strictEqual(noDrop.enqueue({ id: 1 }), true);
   await delay(0);
-  assert.strictEqual(full.enqueue({ id: 2 }), true);
-  assert.strictEqual(full.enqueue({ id: 3 }), false, 'queue full should drop without throwing');
-  await assert.rejects(
-    () => full.dispatch({ id: 4 }),
-    (error) => error?.code === 'MESSAGE_INGRESS_QUEUE_FULL'
-  );
-  assert.strictEqual(full.getSnapshot().dropped, 2);
-  await full.stop({ drain: false });
-  assert.strictEqual(full.getSnapshot().dropped, 3, 'stop without drain should count discarded queued work');
+  assert.strictEqual(noDrop.enqueue({ id: 2 }), true);
+  assert.strictEqual(noDrop.enqueue({ id: 3 }), true, 'messages beyond the legacy queue limit should keep waiting');
+  const fourth = noDrop.dispatch({ id: 4 });
+  await noDrop.stop({ drain: true, timeoutMs: 1000 });
+  await fourth;
+  assert.strictEqual(noDrop.getSnapshot().completed, 4);
+  assert.strictEqual(noDrop.getSnapshot().dropped, 0);
+
+  const stopping = createMessageIngressDispatcher({
+    maxActive: 1,
+    maxQueueLength: 1,
+    logger: {
+      warn() {},
+      error() {}
+    },
+    handleMessage: async () => {
+      await delay(50);
+    }
+  });
+  assert.strictEqual(stopping.enqueue({ id: 1 }), true);
+  await delay(0);
+  const discarded = [2, 3, 4].map((id) => assert.rejects(
+    stopping.dispatch({ id }),
+    (error) => error?.code === 'MESSAGE_INGRESS_DISCARDED'
+  ));
+  await stopping.stop({ drain: false });
+  await Promise.all(discarded);
+  assert.strictEqual(stopping.getSnapshot().dropped, 3, 'stop without drain should count discarded queued work');
 
   console.log('messageIngressDispatcher.test.js passed');
 })().catch((error) => {

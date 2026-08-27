@@ -597,6 +597,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-08-27 11:00 +08:00：修复多用户同时对话时因入口队列满、业务入站队列满或排队超时导致的无回复。入口和入站队列现在只受 active 并发槽调度，不再在正常运行期按队列长度/等待时间丢弃消息；通用入站与私聊入站默认并发提升为 16，同一 `sessionKey` 仍串行，停机 `drain: false` 的未开始任务清理保持不变。验收：入口 dispatcher、并发背压、私聊入站突发 8 条、私聊/群聊/前台并发回归、`npm run lint`、`npm run typecheck`、`npm run smoke:napcat-ingress` 和 `git diff --check` 通过。完整 `npm test` 退出 1，仅有既有 `agentPrompts.test.js` 断言，以及私有 `prompts/ADULT.txt` 未被 manifest/allowlist 引用的提示词检查失败；本次未修改提示词资产，尤其未修改 `prompts/admin.txt`，未推送远端。
+
 更新 2026-08-24 17:47 +08:00：实现提交 `eeb51ecb` 将私聊入站队列超时从 20 秒调整为 180 秒，避免同一用户前一条图片问答耗时较长时，后续消息在拿到会话锁前被丢弃；多用户并行、同用户串行和队列长度 10 的边界保持不变。验收结果：私聊并发配置、入站并发、私聊并发来源和背压回归通过，测试运行日志确认 `queueTimeoutMs=180000`；`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。小目标已完成。
 
 更新 2026-07-09 17:48 +08:00：修复主回复 prepare 软超时 fallback 在非召回 `chat/default/direct_chat` 下构造 ambient memory context 并注入 `retrieved_memory_lite/daily_journal` 的问题；非召回普通主回复不再构造 fallback memory context，显式召回保持原记忆 fallback。验收结果：`node scripts/run-tests.js tests/runtimeV2PromptTimeoutMemoryFallback.test.js tests/chatDefaultMemoryLeakDiagnostics.test.js tests/geminiSamplingDegradationPromptGate.test.js` 通过；真实 24h 诊断仍显示修复前日志中 `candidateChatDefaultRequests=49`、`violationRequests=15`。小目标已完成。

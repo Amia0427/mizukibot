@@ -126,13 +126,13 @@ WebSocket `message` 与 HTTP reverse handler 都调用 `acceptNapCatIncomingMess
 
 这里不应放业务路由。Transport 的职责是解析、连接状态、认证、重连和把事件交给统一入口。
 
-### 2. 进程级入口队列限制总压力
+### 2. 进程级入口队列控制总压力
 
-启用 `MESSAGE_INGRESS_ASYNC_ENABLED` 后，`acceptIncomingMessage()` 只把任务压入 `createMessageIngressDispatcher()`。dispatcher 使用全局 `maxActive` 和 `maxQueueLength`：
+启用 `MESSAGE_INGRESS_ASYNC_ENABLED` 后，`acceptIncomingMessage()` 只把任务压入 `createMessageIngressDispatcher()`。dispatcher 使用全局 `maxActive` 控制同时进入 handler 的任务数：
 
-- 队列满时明确丢弃并记录快照，而不是无限积压。
+- active slot 满时继续排队，正常运行期不因队列长度或等待时间丢弃消息。
 - 单个 handler 失败只增加失败计数，不让 drain 循环停止。
-- shutdown 可以停止接收后等待 active 与 queue 清空。
+- shutdown 可以停止接收后等待 active 与 queue 清空；显式 `drain: false` 时才清理尚未开始的任务。
 
 它只限制“进入 handler 的总量”，不保证同一用户、同一会话或前台模型调用的顺序；这些约束在消息处理器内第二次实施。
 

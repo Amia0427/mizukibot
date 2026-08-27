@@ -554,8 +554,7 @@ const platformMessageProcessor = createPlatformMessageProcessor({
 messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
   ? createMessageIngressDispatcher({
     handleMessage: (msg) => platformMessageProcessor.run(msg, handleIncomingMessage),
-    maxActive: config.MESSAGE_INGRESS_ASYNC_MAX_ACTIVE,
-    maxQueueLength: config.MESSAGE_INGRESS_ASYNC_MAX_QUEUE_LENGTH
+    maxActive: config.MESSAGE_INGRESS_ASYNC_MAX_ACTIVE
   })
   : null;
 

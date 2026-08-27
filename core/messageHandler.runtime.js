@@ -920,24 +920,18 @@ function createMessageHandler({
     globalLimit: config.INBOUND_GLOBAL_MAX_CONCURRENCY,
     generalLimit: config.INBOUND_GENERAL_MAX_CONCURRENCY,
     adminLimit: config.INBOUND_ADMIN_MAX_CONCURRENCY,
-    perUserLimit: config.INBOUND_PER_USER_MAX_INFLIGHT,
-    maxQueueLength: config.INBOUND_QUEUE_MAX_LENGTH,
-    queueTimeoutMs: config.INBOUND_QUEUE_TIMEOUT_MS
+    perUserLimit: config.INBOUND_PER_USER_MAX_INFLIGHT
   });
   const privateInboundConcurrency = createInboundConcurrencyController({
     globalLimit: config.PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY,
     generalLimit: config.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY,
     adminLimit: config.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY,
-    perUserLimit: config.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT,
-    maxQueueLength: config.PRIVATE_INBOUND_QUEUE_MAX_LENGTH,
-    queueTimeoutMs: config.PRIVATE_INBOUND_QUEUE_TIMEOUT_MS
+    perUserLimit: config.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT
   });
   const foregroundConcurrency = createForegroundConcurrencyController({
     globalLimit: config.FOREGROUND_GLOBAL_MAX_CONCURRENCY,
     adminReservedSlots: config.FOREGROUND_ADMIN_RESERVED_SLOTS,
-    perUserLimit: config.FOREGROUND_PER_USER_MAX_INFLIGHT,
-    maxQueueLength: config.FOREGROUND_QUEUE_MAX_LENGTH,
-    queueTimeoutMs: config.FOREGROUND_QUEUE_TIMEOUT_MS
+    perUserLimit: config.FOREGROUND_PER_USER_MAX_INFLIGHT
   });
   const normalizeUserFacingReply = replyRuntime.normalizeUserFacingReply;
   const parseBackgroundControlCommand = replyRuntime.parseBackgroundControlCommand;

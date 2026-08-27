@@ -170,6 +170,8 @@ module.exports = (async () => {
     process.env.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY = '2';
     process.env.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY = '1';
     process.env.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT = '1';
+    process.env.PRIVATE_INBOUND_QUEUE_MAX_LENGTH = '2';
+    process.env.PRIVATE_INBOUND_QUEUE_TIMEOUT_MS = '25';
 
     clearProjectCache();
 
@@ -210,6 +212,20 @@ module.exports = (async () => {
       2,
       'different private users should both start send_private_msg before the first send ends'
     );
+
+    const burstyUsers = await runScenario({
+      config,
+      createMessageHandler,
+      messages: Array.from({ length: 8 }, (_, index) => buildPrivateMessage({
+        userId: `burst_user_${index}`,
+        messageId: `burst_${index}`,
+        rawText: `突发私聊 ${index}`
+      })),
+      routeDelayMs: 45
+    });
+
+    assert.strictEqual(burstyUsers.sentPayloads.length, 8, 'private messages should wait instead of being dropped');
+    assert.strictEqual(burstyUsers.maxActive, 2, 'private burst should continue using the configured parallel slots');
 
     const sameUser = await runScenario({
       config,
