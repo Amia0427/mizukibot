@@ -126,6 +126,6 @@ git diff --check
 
 检查 `git status`、`git diff --stat` 和 `git diff --name-only`，确认只包含本次并发修复、文档/README、测试和必要本地配置；保留用户已有 `.belt/notices/survey-q-use_case`、`.codex/config.toml`、`prompts/guanxi/07.txt` 改动。
 
-- [ ] **Step 4: 提交当前分支，不推送远端**
+- [x] **Step 4: 提交当前分支，不推送远端**
 
 提交信息：`fix: prevent message loss under concurrent chats`。

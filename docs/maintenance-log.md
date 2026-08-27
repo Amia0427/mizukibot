@@ -13,6 +13,7 @@
 - 验收：入口 dispatcher、并发背压、私聊入站突发 8 条、私聊/群聊/前台并发、私聊新鲜度、NapCat WebSocket/HTTP 入口 smoke 全部通过；`npm run lint`（912 个文件）、`npm run typecheck` 和 `git diff --check` 通过。
 - 完整回归：`npm test` 退出 1，仅有既有 `agentPrompts.test.js` 断言，以及私有 `prompts/ADULT.txt` 未被 manifest/allowlist 引用的提示词检查失败；本次未修改提示词资产。
 - 边界：本次未修改 `prompts/admin.txt`，未推送远端；当前本地 `.env` 的通用和私聊 global/general 并发均已调整为 16。
+- 小目标已完成（2026-08-27 11:00 +08:00）：高并发不丢消息实现、回归、配置和文档均已提交；并行改动未纳入，当前分支未推送远端。
 
 ## 运行维护 2026-08-25 11:11 +08:00
 
