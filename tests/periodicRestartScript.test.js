@@ -76,14 +76,26 @@ if (restartResult.error?.code === 'ENOENT' && process.platform !== 'win32') {
   assert.doesNotMatch(`${installResult.stdout}\n${installResult.stderr}`, /install trap:/);
   const installPlan = readJsonLine(installResult.stdout);
   assert.strictEqual(installPlan.execute, false);
-  assert.strictEqual(installPlan.dailyTime, '04:00');
+  assert.strictEqual(installPlan.dailyTime, '09:30, 21:30');
+  assert.deepStrictEqual(installPlan.dailyTimes, ['09:30', '21:30']);
+  assert.strictEqual(installPlan.firstRuns.length, 2);
   assert.strictEqual(path.resolve(installPlan.restartScript), restartScript);
   assert.strictEqual(path.resolve(installPlan.workingDirectory), root);
-  assert.match(installPlan.taskXml, /<CalendarTrigger>/);
+  assert.strictEqual((installPlan.taskXml.match(/<CalendarTrigger>/g) || []).length, 2);
+  assert.match(installPlan.taskXml, /<Description>MizukiBot periodic restart daily at 09:30, 21:30<\/Description>/);
   assert.match(installPlan.taskXml, /<ScheduleByDay>\s*<DaysInterval>1<\/DaysInterval>\s*<\/ScheduleByDay>/);
   assert.ok(installPlan.taskXml.includes(`-File "${restartScript}"`));
   assert.ok(installPlan.taskXml.includes(`<WorkingDirectory>${root}</WorkingDirectory>`));
   assert.doesNotMatch(installPlan.taskXml, /<Repetition>/);
+
+  const singleTimeResult = runPowerShell([
+    ...installTraps,
+    `& ${quotePowerShell(installScript)} -ValidateOnly -DailyTime '12:15'`
+  ].join('; '));
+  assert.strictEqual(singleTimeResult.status, 0, singleTimeResult.stderr || singleTimeResult.stdout);
+  const singleTimePlan = readJsonLine(singleTimeResult.stdout);
+  assert.deepStrictEqual(singleTimePlan.dailyTimes, ['12:15']);
+  assert.strictEqual((singleTimePlan.taskXml.match(/<CalendarTrigger>/g) || []).length, 1);
 
   const invalidResult = runPowerShell([
     ...installTraps,

@@ -1,9 +1,9 @@
 # 安装定期重启计划任务
-# 每天凌晨 04:00 重启一次Bot
+# 每天 09:30、21:30 重启 Bot
 
 param(
   [string]$TaskName = 'MizukiBotPeriodicRestart',
-  [string]$DailyTime = '04:00',
+  [string[]]$DailyTime = @('09:30', '21:30'),
   [switch]$ValidateOnly
 )
 
@@ -14,44 +14,57 @@ $RestartScript = Join-Path $ScriptRoot "restart-bot-periodic.ps1"
 
 Write-Host "Installing periodic restart task..."
 Write-Host "  Task name: $TaskName"
-Write-Host "  Schedule: Daily at $DailyTime"
+Write-Host "  Schedule: Daily at $($DailyTime -join ', ')"
 Write-Host "  Script: $RestartScript"
 
 try {
-  # 计算首次运行时间（当天已过则顺延到明天）
-  $dailyTimeMatch = [regex]::Match($DailyTime, '^(?<hour>\d{1,2}):(?<minute>\d{2})$')
-  if (-not $dailyTimeMatch.Success) {
-    throw "DailyTime must be HH:mm, for example 04:00."
-  }
-  $dailyHour = [int]$dailyTimeMatch.Groups['hour'].Value
-  $dailyMinute = [int]$dailyTimeMatch.Groups['minute'].Value
-  if ($dailyHour -lt 0 -or $dailyHour -gt 23 -or $dailyMinute -lt 0 -or $dailyMinute -gt 59) {
-    throw "DailyTime must be a valid 24-hour time, for example 04:00."
-  }
-
   $now = Get-Date
-  $firstRun = Get-Date -Date $now.Date -Hour $dailyHour -Minute $dailyMinute -Second 0
-  if ($firstRun -le $now) {
-    $firstRun = $firstRun.AddDays(1)
+  $triggers = @(foreach ($dailyTimeValue in $DailyTime) {
+    $dailyTimeMatch = [regex]::Match($dailyTimeValue, '^(?<hour>\d{1,2}):(?<minute>\d{2})$')
+    if (-not $dailyTimeMatch.Success) {
+      throw "DailyTime must be HH:mm, for example 09:30."
+    }
+    $dailyHour = [int]$dailyTimeMatch.Groups['hour'].Value
+    $dailyMinute = [int]$dailyTimeMatch.Groups['minute'].Value
+    if ($dailyHour -lt 0 -or $dailyHour -gt 23 -or $dailyMinute -lt 0 -or $dailyMinute -gt 59) {
+      throw "DailyTime must be a valid 24-hour time, for example 09:30."
+    }
+
+    $firstRun = Get-Date -Date $now.Date -Hour $dailyHour -Minute $dailyMinute -Second 0
+    if ($firstRun -le $now) {
+      $firstRun = $firstRun.AddDays(1)
+    }
+
+    [pscustomobject]@{
+      label = '{0:D2}:{1:D2}' -f $dailyHour, $dailyMinute
+      startBoundary = $firstRun.ToString("yyyy-MM-ddTHH:mm:ss")
+    }
+  })
+  if ($triggers.Count -eq 0) {
+    throw 'DailyTime must contain at least one time.'
   }
-  $startTime = $firstRun.ToString("yyyy-MM-ddTHH:mm:ss")
-  $dailyTimeLabel = '{0:D2}:{1:D2}' -f $dailyHour, $dailyMinute
+  $dailyTimeLabels = @($triggers | ForEach-Object { $_.label })
+  $triggerXml = ($triggers | ForEach-Object {
+    @"
+    <CalendarTrigger>
+      <StartBoundary>$($_.startBoundary)</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+"@
+  }) -join "`n"
 
   # 创建任务XML
   $taskXml = @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>MizukiBot periodic restart daily at $dailyTimeLabel</Description>
+    <Description>MizukiBot periodic restart daily at $($dailyTimeLabels -join ', ')</Description>
   </RegistrationInfo>
   <Triggers>
-    <CalendarTrigger>
-      <StartBoundary>$startTime</StartBoundary>
-      <Enabled>true</Enabled>
-      <ScheduleByDay>
-        <DaysInterval>1</DaysInterval>
-      </ScheduleByDay>
-    </CalendarTrigger>
+$triggerXml
   </Triggers>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
@@ -88,8 +101,9 @@ try {
   $taskPlan = [ordered]@{
     execute = -not [bool]$ValidateOnly
     taskName = $TaskName
-    dailyTime = $dailyTimeLabel
-    firstRun = $startTime
+    dailyTime = $dailyTimeLabels -join ', '
+    dailyTimes = $dailyTimeLabels
+    firstRuns = @($triggers | ForEach-Object { $_.startBoundary })
     restartScript = $RestartScript
     workingDirectory = $ProjectRoot
     taskXml = $taskXml
@@ -128,8 +142,8 @@ try {
   Write-Host ""
   Write-Host "Task details:"
   Write-Host "  - Name: $TaskName"
-  Write-Host "  - Schedule: Daily at $dailyTimeLabel"
-  Write-Host "  - First run: $startTime"
+  Write-Host "  - Schedule: Daily at $($dailyTimeLabels -join ', ')"
+  Write-Host "  - First runs: $($triggers.startBoundary -join ', ')"
   Write-Host ""
   Write-Host "To check task status, run:"
   Write-Host "  schtasks /query /tn $TaskName /fo list /v"

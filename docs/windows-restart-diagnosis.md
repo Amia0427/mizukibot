@@ -1,5 +1,7 @@
 # Windows 重启脚本诊断
 
+更新 2026-08-27 09:42 +08:00：`scripts\install-periodic-restart.ps1` 默认将 `MizukiBotPeriodicRestart` 配置为每天 09:30、21:30 两个 `CalendarTrigger`，同时保留显式单时间 `-DailyTime` 调用。已重新注册本机计划任务；实查触发器为 `2026-08-28T09:30:00`、`2026-08-27T21:30:00`，`NextRunTime=2026-08-27 21:30:00`。验收：`node tests\periodicRestartScript.test.js`、PowerShell AST parse、`Get-ScheduledTask -TaskName MizukiBotPeriodicRestart` 均通过。
+
 更新 2026-08-18 10:35 +08:00：修复 `scripts\restart-bot-periodic.ps1` 启动 `node index.js` 时未重定向 stdout/stderr，导致 `data\bot-runtime.out.log` 与 `data\bot-runtime.err.log` 无法记录周期重启后进程输出。脚本现将两条日志路径同时暴露在 `-ValidateOnly` 计划中，并传给真实 `Start-Process` 的 `-RedirectStandardOutput`/`-RedirectStandardError`。验收：`node tests\periodicRestartScript.test.js`、PowerShell AST parse 和 `git diff --check` 通过；直接执行周期脚本停止旧 PID `44816` 并启动 PID `33892`，`.mizukibot.lock` 持有且 `cmd /c restart-bot.cmd status` 显示主 bot/worker 均 Running；两条 runtime 日志 mtime 更新至 10:35:13，文件均非空（stdout 435、stderr 393 字节）。
 
 更新 2026-06-26 09:56 +08:00：修复 `restart-bot.cmd restart confirm` 在旧 pid 文件存在但主 bot/worker 进程都已退出时直接报 `无法将参数绑定到参数“Process”，因为该参数是空值。`。根因是进程识别 helper 仍把 `$Process` 声明为强制参数，空快照/空管道下调用会在进入判断前被 PowerShell 参数绑定拦截；现空进程对象统一返回“不匹配”，让脚本继续走启动恢复流程。验收：`node tests\restartBotScript.test.js`、`scripts\restart-bot.ps1` AST parse、`cmd /c restart-bot.cmd restart confirm` 和 `cmd /c restart-bot.cmd status` 通过，最终 main bot PID=5608、post-reply worker PID=21452 Running。小目标完成：确认重启遇到 stale pid + 空进程列表时不再被 PowerShell 强制参数绑定挡住。
