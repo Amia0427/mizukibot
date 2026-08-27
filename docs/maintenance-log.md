@@ -14,6 +14,7 @@
 - 完整回归：`npm test` 退出 1，仅有既有 `agentPrompts.test.js` 断言，以及私有 `prompts/ADULT.txt` 未被 manifest/allowlist 引用的提示词检查失败；本次未修改提示词资产。
 - 边界：本次未修改 `prompts/admin.txt`，未推送远端；当前本地 `.env` 的通用和私聊 global/general 并发均已调整为 16。
 - 小目标已完成（2026-08-27 11:00 +08:00）：高并发不丢消息实现、回归、配置和文档均已提交；并行改动未纳入，当前分支未推送远端。
+- 部署验收（2026-08-27 11:48 +08:00）：执行 `restart-bot.cmd restart confirm` 后主 bot 与 post-reply worker 均为 Running；运行配置确认通用/私聊 global/general 均为 16、per-user 均为 1，`/live` 与 `/ready` 均返回 HTTP 200。
 
 ## 运行维护 2026-08-25 11:11 +08:00
 
