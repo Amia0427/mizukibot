@@ -43,7 +43,8 @@ function createSecurityHeaders(options = {}) {
       "img-src 'self' data:",
       "object-src 'none'",
       `script-src 'nonce-${nonce}'`,
-      "style-src 'self' 'unsafe-inline'"
+      "style-src 'self' 'unsafe-inline'",
+      "worker-src 'self'"
     ].join('; '));
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');

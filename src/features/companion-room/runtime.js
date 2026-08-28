@@ -169,7 +169,7 @@ function createCompanionRoomRuntime(options = {}) {
     }
     if (parsed.action === 'density') {
       const updated = stateStore.updateRoom(userId, (current) => { current.density = parsed.density; });
-      return { handled: true, code: 'density_updated', replyText: parsed.density === 'quiet' ? '好，我安静一点陪你。' : '好，我会多陪你说几句。', room: updated };
+      return { handled: true, code: 'density_updated', replyText: `好，接下来是${densityLabel(parsed.density)}。`, room: updated };
     }
     if (parsed.action === 'switch') {
       const updated = stateStore.updateRoom(userId, (current) => {
@@ -292,6 +292,17 @@ function createCompanionRoomRuntime(options = {}) {
 
   return {
     getStatus: () => ({ ...stateStore.getStatus(), running }),
+    getUserSnapshot(userId, limit = 12) {
+      const room = stateStore.getRoom(userId);
+      return {
+        status: { ...stateStore.getStatus(), running },
+        room: room ? { ...room, elapsedMs: elapsedMs(room) } : null,
+        memories: stateStore.listMemories(userId, limit)
+      };
+    },
+    handleAction(userId, parsed) {
+      return handleParsedAction(String(userId || '').trim(), parsed || {});
+    },
     handleAdminCommand,
     handleUserMessage,
     reload: () => stateStore.reload(),

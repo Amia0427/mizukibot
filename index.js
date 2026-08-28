@@ -1011,7 +1011,10 @@ async function startMainProcess() {
   cleanupSingleInstanceLock = await acquireSingleInstanceLock();
   startMainRuntimeHeartbeat('lock_acquired');
   await cleanupStaleTmpFilesOnStartup();
-  webServer = startServer({ readiness: runtimeReadiness });
+  webServer = startServer({
+    readiness: runtimeReadiness,
+    companionRoomRuntime
+  });
   initializeMemeManager();
   scheduleMainProcessEmbeddingBackfill();
   startResourceSnapshots();

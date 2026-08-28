@@ -2175,3 +2175,9 @@
 - 根因：原图片 provider `https://ai.centos.hk/v1/chat/completions` 在本机真实请求中返回 `ETIMEDOUT`；切换用户提供的新上游后，旧图片密钥返回 HTTP 401 `invalid_api_key`。新密钥更新后鉴权通过，`gpt-image-2` 真实生成约 119 秒返回 JPEG 内联数据。
 - 修复：本地 `.env` 的 `BOT_DIARY_QZONE_IMAGE_PROVIDER_API_BASE_URL` 更新为 `https://api.penguinsama.com/api/draw/openai/v1`，并更新用户提供的新密钥；图片响应解析支持 OpenAI-compatible 的嵌套 `image_url.url`，字符串错误直接保留；原生图片工具将 Base64 data URL 写入 `output_path`。
 - 验收：`node tests/providerRequestNormalization.test.js`、`node tests/imageGenerate.test.js`、`node --check api/imageGeneration.js` 通过；真实返回前缀为 `data:image/jpeg;base64,`。`.env` 未纳入提交，未修改 `prompts/admin.txt`，未推送远端。
+## 运行维护 2026-08-28 11:43 +08:00
+
+- 小目标：为现有 QQ 共处房间增加独立、可安装的 PWA 操作面。
+- 改动：主 Web 注入现有 `companionRoomRuntime`；新增固定 QQ 用户绑定的状态与动作 API，以及倒计时、开始、暂停、继续、结束、进度、密度、共同回忆和离线最近状态页面。所有动作继续复用同一房间运行时和状态文件。
+- 边界：不新增平行聊天系统或第二套房间状态；客户端不能传入其他用户 ID；viewer 只读，admin 写入仍要求严格同源。角色图只使用仓库现有图片的本地裁切版本。
+- 阶段验收：房间运行时、PWA 路由、身份隔离、登录重定向、manifest、Service Worker、会话和安全头定向测试已通过；真实浏览器与完整质量门禁将在提交前追加。

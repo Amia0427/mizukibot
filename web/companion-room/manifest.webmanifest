@@ -1,0 +1,26 @@
+{
+  "name": "瑞希的陪伴房间",
+  "short_name": "陪伴房间",
+  "description": "与瑞希共享专注、放松、共读、共看和共听时间。",
+  "lang": "zh-CN",
+  "start_url": "/companion-room/",
+  "scope": "/companion-room/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f8",
+  "theme_color": "#f65f79",
+  "icons": [
+    {
+      "src": "/companion-room/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/companion-room/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

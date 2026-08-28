@@ -1,6 +1,6 @@
 # QQ 私聊共处房间
 
-最后更新：2026-08-25 01:09 +08:00。
+最后更新：2026-08-28 11:43 +08:00。
 
 ## 功能边界
 
@@ -84,7 +84,16 @@ COMPANION_ROOM_ENABLED=false
 COMPANION_ROOM_DEFAULT_DURATION_MINUTES=45
 COMPANION_ROOM_SCAN_INTERVAL_MS=60000
 COMPANION_ROOM_MODEL_TIMEOUT_MS=12000
+COMPANION_ROOM_WEB_USER_ID=
 ```
+
+## PWA 陪伴房间
+
+2026-08-28 起，已登录的 Web 管理会话可以访问 `/companion-room`。该页面是共处房间的独立操作面，不属于管理员大控制台，也不是新的聊天系统；开始、暂停、继续、结束、进度、密度和共同回忆都直接调用同一个 `companionRoomRuntime`，状态仍写入原有 `companion-room-state.json`。
+
+`COMPANION_ROOM_WEB_USER_ID` 必须显式绑定一个 QQ 用户。API 不读取 `user_id` 查询参数或请求体字段，因此不能从页面切换到其他用户。读取允许 viewer 会话访问，所有写入仍由现有 Web 中间件限制为 admin 会话，并要求 `Origin` 或 `Referer` 与当前站点严格同源。
+
+页面支持安装为 PWA。Service Worker 只缓存 `/companion-room` 应用壳和本地图片；最近一次成功状态保存在浏览器本地存储，离线时只读展示，写操作会失败并保留原状态。角色图来自仓库现有 `zhungtailan.jpg` 的裁切版本，页面不引用外部图片源。
 
 ## 验收记录
 
@@ -108,3 +117,5 @@ node scripts/run-tests.js tests/companionRoomParser.test.js tests/companionRoomS
 2026-08-14 00:42 +08:00：实现提交 `82a4369b` 已完成，QQ 私聊共处房间 v1 小目标已完成；未修改天气模块、普通长期记忆结构、主动私聊创建策略或群聊行为，未推送远端。
 
 2026-08-25 01:09 +08:00：共读、共看、共听扩展的解析、状态、模型、运行时、消息入口和 tick 相邻测试全部通过；覆盖标题、合法与非法时长、进度、旧状态兼容、结束后落盘和回忆展示。Bot 只基于用户给出的标题与进度生成陪伴消息，不声明实际消费媒体。
+
+2026-08-28 11:43 +08:00：PWA 路由、固定用户绑定、房间状态序列化、开始与结束动作复用、manifest、Service Worker、登录重定向、viewer 只读、admin 同源写入测试通过。真实浏览器的桌面与移动端交互、离线缓存和控制台日志验收结果将在本阶段提交前追加。

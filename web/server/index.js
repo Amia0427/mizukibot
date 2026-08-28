@@ -49,6 +49,7 @@ const {
 } = require('../memoryV3NocturneAdmin');
 const { registerMemoryV3NocturneRoutes } = require('../memoryV3NocturneRoute');
 const { registerConversationVariablesRoutes } = require('../conversationVariablesRoute');
+const { registerCompanionRoomRoutes } = require('../companionRoomRoute');
 const {
   getCurrentSettings,
   getSettingsEndpointError,
@@ -80,7 +81,13 @@ function handleHealthRequest(req, res, readiness) {
   return handleReadinessRequest(req, res, readiness);
 }
 
-function renderLoginPage(nonce) {
+function normalizeLoginNext(value) {
+  const path = String(value || '').trim();
+  return path === '/companion-room' || path === '/companion-room/' ? '/companion-room' : '/';
+}
+
+function renderLoginPage(nonce, nextPath = '/') {
+  const destination = JSON.stringify(normalizeLoginNext(nextPath));
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -116,7 +123,7 @@ function renderLoginPage(nonce) {
         body: JSON.stringify({ token: document.getElementById('token').value })
       });
       if (response.ok) {
-        location.replace('/');
+        location.replace(${destination});
         return;
       }
       status.textContent = response.status === 429 ? '尝试次数过多，请稍后再试。' : '令牌无效。';
@@ -165,7 +172,7 @@ function createWebApp(options = {}) {
 
   app.get('/login', (req, res) => {
     if (checkWebAuth(req, { host, port, sessionManager, trustProxyHops })) return res.redirect('/');
-    return res.send(renderLoginPage(res.locals.cspNonce));
+    return res.send(renderLoginPage(res.locals.cspNonce, req.query.next));
   });
 
   app.post('/api/session', (req, res) => {
@@ -222,6 +229,9 @@ function createWebApp(options = {}) {
     }
     if (!role || !checkWebAuth(req, { host, port, sessionManager, trustProxyHops })) {
       if (req.method === 'GET' && req.path === '/') return res.redirect('/login');
+      if (req.method === 'GET' && ['/companion-room', '/companion-room/'].includes(req.path)) {
+        return res.redirect('/login?next=%2Fcompanion-room');
+      }
       return res.status(401).json({ error: 'Unauthorized' });
     }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !isStrictSameOrigin(req, { trustProxyHops })) {
@@ -271,6 +281,7 @@ function createWebApp(options = {}) {
   registerPromptRuntimeReloadRoute(app);
   registerMemoryV3NocturneRoutes(app);
   registerConversationVariablesRoutes(app);
+  registerCompanionRoomRoutes(app, { companionRoomRuntime: options.companionRoomRuntime });
 
   app.get('/api/settings', (req, res) => {
     return res.json({ ok: true, settings: getCurrentSettings() });
@@ -1239,6 +1250,7 @@ module.exports = {
     isLocalIp,
     isStrictSameOrigin,
     isTokenlessLocalWebAllowed,
+    normalizeLoginNext,
     renderLoginPage
   }
 };

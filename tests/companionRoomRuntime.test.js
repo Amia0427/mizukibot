@@ -77,6 +77,25 @@ module.exports = (async () => {
   assert.match(contentMemory.replyText, /一起听《世界计划音乐》/);
   assert.match(contentMemory.replyText, /听到第 5 首/);
 
+  const webStarted = await runtime.handleAction('web-user', {
+    action: 'start',
+    activityType: 'focus',
+    contentType: 'read',
+    contentTitle: '人类群星闪耀时',
+    durationMinutes: 45
+  });
+  assert.strictEqual(webStarted.code, 'started');
+  const webDensity = await runtime.handleAction('web-user', { action: 'density', density: 'occasional' });
+  assert.strictEqual(webDensity.room.density, 'occasional');
+  assert.match(webDensity.replyText, /偶尔说话/);
+  const webSnapshot = runtime.getUserSnapshot('web-user');
+  assert.strictEqual(webSnapshot.room.contentTitle, '人类群星闪耀时');
+  assert.strictEqual(webSnapshot.memories.length, 0);
+  const webEnded = await runtime.handleAction('web-user', { action: 'end' });
+  webEnded.afterReplySent();
+  assert.strictEqual(runtime.getUserSnapshot('web-user').room, null);
+  assert.strictEqual(runtime.getUserSnapshot('web-user').memories.length, 1);
+
   const densityChanged = await runtime.handleUserMessage({ chatType: 'private', userId: 'user-1', rawText: '多陪我聊聊' });
   assert.strictEqual(densityChanged.code, 'density_updated');
 
