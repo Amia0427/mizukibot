@@ -26,4 +26,6 @@
 ## 验收证据
 
 - 定向自动测试：`companionRoomRuntime.test.js`、`companionRoomWebRoute.test.js`、`webAuthSecurity.test.js`、`webSessionSecurity.test.js`、`webSecurityHeaders.test.js` 已通过。
-- 浏览器验收、完整静态门禁和提交号将在验收完成后追加。
+- Browser 本地验收已完成：桌面 `1280×900`、移动 `390×844`，首屏、共读、倒计时、暂停/继续、进度、密度、结束与共同回忆通过；无横向溢出，控制台无 error/warn。浏览器评估环境未提供 Service Worker 注册对象，因此只以服务端资源响应、`Service-Worker-Allowed` 响应头、Service Worker 源码和页面实际加载验证离线壳链路。
+- 定向测试、`npm run lint`（915 文件）、`npm run typecheck`、暂存差异检查和 `npm run check:secrets` 已通过；`npm run check:prompts` 仍被既有私有 `prompts/ADULT.txt` manifest 问题阻断，本阶段未修改它。
+- 功能提交：`64c77406`。

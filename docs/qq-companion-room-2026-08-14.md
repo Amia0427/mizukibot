@@ -118,4 +118,6 @@ node scripts/run-tests.js tests/companionRoomParser.test.js tests/companionRoomS
 
 2026-08-25 01:09 +08:00：共读、共看、共听扩展的解析、状态、模型、运行时、消息入口和 tick 相邻测试全部通过；覆盖标题、合法与非法时长、进度、旧状态兼容、结束后落盘和回忆展示。Bot 只基于用户给出的标题与进度生成陪伴消息，不声明实际消费媒体。
 
-2026-08-28 11:43 +08:00：PWA 路由、固定用户绑定、房间状态序列化、开始与结束动作复用、manifest、Service Worker、登录重定向、viewer 只读、admin 同源写入测试通过。真实浏览器的桌面与移动端交互、离线缓存和控制台日志验收结果将在本阶段提交前追加。
+2026-08-28 12:19 +08:00：PWA 路由、固定用户绑定、房间状态序列化、开始与结束动作复用、manifest、Service Worker、登录重定向、viewer 只读、admin 同源写入测试通过。Browser 本地验收使用 `http://127.0.0.1:43128/companion-room/`：首屏、共读开始、倒计时、暂停、继续、记录“看到第 3 章”、切换“多聊”、结束和共同回忆均通过；桌面 `1280×900` 与移动 `390×844` 均无横向溢出，页面控制台无 error/warn。Service Worker 资源响应和 `Service-Worker-Allowed: /companion-room/` 已确认；浏览器评估环境未暴露注册对象，因此注册状态未作强断言，页面资源与离线应用壳逻辑由路由测试覆盖。
+
+2026-08-28 12:19 +08:00：提交前门禁通过：`npm run lint` 检查 915 个文件，`npm run typecheck`、`git diff --cached --check`、`npm run check:secrets` 以及 companion/Web 安全定向测试全部通过。`npm run check:prompts` 仍因既有私有 `prompts/ADULT.txt` 未被 manifest/allowlist 引用而失败，本阶段未修改该提示词资产；功能提交为 `64c77406`，验收记录已补齐。
