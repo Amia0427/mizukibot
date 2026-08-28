@@ -92,5 +92,6 @@
 - 静态验收已完成：入口 smoke、消息并发回归、lint、typecheck 和 git diff --check 通过。
 - 全量回归边界：`npm test` 退出码为 1，失败仅为既有 `agentPrompts.test.js` 和私有 `prompts/ADULT.txt` manifest/allowlist 检查；高并发相关用例均通过。
 - 健康验收：2026-08-28 17:31 +08:00 执行 `restart-bot.cmd restart confirm` 成功，主 bot 与 post-reply worker 均为 Running；`/live`、`/ready` 均返回 HTTP 200 和 `{"ok":true}`。
+- 实现提交：`97250f6f`。
 
 以 `2026-08-28` 时间戳记录验收结果，只暂存本轮文件，保留并行工作区改动，不推送远端。

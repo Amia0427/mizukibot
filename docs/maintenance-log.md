@@ -5,6 +5,7 @@
 - 自动验收：定向并发测试、NapCat 入口 smoke、消息并发回归、npm run lint、npm run typecheck 和 git diff --check 均通过。
 - 全量回归：`npm test` 退出码为 1，失败仅为既有 `agentPrompts.test.js` 断言和 `checkPromptsIntegration.test.js` 对未被 manifest/allowlist 引用的私有 `prompts/ADULT.txt` 的检查；本轮高并发相关测试全部通过，未修改提示词资产。
 - 运行验收：2026-08-28 17:31 +08:00 执行 `restart-bot.cmd restart confirm` 成功，主 bot 与 post-reply worker 均为 Running；`curl.exe http://127.0.0.1:3005/live` 与 `/ready` 均返回 HTTP 200 和 `{"ok":true}`。未修改 `prompts/admin.txt`，未纳入并行工作区改动，未推送远端。
+- 小目标已完成：实现提交 `97250f6f`；后续文档收口提交不改变运行时行为，未推送远端。
 
 ## 运行维护 2026-08-27 +08:00
 
