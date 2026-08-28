@@ -22,6 +22,11 @@ module.exports = (async () => {
   secondLock.release();
   const thirdLock = await queued[1];
   thirdLock.release();
+  assert.strictEqual(foreground.getSnapshot().queuedTotal, 2);
+  assert.strictEqual(foreground.getSnapshot().acquiredTotal, 3);
+  assert.strictEqual(foreground.getSnapshot().releasedTotal, 3);
+  assert.strictEqual(foreground.getSnapshot().peakQueued, 2);
+  assert.ok(foreground.getSnapshot().maxWaitMs >= 25);
 
   const inbound = createInboundConcurrencyController({
     globalLimit: 1,
@@ -46,6 +51,11 @@ module.exports = (async () => {
   same.release();
   const third = await queuedInbound[2];
   third.release();
+  assert.strictEqual(inbound.getSnapshot().queuedTotal, 3);
+  assert.strictEqual(inbound.getSnapshot().acquiredTotal, 4);
+  assert.strictEqual(inbound.getSnapshot().releasedTotal, 4);
+  assert.strictEqual(inbound.getSnapshot().peakQueued, 3);
+  assert.ok(inbound.getSnapshot().maxWaitMs >= 25);
 
   const adminInbound = createInboundConcurrencyController({
     globalLimit: 2,

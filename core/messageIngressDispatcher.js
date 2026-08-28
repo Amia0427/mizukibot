@@ -30,9 +30,13 @@ function createMessageIngressDispatcher(options = {}) {
   let accepting = true;
   let scheduled = false;
   let nextId = 0;
+  let accepted = 0;
+  let started = 0;
   let dropped = 0;
   let completed = 0;
   let failed = 0;
+  let peakQueued = 0;
+  let maxQueueWaitMs = 0;
 
   function buildSnapshot() {
     return {
@@ -40,9 +44,13 @@ function createMessageIngressDispatcher(options = {}) {
       maxActive,
       queued: queue.length,
       active: active.size,
+      accepted,
+      started,
       dropped,
       completed,
-      failed
+      failed,
+      peakQueued,
+      maxQueueWaitMs
     };
   }
 
@@ -65,6 +73,11 @@ function createMessageIngressDispatcher(options = {}) {
   }
 
   async function runItem(item) {
+    started += 1;
+    maxQueueWaitMs = Math.max(
+      maxQueueWaitMs,
+      Math.max(0, Date.now() - (Number(item.meta?.enqueuedAt || 0) || Date.now()))
+    );
     active.add(item);
     try {
       const result = await handleMessage(item.msg, item.meta);
@@ -120,6 +133,8 @@ function createMessageIngressDispatcher(options = {}) {
       resolve: deferred?.resolve,
       reject: deferred?.reject
     });
+    accepted += 1;
+    peakQueued = Math.max(peakQueued, queue.length);
     scheduleDrain();
     return true;
   }

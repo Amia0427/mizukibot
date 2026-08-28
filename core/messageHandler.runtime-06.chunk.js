@@ -16,7 +16,6 @@
         atSender: !isPrivateChatType(chatType) && replyEnvelope?.atSender !== false,
         retries: 2,
         waitMs: 500,
-        shouldSend: freshnessGuard.shouldSend,
         telemetry: buildReplyTelemetry({
           senderId,
           groupId: isPrivateChatType(chatType) ? '' : groupId,
@@ -101,26 +100,6 @@
         }
       }
     } else {
-      if (!freshnessGuard.shouldSend()) {
-        appendTraceTiming('final_reply_discarded_stale', {
-          stage: 'reply_discarded_stale',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0,
-          ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
-        });
-        appendRequestCompleteTrace({
-          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          topRouteType: routeExecutionPlan.topRouteType,
-          sent: false,
-          stream: true,
-          finalErrorCode: 'stale_reply_discarded'
-        });
-        return;
-      }
       appendTraceTiming('final_reply_send_done', {
         stage: 'final_reply_send_done',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),

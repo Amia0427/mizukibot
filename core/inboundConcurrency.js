@@ -43,6 +43,11 @@ function createInboundConcurrencyController(options = {}) {
     general: '',
     admin: ''
   };
+  let queuedTotal = 0;
+  let acquiredTotal = 0;
+  let releasedTotal = 0;
+  let peakQueued = 0;
+  let maxWaitMs = 0;
 
   function getActiveForSession(sessionKey = '') {
     return Math.max(0, Number(activeBySession.get(String(sessionKey || '').trim()) || 0) || 0);
@@ -61,7 +66,12 @@ function createInboundConcurrencyController(options = {}) {
       activeGeneral: activeByLane.general,
       activeAdmin: activeByLane.admin,
       queuedGeneral: queues.general.length,
-      queuedAdmin: queues.admin.length
+      queuedAdmin: queues.admin.length,
+      queuedTotal,
+      acquiredTotal,
+      releasedTotal,
+      peakQueued,
+      maxWaitMs
     };
   }
 
@@ -98,6 +108,8 @@ function createInboundConcurrencyController(options = {}) {
 
     const acquiredAt = Date.now();
     const waitMs = Math.max(0, acquiredAt - (Number(request.enqueuedAt || 0) || acquiredAt));
+    acquiredTotal += 1;
+    maxWaitMs = Math.max(maxWaitMs, waitMs);
     const requestId = buildRequestId(request);
       console.log('[inbound-concurrency] acquired', {
         lane,
@@ -123,6 +135,7 @@ function createInboundConcurrencyController(options = {}) {
       release(meta = {}) {
         if (released) return;
         released = true;
+        releasedTotal += 1;
 
         activeByLane[lane] = Math.max(0, activeByLane[lane] - 1);
         const remainingForSession = Math.max(0, getActiveForSession(sessionKey) - 1);
@@ -223,6 +236,8 @@ function createInboundConcurrencyController(options = {}) {
         resolve
       };
       queues[normalized.lane].push(queued);
+      queuedTotal += 1;
+      peakQueued = Math.max(peakQueued, queues.general.length + queues.admin.length);
       console.log('[inbound-concurrency] queued', {
         lane: normalized.lane,
         userId: normalized.userId,

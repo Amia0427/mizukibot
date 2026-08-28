@@ -120,26 +120,6 @@
           });
           let fastReplyText = String(normalFastReplyResult?.replyText || '').trim();
           if (!fastReplyText) throw new Error('normal_fast_reply_empty');
-          if (!freshnessGuard.shouldSend()) {
-            appendTraceTiming('normal_fast_reply_stale', {
-              stage: 'normal_fast_reply_stale',
-              messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-              groupId: String(groupId || '').trim(),
-              userId: String(senderId || '').trim(),
-              chatType,
-              durationMs: Math.max(0, Date.now() - normalFastStartedAt),
-              sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-              flushVersion: Number(freshnessGuard.flushVersion || 0) || 0
-            });
-            appendRequestCompleteTrace({
-              routePolicyKey: 'chat/default',
-              topRouteType: 'direct_chat',
-              replyPath: 'normal_fast_reply',
-              sent: false,
-              finalErrorCode: 'stale_reply_discarded'
-            });
-            return;
-          }
           fastReplyText = normalizeUserFacingReply(fastReplyText, {
             policyKey: 'chat/default',
             routeDebugKey: 'direct_chat/text_chat/answer',
@@ -602,8 +582,7 @@
         groupId: isPrivateChatType(chatType) ? '' : groupId,
         imageUrl,
         imageUrls,
-        sourceMessageId: String(effectiveMsg.message_id || '').trim(),
-        freshness: freshnessGuard
+        sourceMessageId: String(effectiveMsg.message_id || '').trim()
       });
       appendTraceTiming('runtime_dispatch_done', {
         stage: 'formal_route_dispatch_done',
@@ -667,25 +646,6 @@
       return;
     }
     if (!usedStreamingSend) {
-      if (!freshnessGuard.shouldSend()) {
-        appendTraceTiming('final_reply_discarded_stale', {
-          stage: 'reply_discarded_stale',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0,
-          ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
-        });
-        appendRequestCompleteTrace({
-          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          topRouteType: routeExecutionPlan.topRouteType,
-          sent: false,
-          finalErrorCode: 'stale_reply_discarded'
-        });
-        return;
-      }
       reply = normalizeUserFacingReply(reply, {
         policyKey: getEffectivePolicyKey(routeExecutionPlan),
         routeDebugKey: routeExecutionPlan.routeDebugKey,

@@ -66,6 +66,10 @@ module.exports = (async () => {
   await fourth;
   assert.strictEqual(noDrop.getSnapshot().completed, 4);
   assert.strictEqual(noDrop.getSnapshot().dropped, 0);
+  assert.strictEqual(noDrop.getSnapshot().accepted, 4);
+  assert.strictEqual(noDrop.getSnapshot().started, 4);
+  assert.strictEqual(noDrop.getSnapshot().peakQueued, 3);
+  assert.ok(noDrop.getSnapshot().maxQueueWaitMs >= 40);
 
   const stopping = createMessageIngressDispatcher({
     maxActive: 1,

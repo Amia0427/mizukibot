@@ -20,7 +20,7 @@ function createMessageHandler({
   const normalGroupMainReplyRateLimiter = normalGroupMainReplyRateLimiterOverride || createNormalGroupMainReplyRateLimiter(config);
   const remoteRestartTrigger = triggerRemoteRestartOverride || triggerRemoteRestart;
   const privateTypingPokeCooldownByUser = new Map();
-  const sessionFreshnessVersionByKey = new Map();
+  const sessionActivityVersionByKey = new Map();
   function recordPrivateProactiveActivity(userId, chatType) {
     if (!privateProactiveEngine || typeof privateProactiveEngine.recordObservedActivity !== 'function') return;
     privateProactiveEngine.recordObservedActivity(userId, {
@@ -41,45 +41,12 @@ function createMessageHandler({
       });
     });
   }
-  function nextSessionFreshnessVersion(sessionKey = '') {
+  function nextSessionActivityVersion(sessionKey = '') {
     const normalized = String(sessionKey || '').trim();
     if (!normalized) return 0;
-    const next = (Number(sessionFreshnessVersionByKey.get(normalized) || 0) || 0) + 1;
-    sessionFreshnessVersionByKey.set(normalized, next);
+    const next = (Number(sessionActivityVersionByKey.get(normalized) || 0) || 0) + 1;
+    sessionActivityVersionByKey.set(normalized, next);
     return next;
-  }
-  function updateSessionFreshnessVersion(sessionKey = '', version = 0) {
-    const normalized = String(sessionKey || '').trim();
-    if (!normalized) return;
-    const next = Math.max(
-      Number(sessionFreshnessVersionByKey.get(normalized) || 0) || 0,
-      Number(version || 0) || 0
-    );
-    sessionFreshnessVersionByKey.set(normalized, next);
-  }
-  function buildFreshnessGuard(continuousMeta = null) {
-    const sessionKey = String(continuousMeta?.freshnessSessionKey || continuousMeta?.sessionKey || '').trim();
-    const flushVersion = Number(continuousMeta?.flushVersion || 0) || 0;
-    if (
-      !sessionKey
-      || flushVersion <= 0
-      || continuousMeta?.mentionedBot === true
-      || config.CONTINUOUS_MESSAGE_CANCEL_ON_NEW_MESSAGE !== true
-    ) {
-      return {
-        sessionKey,
-        flushVersion,
-        shouldSend: () => true
-      };
-    }
-    return {
-      sessionKey,
-      flushVersion,
-      shouldSend() {
-        const latest = Number(sessionFreshnessVersionByKey.get(sessionKey) || 0) || 0;
-        return latest <= flushVersion;
-      }
-    };
   }
   const continuousMessagePreprocessor = createContinuousMessagePreprocessor({
     actionClient: globalNapCatActionClient,

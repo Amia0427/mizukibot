@@ -686,7 +686,7 @@ function createMessageHandler({
   const normalGroupMainReplyRateLimiter = normalGroupMainReplyRateLimiterOverride || createNormalGroupMainReplyRateLimiter(config);
   const remoteRestartTrigger = triggerRemoteRestartOverride || triggerRemoteRestart;
   const privateTypingPokeCooldownByUser = new Map();
-  const sessionFreshnessVersionByKey = new Map();
+  const sessionActivityVersionByKey = new Map();
   function recordPrivateProactiveActivity(userId, chatType) {
     if (!privateProactiveEngine || typeof privateProactiveEngine.recordObservedActivity !== 'function') return;
     privateProactiveEngine.recordObservedActivity(userId, {
@@ -707,45 +707,12 @@ function createMessageHandler({
       });
     });
   }
-  function nextSessionFreshnessVersion(sessionKey = '') {
+  function nextSessionActivityVersion(sessionKey = '') {
     const normalized = String(sessionKey || '').trim();
     if (!normalized) return 0;
-    const next = (Number(sessionFreshnessVersionByKey.get(normalized) || 0) || 0) + 1;
-    sessionFreshnessVersionByKey.set(normalized, next);
+    const next = (Number(sessionActivityVersionByKey.get(normalized) || 0) || 0) + 1;
+    sessionActivityVersionByKey.set(normalized, next);
     return next;
-  }
-  function updateSessionFreshnessVersion(sessionKey = '', version = 0) {
-    const normalized = String(sessionKey || '').trim();
-    if (!normalized) return;
-    const next = Math.max(
-      Number(sessionFreshnessVersionByKey.get(normalized) || 0) || 0,
-      Number(version || 0) || 0
-    );
-    sessionFreshnessVersionByKey.set(normalized, next);
-  }
-  function buildFreshnessGuard(continuousMeta = null) {
-    const sessionKey = String(continuousMeta?.freshnessSessionKey || continuousMeta?.sessionKey || '').trim();
-    const flushVersion = Number(continuousMeta?.flushVersion || 0) || 0;
-    if (
-      !sessionKey
-      || flushVersion <= 0
-      || continuousMeta?.mentionedBot === true
-      || config.CONTINUOUS_MESSAGE_CANCEL_ON_NEW_MESSAGE !== true
-    ) {
-      return {
-        sessionKey,
-        flushVersion,
-        shouldSend: () => true
-      };
-    }
-    return {
-      sessionKey,
-      flushVersion,
-      shouldSend() {
-        const latest = Number(sessionFreshnessVersionByKey.get(sessionKey) || 0) || 0;
-        return latest <= flushVersion;
-      }
-    };
   }
   const continuousMessagePreprocessor = createContinuousMessagePreprocessor({
     actionClient: globalNapCatActionClient,
@@ -1046,8 +1013,7 @@ function createMessageHandler({
     senderId,
     userText,
     replyText,
-    mainReplySent,
-    freshnessGuard
+    mainReplySent
   } = {}) {
     if (!privateStatusBarRuntime || typeof privateStatusBarRuntime.handle !== 'function') return;
     void privateStatusBarRuntime.handle({
@@ -1060,8 +1026,7 @@ function createMessageHandler({
       userText,
       replyText,
       mainReplySent,
-      usedTools: replyOptions?.statusBarUsedTools === true,
-      shouldSend: freshnessGuard?.shouldSend
+      usedTools: replyOptions?.statusBarUsedTools === true
     }).then((result) => {
       console.log('[private-status-bar] completed', {
         userId: String(senderId || '').trim(),
@@ -1571,7 +1536,7 @@ function createMessageHandler({
     const rawInboundFreshnessSessionKey = platform !== 'qq' && conversationKey
       ? `${platform}-${chatType}:${conversationKey}:user:${String(senderId || '').trim()}`
       : resolveShortTermSessionKey(senderId, shortTermRouteMeta);
-    const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
+    const rawInboundFreshnessVersion = nextSessionActivityVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
     const toolAuthorizationCommand = await handleToolAuthorizationCommand(rawMessageText, {
       platform: String(msg?.platform || 'qq').trim().toLowerCase() || 'qq',
@@ -2006,11 +1971,6 @@ function createMessageHandler({
       continuousMeta.freshnessSessionKey = String(continuousMeta.freshnessSessionKey || rawInboundFreshnessSessionKey || '').trim();
       continuousMeta.flushVersion = Number(continuousMeta.flushVersion || rawInboundFreshnessVersion || 0) || 0;
     }
-    updateSessionFreshnessVersion(
-      String(continuousMeta?.freshnessSessionKey || continuousMeta?.sessionKey || '').trim(),
-      Number(continuousMeta?.flushVersion || 0) || 0
-    );
-    const freshnessGuard = buildFreshnessGuard(continuousMeta);
     const rawText = effectiveMsg.raw_message || '';
     const slashCommandTextForConcurrency = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
     const adminFastCommandForConcurrency = isAdminUser(senderId)
@@ -3068,26 +3028,6 @@ function createMessageHandler({
           });
           let fastReplyText = String(normalFastReplyResult?.replyText || '').trim();
           if (!fastReplyText) throw new Error('normal_fast_reply_empty');
-          if (!freshnessGuard.shouldSend()) {
-            appendTraceTiming('normal_fast_reply_stale', {
-              stage: 'normal_fast_reply_stale',
-              messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-              groupId: String(groupId || '').trim(),
-              userId: String(senderId || '').trim(),
-              chatType,
-              durationMs: Math.max(0, Date.now() - normalFastStartedAt),
-              sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-              flushVersion: Number(freshnessGuard.flushVersion || 0) || 0
-            });
-            appendRequestCompleteTrace({
-              routePolicyKey: 'chat/default',
-              topRouteType: 'direct_chat',
-              replyPath: 'normal_fast_reply',
-              sent: false,
-              finalErrorCode: 'stale_reply_discarded'
-            });
-            return;
-          }
           fastReplyText = normalizeUserFacingReply(fastReplyText, {
             policyKey: 'chat/default',
             routeDebugKey: 'direct_chat/text_chat/answer',
@@ -3551,8 +3491,7 @@ function createMessageHandler({
         groupId: isPrivateChatType(chatType) ? '' : groupId,
         imageUrl,
         imageUrls,
-        sourceMessageId: String(effectiveMsg.message_id || '').trim(),
-        freshness: freshnessGuard
+        sourceMessageId: String(effectiveMsg.message_id || '').trim()
       });
       appendTraceTiming('runtime_dispatch_done', {
         stage: 'formal_route_dispatch_done',
@@ -3616,25 +3555,6 @@ function createMessageHandler({
       return;
     }
     if (!usedStreamingSend) {
-      if (!freshnessGuard.shouldSend()) {
-        appendTraceTiming('final_reply_discarded_stale', {
-          stage: 'reply_discarded_stale',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0,
-          ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
-        });
-        appendRequestCompleteTrace({
-          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          topRouteType: routeExecutionPlan.topRouteType,
-          sent: false,
-          finalErrorCode: 'stale_reply_discarded'
-        });
-        return;
-      }
       reply = normalizeUserFacingReply(reply, {
         policyKey: getEffectivePolicyKey(routeExecutionPlan),
         routeDebugKey: routeExecutionPlan.routeDebugKey,
@@ -3672,7 +3592,6 @@ function createMessageHandler({
         atSender: !isPrivateChatType(chatType) && replyEnvelope?.atSender !== false,
         retries: 2,
         waitMs: 500,
-        shouldSend: freshnessGuard.shouldSend,
         telemetry: buildReplyTelemetry({
           senderId,
           groupId: isPrivateChatType(chatType) ? '' : groupId,
@@ -3706,8 +3625,7 @@ function createMessageHandler({
           senderId,
           userText: runtimeQuestionText || cleanText,
           replyText: persistedReplyText || reply,
-          mainReplySent: true,
-          freshnessGuard
+          mainReplySent: true
         });
         maybeRunDeferredPersist(replyEnvelope);
         markDirectSessionPresenceReplied({ groupId, senderId, sessionKey });
@@ -3767,26 +3685,6 @@ function createMessageHandler({
         }
       }
     } else {
-      if (!freshnessGuard.shouldSend()) {
-        appendTraceTiming('final_reply_discarded_stale', {
-          stage: 'reply_discarded_stale',
-          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-          groupId: String(groupId || '').trim(),
-          userId: String(senderId || '').trim(),
-          chatType,
-          sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0,
-          ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
-        });
-        appendRequestCompleteTrace({
-          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          topRouteType: routeExecutionPlan.topRouteType,
-          sent: false,
-          stream: true,
-          finalErrorCode: 'stale_reply_discarded'
-        });
-        return;
-      }
       appendTraceTiming('final_reply_send_done', {
         stage: 'final_reply_send_done',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
@@ -3818,8 +3716,7 @@ function createMessageHandler({
           senderId,
           userText: runtimeQuestionText || cleanText,
           replyText: persistedReplyText || reply,
-          mainReplySent: true,
-          freshnessGuard
+          mainReplySent: true
         });
       }
       if (

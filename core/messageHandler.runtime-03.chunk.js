@@ -24,7 +24,7 @@
       senderId,
       isPrivateChatType(chatType) ? {} : { groupId }
     );
-    const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
+    const rawInboundFreshnessVersion = nextSessionActivityVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
     const luckinHandled = await getLuckinCommandService().handleIncomingMessage(msg, {
       chatType,
@@ -351,11 +351,6 @@
       continuousMeta.freshnessSessionKey = String(continuousMeta.freshnessSessionKey || rawInboundFreshnessSessionKey || '').trim();
       continuousMeta.flushVersion = Number(continuousMeta.flushVersion || rawInboundFreshnessVersion || 0) || 0;
     }
-    updateSessionFreshnessVersion(
-      String(continuousMeta?.freshnessSessionKey || continuousMeta?.sessionKey || '').trim(),
-      Number(continuousMeta?.flushVersion || 0) || 0
-    );
-    const freshnessGuard = buildFreshnessGuard(continuousMeta);
     const rawText = effectiveMsg.raw_message || '';
     const slashCommandTextForConcurrency = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
     const adminFastCommandForConcurrency = isAdminUser(senderId)

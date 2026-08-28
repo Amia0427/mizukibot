@@ -63,7 +63,7 @@ function buildDirectRoute(rawText = '') {
       freshness: 'unknown'
     },
     meta: {
-      reason: 'private-freshness-stale-reply-test'
+      reason: 'private-message-ordered-reply-test'
     }
   };
 }
@@ -78,7 +78,6 @@ module.exports = (async () => {
     process.env.BOT_QQ = 'bot_test';
     process.env.ENABLE_DEBUG_LOG = 'false';
     process.env.CONTINUOUS_MESSAGE_ENABLED = 'false';
-    process.env.CONTINUOUS_MESSAGE_CANCEL_ON_NEW_MESSAGE = 'true';
     process.env.NORMAL_FAST_REPLY_ENABLED = 'false';
     process.env.REFUSAL_AGENT_ENABLED = 'false';
     process.env.PASSIVE_AWARENESS_API_BASE_URL = ' ';
@@ -111,8 +110,8 @@ module.exports = (async () => {
           firstDispatchStartedResolve();
           await releaseFirst;
           return {
-            replyText: 'old reply should be stale',
-            persistedReplyText: 'old reply should be stale'
+            replyText: 'first reply',
+            persistedReplyText: 'first reply'
           };
         }
         return {
@@ -151,9 +150,13 @@ module.exports = (async () => {
     await Promise.all([first, second]);
 
     const privateMessages = sentPayloads.filter((payload) => String(payload?.action || '').trim() === 'send_private_msg');
-    assert.strictEqual(privateMessages.length, 1, 'same-user newer private input should stale-discard the older reply');
-    assert.strictEqual(privateMessages[0].params.user_id, 'same_user');
-    assert.strictEqual(privateMessages[0].params.message, 'fresh reply');
+    assert.strictEqual(privateMessages.length, 2, 'same-user messages should both receive replies');
+    assert.deepStrictEqual(
+      privateMessages.map((payload) => payload.params.message),
+      ['first reply', 'fresh reply'],
+      'same-user replies should preserve message order'
+    );
+    assert.ok(privateMessages.every((payload) => payload.params.user_id === 'same_user'));
   } finally {
     restoreEnv(snapshot);
     clearProjectCache();

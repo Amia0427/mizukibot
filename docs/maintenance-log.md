@@ -1,3 +1,11 @@
+## 运行维护 2026-08-28
+
+- 根因：同一会话的新消息会递增 freshness 版本，导致已经开始处理的旧消息在普通、快速或流式回复发送前命中 stale_reply_discarded，从而静默舍弃用户对话。
+- 修复：移除消息处理链的 freshness 回复取消路径和废弃配置；连续消息预处理仍保留活动版本用于聚合，同一 sessionKey 继续串行，不同会话继续并行。入口 dispatcher、入站控制器和前台控制器新增累计生命周期统计、峰值排队和最长等待统计。
+- 自动验收：定向并发测试、NapCat 入口 smoke、消息并发回归、npm run lint、npm run typecheck 和 git diff --check 均通过。
+- 全量回归：`npm test` 退出码为 1，失败仅为既有 `agentPrompts.test.js` 断言和 `checkPromptsIntegration.test.js` 对未被 manifest/allowlist 引用的私有 `prompts/ADULT.txt` 的检查；本轮高并发相关测试全部通过，未修改提示词资产。
+- 运行验收：2026-08-28 17:31 +08:00 执行 `restart-bot.cmd restart confirm` 成功，主 bot 与 post-reply worker 均为 Running；`curl.exe http://127.0.0.1:3005/live` 与 `/ready` 均返回 HTTP 200 和 `{"ok":true}`。未修改 `prompts/admin.txt`，未纳入并行工作区改动，未推送远端。
+
 ## 运行维护 2026-08-27 +08:00
 
 - 根因：本地 `/create` 配置仍使用 `CREATE_AGENT_RESPONSE_FORMAT=url`，新 PenguinSama Images 上游返回 `response_format 仅支持 b64_json`；随后将请求改为 `b64_json` 后，真实生成接口又返回 `该模型不存在或未开放，请重新拉取模型列表`，说明当前密钥的模型开放状态仍未满足生成要求。
