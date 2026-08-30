@@ -2198,4 +2198,7 @@
 - 实现范围：新增四槽位 `MAIN_MODEL_1_*` 至 `MAIN_MODEL_4_*` 配置解析和主模型候选池；支持不完整槽位跳过、候选去重、随机起点、当前请求内失败切换和旧 `API_*` 配置兼容。普通用户 Runtime V2 标准 direct reply、agent/tool reply 接入；管理员、`normal_fast_reply`、显式图片模型及后台专用链路保持原模型选择。
 - 故障边界：每个槽位继续使用 `AI_RETRIES`；所有主模型槽位失败后才立即调用 `AI_FALLBACK_*`。非流式空正文/工具调用和流式空响应视为端点失败；流式已发送可见 partial text 后不再切换其他端点或备用模型，保留 partial reply 错误处理。request trace 和模型调用诊断只记录脱敏槽位、序号、总数、provider、endpoint host 与配置来源，不记录 API key。
 - 文档与模板：`.env.example`、`docs/env-configuration.md`、`README.md` 已增加四槽位配置、兼容规则、随机顺序、故障切换和验收说明，时间戳为 `2026-08-30`。
-- 验收结果：待本轮最终质量门禁和提交完成后，在此条目追加实际命令、结果及提交信息。
+- 完成验收（2026-08-30）：计划内 12 个 Node.js 语法检查全部通过；`mainModelRuntimeConfig.test.js`、`mainModelPool.test.js`、`mainModelPoolRouting.test.js`、`mainModelPoolStreaming.test.js`、`mainModelFallback.test.js`、`mainModelGenerationParams.test.js`、`normalFastReplyConfig.test.js` 和关闭 TLS 仿真的 `mainReplyRouteModelDiagnostics.test.js` 全部通过。
+- 质量门禁（2026-08-30）：`npm run lint`（检查 916 个文件）、`npm run typecheck`、`npm run check:secrets:all`、`git diff --check` 及提交前暂存区检查全部通过；提交钩子再次完成 staged secret scan。
+- 全量回归（2026-08-30）：`npm test` 退出码为 1，失败仅为既有 `agentPrompts.test.js` 断言和 `checkPromptsIntegration.test.js` 对未被 manifest/allowlist 引用的私有 `prompts/ADULT.txt` 检查；本需求新增测试及其余项目测试通过，未修改 `prompts/admin.txt` 或其他提示词资产。
+- 小目标已完成（2026-08-30）：功能提交 `06b53b7e`（`feat: add normal user main model pool failover`）；维护日志随后单独提交，未推送远端，未纳入并行工作区改动。
