@@ -14,6 +14,15 @@
 - `ADMIN_AI_MAX_TOKENS=45000`：当前本地管理员输出预算。2026-08-21 21:31 +08:00 为应对上游账户余额 `¥0.250078` 低于请求预扣 `¥0.262740` 的 403 临时下调；充值后可恢复 `50000`。
 - 验收（2026-08-21 21:07 +08:00）：配置解析、管理员主回复路由和管理员视觉路由均解析为 `claude-opus-5`；受控重启脚本报告主进程和 post-reply worker 健康；未修改 `prompts/admin.txt`。
 
+## 普通用户主回复四槽位模型池（2026-08-30）
+
+- 普通用户标准主回复可配置最多四个独立主模型槽位：`MAIN_MODEL_1_*` 至 `MAIN_MODEL_4_*`。每个槽位需要同时配置 `API_BASE_URL`、`API_KEY` 和 `MODEL`，`API_PROVIDER` 可留空并沿用现有 provider 推断逻辑。
+- 每次请求会随机选择一个槽位作为起点；当前槽位在本次请求内按既有 `AI_RETRIES` 全部失败后，立即按随机顺序尝试其他未尝试槽位。不会跨请求保存熔断状态、健康评分或权重。
+- 四个主模型槽位全部失败后，当前请求立即进入现有 `AI_FALLBACK_*` 备用模型路径；备用模型未启用或配置不完整时，抛出最后一个主模型错误。
+- 未配置任何 `MAIN_MODEL_N_*` 槽位时，完全兼容旧的 `API_BASE_URL`、`API_KEY`、`AI_MODEL`、`API_PROVIDER` 单主模型行为。已配置新槽位但缺少槽位 1 时，旧配置会作为兼容候选加入池；槽位 1 已配置时不会隐式增加旧配置为第五个端点。
+- 不完整槽位会被跳过，重复的 endpoint、key、model、provider 组合只保留一份。日志和 request trace 记录槽位、候选序号、候选总数、切换和备用状态，但不记录 API key。
+- 管理员、`normal_fast_reply`、图片问答/总结等显式传入 `modelConfig` 的专用模型，以及 companion、small theater、proactive、passive awareness、memory、summary 等后台链路不使用该主模型池。已发送可见流式正文后不再切换其他端点，保留现有 partial reply 处理。
+
 ## NapCat OneBot action
 
 - `NAPCAT_ACTION_TIMEOUT_MS=30000`：机器人调用 NapCat HTTP action 的总超时。

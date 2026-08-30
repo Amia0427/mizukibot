@@ -2192,3 +2192,10 @@
 - 阶段验收：房间运行时、PWA 路由、身份隔离、登录重定向、manifest、Service Worker、会话和安全头定向测试已通过；真实浏览器与完整质量门禁将在提交前追加。
 - 完成验收（2026-08-28 12:19 +08:00）：Browser 在 `1280×900` 与 `390×844` 验证首屏、共读、倒计时、暂停/继续、进度、密度、结束和共同回忆；无横向溢出、无页面控制台 error/warn。`npm run lint`（915 文件）、`npm run typecheck`、`git diff --cached --check`、`npm run check:secrets` 和 companion/Web 定向测试通过；`npm run check:prompts` 仅受既有私有 `prompts/ADULT.txt` 未纳入 manifest/allowlist 影响。
 - 小目标已完成（2026-08-28 12:19 +08:00）：功能提交 `64c77406` 已完成；本次文档验收记录随后单独提交，未纳入其他并行改动，未推送远端。
+
+## 普通用户主回复多端点随机与故障切换（2026-08-30）
+
+- 实现范围：新增四槽位 `MAIN_MODEL_1_*` 至 `MAIN_MODEL_4_*` 配置解析和主模型候选池；支持不完整槽位跳过、候选去重、随机起点、当前请求内失败切换和旧 `API_*` 配置兼容。普通用户 Runtime V2 标准 direct reply、agent/tool reply 接入；管理员、`normal_fast_reply`、显式图片模型及后台专用链路保持原模型选择。
+- 故障边界：每个槽位继续使用 `AI_RETRIES`；所有主模型槽位失败后才立即调用 `AI_FALLBACK_*`。非流式空正文/工具调用和流式空响应视为端点失败；流式已发送可见 partial text 后不再切换其他端点或备用模型，保留 partial reply 错误处理。request trace 和模型调用诊断只记录脱敏槽位、序号、总数、provider、endpoint host 与配置来源，不记录 API key。
+- 文档与模板：`.env.example`、`docs/env-configuration.md`、`README.md` 已增加四槽位配置、兼容规则、随机顺序、故障切换和验收说明，时间戳为 `2026-08-30`。
+- 验收结果：待本轮最终质量门禁和提交完成后，在此条目追加实际命令、结果及提交信息。

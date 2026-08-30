@@ -137,6 +137,7 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     dispatchBranch: String(options.dispatchBranch || routeMeta?.dispatchBranch || '').trim(),
     triggerBranch: String(options.triggerBranch || '').trim(),
     reviewMode: String(options.reviewMode || '').trim(),
+    primaryModelPoolEnabled: options.primaryModelPoolEnabled === true,
     routeMeta,
     requestTrace: cloneTraceForMeta(requestTrace),
     visualContext: normalizeObject(options.visualContext || routeMeta?.visualContext, null),

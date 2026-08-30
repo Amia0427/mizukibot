@@ -144,9 +144,46 @@ function resolveUserScopedMainModelConfig(userId = '', overrides = null, options
   return resolveMainModelConfig(primaryConfig, { scope });
 }
 
+function resolveNormalUserMainModelConfigs(userId = '', overrides = null, options = {}) {
+  const primaryConfig = resolveUserScopedMainModelConfig(userId, overrides, options);
+  const isExplicitOverride = overrides && typeof overrides === 'object';
+  if (
+    options.primaryModelPoolEnabled !== true
+    || isAdminMainModelUser(userId, options)
+    || isExplicitOverride
+    || config.MAIN_MODEL_POOL_CONFIGURED !== true
+    || primaryConfig.__mainFallbackActive
+  ) {
+    return [primaryConfig];
+  }
+
+  const candidates = Array.isArray(config.MAIN_MODEL_CONFIGS) ? config.MAIN_MODEL_CONFIGS : [];
+  return candidates.map((candidate) => ({
+    id: candidate.id,
+    slot: candidate.slot,
+    ...resolveRoleAwareMainModelConfig(userId, {
+      model: candidate.model,
+      provider: candidate.provider,
+      apiBaseUrl: candidate.apiBaseUrl,
+      apiKey: candidate.apiKey
+    }, options),
+    provider: normalizeText(candidate.provider),
+    __mainModelSource: normalizeText(candidate.__mainModelSource) || `MAIN_MODEL_${candidate.slot}_MODEL`,
+    __mainProviderSource: normalizeText(candidate.__mainProviderSource) || 'auto',
+    __mainApiBaseUrlSource: normalizeText(candidate.__mainApiBaseUrlSource) || `MAIN_MODEL_${candidate.slot}_API_BASE_URL`,
+    __mainApiKeySource: normalizeText(candidate.__mainApiKeySource) || `MAIN_MODEL_${candidate.slot}_API_KEY`,
+    __mainModelPoolEnabled: true,
+    __mainModelPoolSlot: normalizeText(candidate.id || candidate.slot),
+    __mainFallbackActive: false,
+    __mainFallbackScope: primaryConfig.__mainFallbackScope || 'default',
+    __mainFallbackReason: primaryConfig.__mainFallbackReason || ''
+  }));
+}
+
 module.exports = {
   isAdminMainModelUser,
   shouldBypassMainModelFallback,
   resolveRoleAwareMainModelConfig,
-  resolveUserScopedMainModelConfig
+  resolveUserScopedMainModelConfig,
+  resolveNormalUserMainModelConfigs
 };

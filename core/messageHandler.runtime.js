@@ -975,6 +975,7 @@ function createMessageHandler({
     createStreamingDispatcher,
     composeDirectRoutePrompt,
     askAIDispatch,
+    isAdminUser,
     sendWithRetry
   });
   const dispatchByRoutePlan = (...args) => dispatchCoordinator.dispatchByRoutePlan(...args);

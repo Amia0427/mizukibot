@@ -27,9 +27,11 @@ const {
 const {
   resolveRoleAwareMainModelConfig,
   resolveUserScopedMainModelConfig,
+  resolveNormalUserMainModelConfigs,
   shouldBypassMainModelFallback,
   isAdminMainModelUser
 } = require('../../../utils/mainModelConfigResolver');
+const { runMainModelPool } = require('../../../utils/mainModelPool');
 const {
   buildImageModelConfig
 } = require('../../../utils/imageModelConfigResolver');
@@ -670,6 +672,14 @@ function buildPrimaryMainModelConfig(overrides = null, userId = '', options = {}
   return resolveRoleAwareMainModelConfig(userId, overrides, options);
 }
 
+function shouldUsePrimaryModelPool(modelConfig = null, userId = '', options = {}) {
+  return options.primaryModelPoolEnabled === true
+    && options.bypassMainModelPool !== true
+    && config.MAIN_MODEL_POOL_CONFIGURED === true
+    && !isAdminMainModelUser(userId, options)
+    && !(modelConfig && typeof modelConfig === 'object');
+}
+
 async function withMainModelFallback(action, modelConfig = null, userId = '', options = {}) {
   const bypassFallback = shouldBypassMainModelFallback(userId, options);
   const scope = options?.fallbackScope
@@ -690,6 +700,101 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
       ...payload
     }));
   };
+
+  if (shouldUsePrimaryModelPool(modelConfig, userId, options) && !bypassFallback && !resolvedConfig.__mainFallbackActive) {
+    const poolConfigs = resolveNormalUserMainModelConfigs(userId, modelConfig, options);
+    const shouldContinuePool = (error) => error?.bypassMainModelFallback !== true
+      && error?.streamHadOutput !== true
+      && !String(error?.partialText || '').trim();
+    try {
+      return await runMainModelPool(poolConfigs, async (poolConfig) => {
+        emitFallbackTrace('main_model_pool_attempt', {
+          mainModelPoolEnabled: true,
+          mainModelPoolSlot: poolConfig.__mainModelPoolSlot,
+          mainModelPoolAttempt: poolConfig.__mainModelPoolAttempt,
+          mainModelPoolSize: poolConfig.__mainModelPoolSize,
+          model: getModelName(poolConfig),
+          provider: resolveMainProvider(getApiBaseUrl(poolConfig), getModelName(poolConfig), poolConfig)
+        });
+        try {
+          const result = await action(poolConfig);
+          recordMainModelSuccess({ usingFallback: false }, { scope });
+          emitFallbackTrace('main_model_pool_success', {
+            mainModelPoolEnabled: true,
+            mainModelPoolSlot: poolConfig.__mainModelPoolSlot,
+            mainModelPoolAttempt: poolConfig.__mainModelPoolAttempt,
+            mainModelPoolSize: poolConfig.__mainModelPoolSize,
+            model: getModelName(poolConfig),
+            provider: resolveMainProvider(getApiBaseUrl(poolConfig), getModelName(poolConfig), poolConfig)
+          });
+          return result;
+        } catch (error) {
+          emitFallbackTrace('main_model_pool_failure', {
+            mainModelPoolEnabled: true,
+            mainModelPoolSlot: poolConfig.__mainModelPoolSlot,
+            mainModelPoolAttempt: poolConfig.__mainModelPoolAttempt,
+            mainModelPoolSize: poolConfig.__mainModelPoolSize,
+            model: getModelName(poolConfig),
+            provider: resolveMainProvider(getApiBaseUrl(poolConfig), getModelName(poolConfig), poolConfig),
+            mainModelPoolSwitchToNext: poolConfig.__mainModelPoolAttempt < poolConfig.__mainModelPoolSize
+              && shouldContinuePool(error),
+            finalErrorCode: extractErrorCode(error),
+            error: String(error?.message || error || '').slice(0, 400)
+          });
+          throw error;
+        }
+      }, {
+        random: options.mainModelPoolRandom,
+        shouldContinue: shouldContinuePool
+      });
+    } catch (error) {
+      if (error?.bypassMainModelFallback === true || bypassFallback) throw error;
+      if (error?.streamHadOutput === true || String(error?.partialText || '').trim()) throw error;
+
+      const failureState = recordMainModelFailure(error, { scope });
+      if (!failureState.counted) throw error;
+
+      const forcedFallbackConfig = resolveForcedFallbackMainModelConfig(
+        buildPrimaryMainModelConfig(modelConfig, userId, options),
+        { scope }
+      );
+      emitFallbackTrace('fallback_activated', {
+        fallbackActive: true,
+        fallbackForced: true,
+        fallbackScope: scope || '',
+        primaryModelPoolExhausted: true,
+        mainModelPoolAttempts: error.mainModelPoolAttempts,
+        model: getModelName(forcedFallbackConfig),
+        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig), forcedFallbackConfig),
+        finalErrorCode: extractErrorCode(error)
+      });
+      try {
+        const fallbackResult = await action(forcedFallbackConfig);
+        recordMainModelSuccess({ usingFallback: true }, { scope });
+        emitFallbackTrace('fallback_success', {
+          fallbackActive: true,
+          fallbackForced: true,
+          primaryModelPoolExhausted: true,
+          model: getModelName(forcedFallbackConfig),
+          provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig), forcedFallbackConfig)
+        });
+        return fallbackResult;
+      } catch (fallbackError) {
+        fallbackError.mainModelPoolAttempts = error.mainModelPoolAttempts;
+        emitFallbackTrace('fallback_failure', {
+          fallbackActive: true,
+          fallbackForced: true,
+          primaryModelPoolExhausted: true,
+          model: getModelName(forcedFallbackConfig),
+          provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig), forcedFallbackConfig),
+          finalErrorCode: extractErrorCode(fallbackError),
+          error: String(fallbackError?.message || fallbackError || '').slice(0, 400)
+        });
+        throw fallbackError;
+      }
+    }
+  }
+
   try {
     const result = await action(resolvedConfig);
     recordMainModelSuccess({ usingFallback: resolvedConfig.__mainFallbackActive }, { scope });

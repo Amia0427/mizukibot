@@ -48,11 +48,6 @@ const {
   buildModelRouteDiagnostics,
   createModelRouteTracePatch
 } = require('../../../utils/modelRouteDiagnostics');
-// source-compat anchors for role-aware main model routing:
-// require('../../../utils/mainModelConfigResolver');
-// function buildPrimaryMainModelConfig(overrides = null, userId = '') {
-// const resolvedConfig = resolveUserScopedMainModelConfig(userId, modelConfig, options);
-// const bypassFallback = shouldBypassMainModelFallback(userId, options);
 const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
 const FILTERED_TOOL_SCHEMA_CACHE_TTL_MS = 60 * 60 * 1000;
 const FILTERED_TOOL_SCHEMA_CACHE_MAX_ENTRIES = 100;
@@ -130,6 +125,31 @@ function hasAssistantUsableContent(message = null) {
   const content = normalizeTextContent(message.content).trim();
   if (content) return true;
   return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+}
+
+function createInvalidModelResponseError(message = 'model response did not include usable assistant content') {
+  const error = new Error(message);
+  error.mainModelResponseInvalid = true;
+  return error;
+}
+
+function parseAssistantResponse(response) {
+  const message = isolateReasoningPreamble(extractMessageContent(response));
+  if (hasAssistantUsableContent(message)) return message;
+
+  const parseDiagnostic = summarizeMalformedResponse(response);
+  recordModelCallParseFailure(response?.__modelCallId, {
+    statusCode: Number(response?.status || 0) || null,
+    parseDiagnostic,
+    error: message
+      ? 'assistant message parsed without usable text or tool calls'
+      : 'model response parsed without usable assistant content'
+  });
+  console.error('AI response malformed(raw assistant):', previewMalformedResponseData(response?.data));
+  const error = createInvalidModelResponseError();
+  error.modelCallId = response?.__modelCallId;
+  error.parseDiagnostic = parseDiagnostic;
+  throw error;
 }
 
 function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
@@ -348,7 +368,11 @@ function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = '
     fallbackReason: resolvedConfig?.__mainFallbackReason || trace.fallbackReason,
     fallbackScope: resolvedConfig?.__mainFallbackScope,
     fallbackActive: resolvedConfig?.__mainFallbackActive === true,
-    fallbackForced: resolvedConfig?.__mainFallbackForced === true
+    fallbackForced: resolvedConfig?.__mainFallbackForced === true,
+    mainModelPoolEnabled: resolvedConfig?.__mainModelPoolEnabled === true,
+    mainModelPoolSlot: resolvedConfig?.__mainModelPoolSlot,
+    mainModelPoolAttempt: resolvedConfig?.__mainModelPoolAttempt,
+    mainModelPoolSize: resolvedConfig?.__mainModelPoolSize
   });
   return {
     ...trace,
@@ -385,6 +409,10 @@ function logResolvedModelCall(context = {}, resolvedConfig = null, source = 'v2_
     fallbackActive: trace.mainFallbackActive,
     fallbackForced: trace.mainFallbackForced,
     fallbackReason: trace.fallbackReason,
+    mainModelPoolEnabled: trace.mainModelPoolEnabled,
+    mainModelPoolSlot: trace.mainModelPoolSlot,
+    mainModelPoolAttempt: trace.mainModelPoolAttempt,
+    mainModelPoolSize: trace.mainModelPoolSize,
     adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
     adminConfigWarnings: trace.adminConfigWarnings
   };
@@ -475,59 +503,57 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
     );
   };
 
-  const response = await withMainModelFallback(async (resolvedConfig) => {
+  const requestForConfig = async (resolvedConfig) => {
+    let response;
     try {
-      return await requestOnce(resolvedConfig, toolSchemas.length > 0);
+      response = await requestOnce(resolvedConfig, toolSchemas.length > 0);
     } catch (error) {
       if (toolSchemas.length > 0 && isToolSchemaValidationError(error)) {
-        return requestOnce(resolvedConfig, false);
-      }
-      if (!isContextOverflowError(error)) throw error;
-      const retryPayload = buildReactiveRetryPayload({
-        messages: messagesToSend,
-        canonicalSegments: context?.canonicalSegments,
-        routeMeta: context?.routeMeta,
-        source: String(context?.source || 'v2_assistant_message').trim() || 'v2_assistant_message',
-        modelName: getModelName(resolvedConfig),
-        modelWindowTokens: Number(
-          context?.compactionPlan?.diagnostics?.modelWindowTokens
-          || context?.modelWindowTokens
-          || config.CONTEXT_WINDOW_MAX_TOKENS
-          || 32000
-        ) || 32000,
-        maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
-        preferRawTrim: !context?.canonicalSegments
-      });
-      try {
-        return await requestOnce(resolvedConfig, false, retryPayload.messages);
-      } catch (retryError) {
-        if (isContextOverflowError(retryError)) {
-          throw createContextCompactionHardBlockError(retryPayload.compactionPlan);
+        response = await requestOnce(resolvedConfig, false);
+      } else {
+        if (!isContextOverflowError(error)) throw error;
+        const retryPayload = buildReactiveRetryPayload({
+          messages: messagesToSend,
+          canonicalSegments: context?.canonicalSegments,
+          routeMeta: context?.routeMeta,
+          source: String(context?.source || 'v2_assistant_message').trim() || 'v2_assistant_message',
+          modelName: getModelName(resolvedConfig),
+          modelWindowTokens: Number(
+            context?.compactionPlan?.diagnostics?.modelWindowTokens
+            || context?.modelWindowTokens
+            || config.CONTEXT_WINDOW_MAX_TOKENS
+            || 32000
+          ) || 32000,
+          maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
+          preferRawTrim: !context?.canonicalSegments
+        });
+        try {
+          response = await requestOnce(resolvedConfig, false, retryPayload.messages);
+        } catch (retryError) {
+          if (isContextOverflowError(retryError)) {
+            throw createContextCompactionHardBlockError(retryPayload.compactionPlan);
+          }
+          throw retryError;
         }
-        throw retryError;
       }
     }
-  }, modelConfig, userId, {
-    routeMeta: context?.routeMeta,
-    requestTrace: context?.requestTrace || context?.routeMeta?.requestTrace
-  });
-
-  const message = isolateReasoningPreamble(extractMessageContent(response));
-  if (hasAssistantUsableContent(message)) return message;
-
-  const parseDiagnostic = summarizeMalformedResponse(response);
-  recordModelCallParseFailure(response?.__modelCallId, {
-    statusCode: Number(response?.status || 0) || null,
-    parseDiagnostic,
-    error: message
-      ? 'assistant message parsed without usable text or tool calls'
-      : 'model response parsed without usable assistant content'
-  });
-  console.error('AI response malformed(raw assistant):', previewMalformedResponseData(response?.data));
-  return {
-    role: 'assistant',
-    content: MODEL_RESPONSE_MALFORMED_REPLY
+    return parseAssistantResponse(response);
   };
+
+  try {
+    return await withMainModelFallback(requestForConfig, modelConfig, userId, {
+    routeMeta: context?.routeMeta,
+    requestTrace: context?.requestTrace || context?.routeMeta?.requestTrace,
+    primaryModelPoolEnabled: context.primaryModelPoolEnabled === true,
+    mainModelPoolRandom: context.mainModelPoolRandom
+    });
+  } catch (error) {
+    if (!error?.mainModelResponseInvalid) throw error;
+    return {
+      role: 'assistant',
+      content: MODEL_RESPONSE_MALFORMED_REPLY
+    };
+  }
 }
 
 async function requestNonStreamingReply(messagesToSend, context = {}) {
@@ -642,8 +668,24 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           getRetries(1, resolvedConfig),
           getApiKey(resolvedConfig)
         );
+        const flushStreamTail = () => {
+          const tailEvents = flushSSEState(parserState);
+          for (const event of tailEvents) {
+            if (!event || event.done) continue;
+            if (event.reasoning) {
+              reasoningCollected += event.reasoning;
+            }
+            if (event.delta) {
+              emitVisibleDelta(event.delta);
+            }
+          }
+        };
         if (!useFirstTokenTimeout && !useTotalTimeout) {
           await streamPromise;
+          flushStreamTail();
+          if (!options.streamHadOutput) {
+            throw createInvalidModelResponseError('stream response did not include usable assistant content');
+          }
           return;
         }
 
@@ -699,11 +741,20 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
         } finally {
           cancelAllTimers();
         }
+
+        flushStreamTail();
+        if (!options.streamHadOutput) {
+          throw createInvalidModelResponseError('stream response did not include usable assistant content');
+        }
       };
 
       try {
         await requestStreamOnce(messagesToSend);
       } catch (error) {
+        if (options.streamHadOutput) {
+          error.streamHadOutput = true;
+          error.partialText = lastVisibleText;
+        }
         if (!isContextOverflowError(error) || String(collected || '').trim()) throw error;
         const retryPayload = buildReactiveRetryPayload({
           messages: messagesToSend,
@@ -731,7 +782,9 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
       }
     }, modelConfig, userId, {
       routeMeta: options?.routeMeta,
-      requestTrace: options?.requestTrace || options?.routeMeta?.requestTrace
+      requestTrace: options?.requestTrace || options?.routeMeta?.requestTrace,
+      primaryModelPoolEnabled: options.primaryModelPoolEnabled === true,
+      mainModelPoolRandom: options.mainModelPoolRandom
     });
   } catch (error) {
     const visiblePartial = sanitizeUserFacingText(collected, {

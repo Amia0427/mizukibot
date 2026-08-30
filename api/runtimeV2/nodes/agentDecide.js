@@ -59,6 +59,7 @@ function createAgentDecideNode(deps = {}) {
       requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
       topRouteType: request.topRouteType,
       customPrompt: request.customPrompt,
+      primaryModelPoolEnabled: request.primaryModelPoolEnabled === true,
       source: 'agent_decide',
       dispatchBranch: 'agent',
       triggerBranch: 'agent_decide.react',

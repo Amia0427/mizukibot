@@ -32,6 +32,7 @@ function createMessageDispatchCoordinator(deps = {}) {
     createStreamingDispatcher,
     composeDirectRoutePrompt,
     askAIDispatch,
+    isAdminUser = () => false,
     actionClient = null
   } = deps;
 
@@ -122,6 +123,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           topRouteType: routeExecutionPlan.topRouteType,
           dispatchBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct' : 'agent',
           triggerBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct.final_send' : 'agent.final_send',
+          primaryModelPoolEnabled: routeExecutionPlan.executor !== 'background_direct' && !isAdminUser(senderId),
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
           imageUrl,
@@ -273,6 +275,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           topRouteType: routeExecutionPlan.topRouteType,
           dispatchBranch: 'direct_reply',
           triggerBranch: 'direct_reply.final_send',
+          primaryModelPoolEnabled: !isAdminUser(senderId),
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,

@@ -28,6 +28,7 @@ const {
   buildSessionContextRuntimeConfig
 } = require('./mainReplyContextRuntime');
 const { buildImageVisualSummaryRuntimeConfig } = require('./imageMemoryRuntime');
+const { buildMainModelRuntimeConfig } = require('./mainModelRuntime');
 const {
   BROWSER_ACCEPT_LANGUAGE,
   BROWSER_USER_AGENT,
@@ -395,6 +396,7 @@ module.exports = {
   LLM_PERCEPTION_ENABLE_ALMANAC: pickBool('LLM_PERCEPTION_ENABLE_ALMANAC', true),
   LLM_PERCEPTION_INCLUDE_GROUP_NAME: pickBool('LLM_PERCEPTION_INCLUDE_GROUP_NAME', true),
   // ===== Unified AI  =====
+  ...buildMainModelRuntimeConfig({ pick }),
   API_BASE_URL: pick('API_BASE_URL', 'https://api2.gemai.cc/v1/chat/completions'),
   API_PROVIDER: pick('API_PROVIDER', ''),
   API_KEY: pick('API_KEY', ''),

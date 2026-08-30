@@ -22,7 +22,8 @@ const TRACE_TEXT_FIELDS = new Set([
   'ignoreSessionLimitReason', 'executor', 'apiBaseUrl', 'requestUrl',
   'retry', 'tool', 'toolName', 'replyPath', 'finishReason', 'mode', 'jobId', 'postReplyJobId',
   'decisionSource', 'decision', 'stopReason', 'status', 'blockedReason', 'toolCallId', 'unavailableReason',
-  'needsMemoryReason', 'recallFacet', 'downgradeReason', 'relationship', 'fastPath'
+  'needsMemoryReason', 'recallFacet', 'downgradeReason', 'relationship', 'fastPath',
+  'mainModelPoolSlot'
 ]);
 const TRACE_NUMBER_FIELDS = new Set([
   'phaseSeq', 'requestStartedAt', 'elapsedSinceRequestStartMs', 'durationMs', 'statusCode',
@@ -32,7 +33,8 @@ const TRACE_NUMBER_FIELDS = new Set([
   'inbound_active_general', 'inbound_active_total', 'inbound_wait_ms', 'attempt', 'retryCount',
   'maxRetry', 'pid', 'executorMs', 'streamMs', 'firstTokenMs', 'sendMs',
   'prepareMs', 'routeMs', 'dispatchMs', 'validateMs', 'persistMs', 'toolMs', 'maxAttempts',
-  'allowedToolCount', 'toolRoundCount', 'toolCallCount', 'round', 'callCount', 'tokens'
+  'allowedToolCount', 'toolRoundCount', 'toolCallCount', 'round', 'callCount', 'tokens',
+  'mainModelPoolAttempt', 'mainModelPoolSize'
 ]);
 const TRACE_BOOLEAN_FIELDS = new Set([
   'isAdmin', 'applied', 'success', 'ok', 'cache', 'richMessage', 'fallbackActive', 'fallbackForced',
@@ -40,7 +42,7 @@ const TRACE_BOOLEAN_FIELDS = new Set([
   'needsBackground', 'streamCompleted', 'retryable', 'saved', 'shouldPersistBridge',
   'shouldPersistJournal', 'shouldLearn', 'shouldEnqueuePostReplyJob', 'workerStarted',
   'stream', 'sent', 'streamDoneSeen', 'allowTools', 'shouldUseTools', 'forced',
-  'hasContext', 'needsMemory', 'forceMemoryContext'
+  'hasContext', 'needsMemory', 'forceMemoryContext', 'mainModelPoolEnabled', 'mainModelPoolSwitchToNext'
 ]);
 const TRACE_IDENTITY_FIELDS = new Map([
   ['messageId', ['messageId', 'message_id']],

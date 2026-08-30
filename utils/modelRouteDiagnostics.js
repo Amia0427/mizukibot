@@ -4,6 +4,12 @@ function normalizeText(value = '') {
   return String(value || '').trim();
 }
 
+function normalizeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function safeHost(url = '') {
   try {
     return new URL(String(url || '')).host || '';
@@ -76,7 +82,11 @@ function buildModelRouteDiagnostics(input = {}) {
     fallbackReason,
     fallbackScope: normalizeText(input.fallbackScope || input.mainFallbackScope || existing.fallbackScope),
     fallbackActive: input.fallbackActive === true || input.mainFallbackActive === true || existing.fallbackActive === true,
-    fallbackForced: input.fallbackForced === true || input.mainFallbackForced === true || existing.fallbackForced === true
+    fallbackForced: input.fallbackForced === true || input.mainFallbackForced === true || existing.fallbackForced === true,
+    mainModelPoolEnabled: input.mainModelPoolEnabled === true || existing.mainModelPoolEnabled === true,
+    mainModelPoolSlot: normalizeText(input.mainModelPoolSlot || existing.mainModelPoolSlot),
+    mainModelPoolAttempt: normalizeNumber(input.mainModelPoolAttempt ?? existing.mainModelPoolAttempt),
+    mainModelPoolSize: normalizeNumber(input.mainModelPoolSize ?? existing.mainModelPoolSize)
   };
 }
 
@@ -98,7 +108,11 @@ function pickModelRouteDiagnosticFields(input = {}) {
     fallbackReason: normalizeText(diagnostics.fallbackReason || diagnostics.mainFallbackReason),
     fallbackScope: normalizeText(diagnostics.fallbackScope),
     fallbackActive: diagnostics.fallbackActive === true,
-    fallbackForced: diagnostics.fallbackForced === true
+    fallbackForced: diagnostics.fallbackForced === true,
+    mainModelPoolEnabled: diagnostics.mainModelPoolEnabled === true,
+    mainModelPoolSlot: normalizeText(diagnostics.mainModelPoolSlot),
+    mainModelPoolAttempt: normalizeNumber(diagnostics.mainModelPoolAttempt),
+    mainModelPoolSize: normalizeNumber(diagnostics.mainModelPoolSize)
   };
 }
 
@@ -121,6 +135,10 @@ function createModelRouteTracePatch(diagnostics = {}) {
     mainFallbackScope: picked.fallbackScope,
     mainFallbackActive: picked.fallbackActive,
     mainFallbackForced: picked.fallbackForced,
+    mainModelPoolEnabled: picked.mainModelPoolEnabled,
+    mainModelPoolSlot: picked.mainModelPoolSlot,
+    mainModelPoolAttempt: picked.mainModelPoolAttempt,
+    mainModelPoolSize: picked.mainModelPoolSize,
     modelRouteDiagnostic: picked
   };
 }
