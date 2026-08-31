@@ -32,7 +32,139 @@ const {
   findNaturalSplitIndex,
   getGroupChatStreamSendGapMs
 } = require('../core/streamingSegmentation');
+const {
+  getGroupReplySendQueueSize,
+  sendGroupReply
+} = require('../core/systemGroupReply');
 const { registerSensitivePromptContent } = require('../utils/promptSecurity');
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function assertUnawaitedDeltaOrder(createDispatcher, label) {
+  const payloads = [];
+  const events = [];
+  const sentence = (index) => `第${index}段${'内容'.repeat(80)}。`;
+  const fullReply = Array.from({ length: 8 }, (_, index) => sentence(index + 1)).join('');
+  const dispatcher = createDispatcher({
+    runtimeConfig: {
+      AI_STREAM_MAX_SEGMENTS: 3,
+      AI_STREAM_SEND_GAP_MS: 0
+    },
+    sendWithRetry: async (payload) => {
+      payloads.push(payload);
+      await delay(20);
+      return true;
+    },
+    chatType: 'private',
+    userId: `${label}_user`,
+    senderId: `${label}_user`,
+    telemetry: {
+      onEvent(event) {
+        events.push(event);
+      }
+    }
+  });
+
+  const pendingDeltas = [];
+  for (let index = 1; index <= 8; index += 1) {
+    const visible = Array.from({ length: index }, (_, sentenceIndex) => sentence(sentenceIndex + 1)).join('');
+    pendingDeltas.push(dispatcher.onDelta('', visible));
+  }
+
+  await dispatcher.finish(fullReply);
+  await Promise.all(pendingDeltas);
+
+  const chunkIndexes = events
+    .filter((event) => event.type === 'reply_stream_chunk_start')
+    .map((event) => event.chunkIndex);
+  assert.strictEqual(payloads.length, 3, `${label} should enforce the configured stream segment limit`);
+  assert.strictEqual(dispatcher.getStats().sentSegments, 3, `${label} should count serialized segments once`);
+  if (chunkIndexes.length) {
+    assert.deepStrictEqual(chunkIndexes, [1, 2, 3], `${label} should serialize unawaited delta callbacks`);
+  }
+}
+
+async function assertSameGroupStreamOrder(createDispatcher, label) {
+  const payloads = [];
+  const firstReply = '我感觉先别急着背完整番种表，那个很容易越背越乱。先把役、振听和立直这三个坑搞懂，再去雀魂低段打一局，遇到无役就看系统提示；这比一上来背全表舒服很多。';
+  const secondReply = '后来请求的完整回复。';
+  const firstDispatcher = createDispatcher({
+    runtimeConfig: { AI_STREAM_MAX_SEGMENTS: 2 },
+    sendWithRetry: async (payload) => {
+      payloads.push(payload.params.message);
+      return true;
+    },
+    chatType: 'group',
+    groupId: `${label}_same_group`,
+    userId: `${label}_user_a`,
+    senderId: `${label}_user_a`
+  });
+  const secondDispatcher = createDispatcher({
+    runtimeConfig: { AI_STREAM_MAX_SEGMENTS: 1 },
+    sendWithRetry: async (payload) => {
+      payloads.push(payload.params.message);
+      return true;
+    },
+    chatType: 'group',
+    groupId: `${label}_same_group`,
+    userId: `${label}_user_b`,
+    senderId: `${label}_user_b`
+  });
+
+  await firstDispatcher.onDelta('', firstReply);
+  await Promise.all([
+    firstDispatcher.finish(firstReply),
+    (async () => {
+      await delay(20);
+      await secondDispatcher.finish(secondReply);
+    })()
+  ]);
+
+  assert.deepStrictEqual(payloads, [
+    `[CQ:at,qq=${label}_user_a] 我感觉先别急着背完整番种表，那个很容易越背越乱。`,
+    '先把役、振听和立直这三个坑搞懂，再去雀魂低段打一局，遇到无役就看系统提示；这比一上来背全表舒服很多。',
+    `[CQ:at,qq=${label}_user_b] ${secondReply}`
+  ], `${label} should keep each same-group stream contiguous`);
+}
+
+async function assertAbortReleasesGroupLease(createDispatcher, label) {
+  const payloads = [];
+  const groupId = `${label}_abort_group`;
+  const firstReply = Array.from({ length: 10 }, () => '我感觉先别急着背完整番种表，那个很容易越背越乱。先把役、振听和立直这三个坑搞懂，再去雀魂低段打一局，遇到无役就看系统提示；这比一上来背全表舒服很多。').join('');
+  const dispatcher = createDispatcher({
+    runtimeConfig: { AI_STREAM_MAX_SEGMENTS: 2 },
+    sendWithRetry: async (payload) => {
+      payloads.push(payload.params.message);
+      return true;
+    },
+    chatType: 'group',
+    groupId,
+    userId: `${label}_user`,
+    senderId: `${label}_user`
+  });
+
+  await dispatcher.onDelta('', firstReply);
+  assert.strictEqual(payloads.length, 1, `${label} should send the first streamed segment before aborting`);
+  assert.strictEqual(getGroupReplySendQueueSize(), 1, `${label} should hold the group send lease while streaming`);
+
+  const queuedReply = sendGroupReply({
+    sendWithRetry: async (payload) => {
+      payloads.push(payload.params.message);
+      return true;
+    },
+    groupId,
+    senderId: `${label}_other`,
+    replyText: '中止后的普通回复'
+  });
+
+  await dispatcher.abort();
+  await queuedReply;
+
+  assert.strictEqual(payloads[payloads.length - 1], `[CQ:at,qq=${label}_other] 中止后的普通回复`, `${label} should release the lease for later replies`);
+  assert.strictEqual(getGroupReplySendQueueSize(), 0, `${label} group send queue should drain after abort`);
+}
 
 module.exports = (async () => {
   const sentPayloads = [];
@@ -382,6 +514,13 @@ module.exports = (async () => {
   await protectedSrcDispatcher.finish(splitPromptFragment);
   assert.strictEqual(protectedSrcPayloads.length, 1);
   assert.ok(!protectedSrcPayloads[0].params.message.includes(splitPromptFragment.slice(0, 64)));
+
+  await assertUnawaitedDeltaOrder(createStreamingDispatcher, 'core');
+  await assertUnawaitedDeltaOrder(createSrcStreamingDispatcher, 'src');
+  await assertSameGroupStreamOrder(createStreamingDispatcher, 'core');
+  await assertSameGroupStreamOrder(createSrcStreamingDispatcher, 'src');
+  await assertAbortReleasesGroupLease(createStreamingDispatcher, 'core');
+  await assertAbortReleasesGroupLease(createSrcStreamingDispatcher, 'src');
 
   fs.rmSync(tempSensitiveDir, { recursive: true, force: true });
   console.log('messageReplyRuntimeFreshness.test.js passed');

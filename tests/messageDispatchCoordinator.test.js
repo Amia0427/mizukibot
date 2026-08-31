@@ -18,6 +18,8 @@ module.exports = (async () => {
   let backgroundCalled = false;
   let toolCalled = false;
   let aiCalled = false;
+  let failStreamingReply = false;
+  let streamAbortCalls = 0;
   const aiReplyOptionsSeen = [];
   const injectedActionClient = { marker: 'injected-action-client' };
   const thinkingEmojiOptionsSeen = [];
@@ -55,7 +57,13 @@ module.exports = (async () => {
       return true;
     },
     askToolTaskLocally: async () => { toolCalled = true; return 'tool reply'; },
-    createStreamingDispatcher: () => ({ onDelta() {}, async finish() {} }),
+    createStreamingDispatcher: () => ({
+      onDelta() {},
+      async finish() {},
+      async abort() {
+        streamAbortCalls += 1;
+      }
+    }),
     composeDirectRoutePrompt: (parts = {}) => Object.entries(parts)
       .filter(([, value]) => String(value || '').trim())
       .map(([key, value]) => `${key}:${value}`)
@@ -63,6 +71,10 @@ module.exports = (async () => {
     askAIDispatch: async (_text, _userInfo, _senderId, _customPrompt, _imageUrl, replyOptions) => {
       aiCalled = true;
       aiReplyOptionsSeen.push({ ...(replyOptions || {}) });
+      if (failStreamingReply) {
+        replyOptions.onDelta('', '已发送首段');
+        throw new Error('stream failed');
+      }
       return 'ai reply';
     },
     sendWithRetry: async () => true,
@@ -228,6 +240,19 @@ module.exports = (async () => {
   assert.strictEqual(privateChat.reply, 'ai reply');
   assert.strictEqual(privateChat.replyOptions.disableStream, false, 'private chat should keep the original stream setting');
   assert.strictEqual(privateChat.replyOptions.deferPersist, true, 'private direct chat replies should also use deferred persist');
+
+  const abortCallsBeforeFailure = streamAbortCalls;
+  failStreamingReply = true;
+  await coordinator.dispatchByRoutePlan({
+    route: { meta: {} },
+    routeExecutionPlan: { executor: 'direct', allowTools: false, allowStream: true, topRouteType: 'direct_chat', allowedTools: [] },
+    cleanText: 'stream failure',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1'
+  });
+  assert.strictEqual(streamAbortCalls, abortCallsBeforeFailure + 1, 'coordinator should abort an unfinished stream after model failure');
 
   console.log('messageDispatchCoordinator.test.js passed');
 })().catch((error) => {

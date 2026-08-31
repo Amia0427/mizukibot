@@ -235,6 +235,23 @@ module.exports = (async () => {
   assert.strictEqual(privateThinkingEmojiCalls, 0);
   assert.ok(privateNoToolEvents.some((event) => event.type === 'thinking_emoji_skipped' && event.reason === 'private_no_tool_direct_reply'));
 
+  let failedStreamAbortCalls = 0;
+  const failedStreamCase = createBaseDeps({
+    createStreamingDispatcher: () => ({
+      onDelta() {},
+      async finish() {},
+      async abort() {
+        failedStreamAbortCalls += 1;
+      }
+    }),
+    askAIDispatch: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, replyOptions) => {
+      replyOptions.onDelta('', '已发送首段');
+      throw new Error('stream failed');
+    }
+  });
+  await failedStreamCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
+  assert.strictEqual(failedStreamAbortCalls, 1, 'route flow should abort an unfinished stream after model failure');
+
   const unavailableToolCase = createBaseDeps();
   const unavailableToolEnvelope = await unavailableToolCase.routeFlow.dispatchByRoutePlan({
     ...buildRouteDecision('group'),

@@ -372,6 +372,7 @@ function createMessageRouteFlow(deps = {}) {
     let reply = '';
     let usedStreamingSend = false;
     let finalReplyOptions = null;
+    let activeStreamingDispatcher = null;
     let persistedReplyText = '';
     let reasoningText = '';
     let reasoningForwardText = '';
@@ -595,6 +596,7 @@ function createMessageRouteFlow(deps = {}) {
           }),
           requestTrace: cloneTraceForMeta(requestTrace)
         });
+        activeStreamingDispatcher = streamingDispatcher;
         const replyOptions = {
           onEvent: typeof inboundContext?.onEvent === 'function' ? inboundContext.onEvent : null,
           onDelta: streamingDispatcher.onDelta,
@@ -738,9 +740,15 @@ function createMessageRouteFlow(deps = {}) {
             ...(streamStats && typeof streamStats === 'object' ? streamStats : {}),
             finishDurationMs: Math.max(0, Date.now() - streamFinishStartedAt)
           };
+          activeStreamingDispatcher = null;
+        } else {
+          await streamingDispatcher.abort?.();
+          activeStreamingDispatcher = null;
         }
       }
     } catch (dispatchErr) {
+      await activeStreamingDispatcher?.abort?.();
+      activeStreamingDispatcher = null;
       console.error('[dispatch] failed:', {
         routeDebugKey: routeExecutionPlan?.routeDebugKey,
         policyKey: routeExecutionPlan?.policyKey,

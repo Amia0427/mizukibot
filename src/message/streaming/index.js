@@ -16,6 +16,7 @@ const {
   getSensitiveOutputHoldbackChars,
   protectFinalOutput
 } = require('../../../utils/promptSecurity');
+const { createGroupReplySendLease } = require('../../../core/systemGroupReply');
 
 function getReplyChunkChars(config = {}) {
   const n = Number(config.AI_REPLY_CHUNK_CHARS);
@@ -70,13 +71,37 @@ function createStreamingDispatcher({
     sentSegments: 0,
     hasSentAny: false,
     lastSendAt: 0,
+    operationQueue: Promise.resolve(),
     sendQueue: Promise.resolve(),
+    groupSendLease: null,
+    aborted: false,
     sendStartedAt: 0,
     sendFinishedAt: 0,
     totalSendDurationMs: 0,
     totalGapWaitMs: 0,
     failedChunks: 0
   };
+
+  function enqueueOperation(task) {
+    state.operationQueue = state.operationQueue.then(task, task);
+    return state.operationQueue;
+  }
+
+  async function waitForGroupSendTurn() {
+    const isPrivate = String(chatType || '').trim().toLowerCase() === 'private';
+    if (isPrivate) return;
+    if (!state.groupSendLease) {
+      state.groupSendLease = createGroupReplySendLease(groupId);
+    }
+    await state.groupSendLease?.waitForTurn();
+  }
+
+  async function releaseGroupSendTurn() {
+    if (!state.groupSendLease) return;
+    const lease = state.groupSendLease;
+    state.groupSendLease = null;
+    await lease.release();
+  }
 
   function emitStreamingTelemetry(type = '', payload = {}) {
     if (!telemetry || typeof telemetry.onEvent !== 'function') return;
@@ -93,13 +118,14 @@ function createStreamingDispatcher({
   async function sendChunk(chunk) {
     const text = String(chunk || '').trim();
     if (!text) return false;
-    const chunkIndex = state.sentSegments + 1;
 
     const task = async () => {
-      if (typeof shouldSend === 'function' && shouldSend() === false) return false;
-      // Keep streamed chunk sending strictly serialized (unit-test anchor).
+      if (state.aborted || (typeof shouldSend === 'function' && shouldSend() === false)) return false;
+      await waitForGroupSendTurn();
+      if (state.aborted || (typeof shouldSend === 'function' && shouldSend() === false)) return false;
       const now = Date.now();
       const isPrivate = String(chatType || '').trim().toLowerCase() === 'private';
+      const chunkIndex = state.sentSegments + 1;
       const groupGap = getGroupChatStreamSendGapMs(text, {
         chatType,
         groupId,
@@ -117,7 +143,7 @@ function createStreamingDispatcher({
         state.totalGapWaitMs += gapWaitMs;
         await new Promise((r) => setTimeout(r, gapWaitMs));
       }
-      if (typeof shouldSend === 'function' && shouldSend() === false) return false;
+      if (state.aborted || (typeof shouldSend === 'function' && shouldSend() === false)) return false;
 
       let sendText = protectFinalOutput(text).text;
       const adminConfig = effectiveConfig && Object.keys(effectiveConfig).length ? effectiveConfig : defaultConfig;
@@ -288,28 +314,49 @@ function createStreamingDispatcher({
   }
 
   return {
-    async onDelta(_delta, fullText) {
-      state.fullText = sanitizeUserFacingText(fullText);
-      const protectedOutput = protectFinalOutput(state.fullText);
-      if (protectedOutput.blocked) {
-        state.fullText = `${state.fullText.slice(0, state.sentLength)}${protectedOutput.text}`;
-      }
-      await flush(false);
+    onDelta(_delta, fullText) {
+      const visibleText = sanitizeUserFacingText(fullText);
+      return enqueueOperation(async () => {
+        if (state.aborted) return false;
+        state.fullText = visibleText;
+        const protectedOutput = protectFinalOutput(state.fullText);
+        if (protectedOutput.blocked) {
+          state.fullText = `${state.fullText.slice(0, state.sentLength)}${protectedOutput.text}`;
+        }
+        return flush(false);
+      });
     },
-    async finish(finalReply) {
-      if (typeof shouldSend === 'function' && shouldSend() === false) return;
+    finish(finalReply) {
       const visibleFinalReply = sanitizeUserFacingText(finalReply).trim();
-      const protectedOutput = protectFinalOutput(visibleFinalReply || state.fullText || '');
-      state.fullText = protectedOutput.blocked
-        ? `${state.fullText.slice(0, state.sentLength)}${protectedOutput.text}`
-        : protectedOutput.text;
-      while (state.sentSegments < maxSegments && await flush(true)) {}
+      return enqueueOperation(async () => {
+        try {
+          if (state.aborted || (typeof shouldSend === 'function' && shouldSend() === false)) return;
+          const protectedOutput = protectFinalOutput(visibleFinalReply || state.fullText || '');
+          state.fullText = protectedOutput.blocked
+            ? `${state.fullText.slice(0, state.sentLength)}${protectedOutput.text}`
+            : protectedOutput.text;
+          while (state.sentSegments < maxSegments && await flush(true)) {}
 
-      if (!state.hasSentAny && state.fullText.trim()) {
-        await sendChunk(state.fullText.trim());
-        state.sentLength = state.fullText.length;
-        state.sentSegments = Math.max(1, state.sentSegments);
-      }
+          if (!state.hasSentAny && state.fullText.trim()) {
+            await sendChunk(state.fullText.trim());
+            state.sentLength = state.fullText.length;
+            state.sentSegments = Math.max(1, state.sentSegments);
+          }
+          await state.sendQueue;
+        } finally {
+          await releaseGroupSendTurn();
+        }
+      });
+    },
+    abort() {
+      state.aborted = true;
+      return enqueueOperation(async () => {
+        try {
+          await state.sendQueue;
+        } finally {
+          await releaseGroupSendTurn();
+        }
+      });
     },
     getStats() {
       const wallMs = state.sendStartedAt && state.sendFinishedAt

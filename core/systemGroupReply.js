@@ -187,6 +187,39 @@ function enqueueGroupSend(groupId = '', task = async () => false) {
   return next;
 }
 
+function createGroupReplySendLease(groupId = '') {
+  const normalizedGroupId = String(groupId || '').trim();
+  if (!normalizedGroupId) return null;
+
+  let markStarted;
+  let releaseHold;
+  let released = false;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+  const hold = new Promise((resolve) => {
+    releaseHold = resolve;
+  });
+  const completed = enqueueGroupSend(normalizedGroupId, async () => {
+    markStarted();
+    await hold;
+    return true;
+  });
+
+  return {
+    waitForTurn() {
+      return started;
+    },
+    release() {
+      if (!released) {
+        released = true;
+        releaseHold();
+      }
+      return completed;
+    }
+  };
+}
+
 function getGroupReplySendQueueSize() {
   return groupReplySendQueueByGroupId.size;
 }
@@ -540,6 +573,7 @@ function buildDailyShareUserInfo(groupId, extra = {}) {
 module.exports = {
   buildQqRichMessagePayload,
   buildDailyShareUserInfo,
+  createGroupReplySendLease,
   getGroupReplySendQueueSize,
   getReplyChunkChars,
   parseQqRichMessage,
