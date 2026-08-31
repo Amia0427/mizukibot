@@ -82,4 +82,4 @@
 - 根因：上游流式回调同步触发 `onDelta` 却不等待 Promise，dispatcher 的切段状态并发读取；同时每个 dispatcher 只维护自己的发送队列，导致同群并发流互相插入。
 - 修复：dispatcher 增加操作队列串行化 `onDelta`、`finish`、`abort`；群流式回复通过现有群发送队列持有从首段到收尾的发送租约，不同群保持并行；模型异常和未完成流式收尾统一释放租约。
 - 验收（2026-08-31）：`node scripts/run-tests.js tests/messageReplyRuntimeFreshness.test.js tests/systemGroupReplyQueue.test.js tests/messageRouteFlowGroupStreaming.test.js tests/messageDispatchCoordinator.test.js tests/messageHandlerGroupConcurrency.test.js tests/messageHandlerInboundConcurrency.test.js` 退出码 0，全部测试通过；`npm run lint`、`npm run typecheck`、`git diff --check` 退出码 0。
-- 小目标已完成，提交号在实现提交完成后补录。
+- 小目标已完成：实现提交 `e55de53a`。

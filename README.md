@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 流式分段发送顺序修复（2026-08-31）
+
+- 修复上游不等待 `onDelta` Promise 时的分段状态竞态，core 与 src dispatcher 现在按调用顺序串行处理增量、收尾和中止。
+- 同一 QQ 群的一条流式回复从首段到结束持有现有群发送队列的租约，避免其他回复插入；不同群继续并行，异常中止会释放租约。
+- 验收：流式最大 3 段稳定按 `1,2,3` 发送，同群并发顺序为 `A1,A2,B`；定向测试、lint、typecheck 和差异检查均通过。
+
 ## 生图上游切换与真实验收 2026-08-26 22:24 +08:00
 
 - 根因：原图片上游 `https://ai.centos.hk/v1/chat/completions` 连接超时；切换到 `https://api.penguinsama.com/api/draw/openai/v1` 后，旧密钥返回 HTTP 401 `invalid_api_key`。

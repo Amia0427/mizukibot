@@ -1,3 +1,12 @@
+## 运行维护 2026-08-31 17:44 +08:00
+
+- 小目标：修复流式分段发送顺序混乱，保证同一流按增量顺序切段，并保证同群并发回复不互相插入。
+- 根因：上游模型同步触发 `onDelta` 但不等待 Promise，dispatcher 的切段状态被并发读取；原发送队列只在单个 dispatcher 内，同群不同流各自排队，后启动的回复可能插入前一条流中间。
+- 修复：core 与 src dispatcher 增加操作队列，串行执行 `onDelta`、`finish`、`abort`；复用 `systemGroupReply` 的按群队列为流式回复建立从首段到收尾的发送租约；模型异常或未完成流式收尾时释放租约。
+- 验收：`node scripts/run-tests.js tests/messageReplyRuntimeFreshness.test.js tests/systemGroupReplyQueue.test.js tests/messageRouteFlowGroupStreaming.test.js tests/messageDispatchCoordinator.test.js tests/messageHandlerGroupConcurrency.test.js tests/messageHandlerInboundConcurrency.test.js` 退出码 0；`npm run lint`、`npm run typecheck`、`git diff --check` 均退出码 0。新增回归确认最大 3 段稳定按 `1,2,3` 发送、同群顺序为 `A1,A2,B`，中止后普通回复可继续发送且群队列归零。
+- 边界：不同群仍可并行，私聊不接入群发送租约；未修改 `prompts/admin.txt`，未纳入其他并行工作区改动，未推送远端。
+- 小目标已完成：实现提交 `e55de53a`；文档收口提交随后完成，未推送远端。
+
 ## 运行维护 2026-08-28
 
 - 根因：同一会话的新消息会递增 freshness 版本，导致已经开始处理的旧消息在普通、快速或流式回复发送前命中 stale_reply_discarded，从而静默舍弃用户对话。
