@@ -22,7 +22,16 @@ function buildError(status, message) {
   return error;
 }
 
+function clearMainModelEnv() {
+  for (const key of Object.keys(process.env)) {
+    if (/^MAIN_MODEL_\d+_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER)$/.test(key)) {
+      delete process.env[key];
+    }
+  }
+}
+
 function setPoolEnv({ fallbackEnabled = false, includeAllSlots = false } = {}) {
+  clearMainModelEnv();
   Object.assign(process.env, {
     MIZUKIBOT_ENV_FILE: path.join(os.tmpdir(), 'mizuki-main-model-pool-routing-missing.env'),
     API_BASE_URL: 'https://legacy.example/v1/chat/completions',
@@ -49,6 +58,10 @@ function setPoolEnv({ fallbackEnabled = false, includeAllSlots = false } = {}) {
     MAIN_MODEL_4_API_KEY: '',
     MAIN_MODEL_4_MODEL: '',
     MAIN_MODEL_4_API_PROVIDER: '',
+    MAIN_MODEL_5_API_BASE_URL: '',
+    MAIN_MODEL_5_API_KEY: '',
+    MAIN_MODEL_5_MODEL: '',
+    MAIN_MODEL_5_API_PROVIDER: '',
     ADMIN_USER_IDS: 'admin-1',
     ADMIN_API_BASE_URL: 'https://admin.example/v1/chat/completions',
     ADMIN_API_KEY: 'admin-test-key',
@@ -73,7 +86,11 @@ function setPoolEnv({ fallbackEnabled = false, includeAllSlots = false } = {}) {
       MAIN_MODEL_4_API_BASE_URL: 'https://four.example/v1/chat/completions',
       MAIN_MODEL_4_API_KEY: 'slot-test-key-4',
       MAIN_MODEL_4_MODEL: 'slot-model-four',
-      MAIN_MODEL_4_API_PROVIDER: 'openai_compatible'
+      MAIN_MODEL_4_API_PROVIDER: 'openai_compatible',
+      MAIN_MODEL_5_API_BASE_URL: 'https://five.example/v1/chat/completions',
+      MAIN_MODEL_5_API_KEY: 'slot-test-key-5',
+      MAIN_MODEL_5_MODEL: 'slot-model-five',
+      MAIN_MODEL_5_API_PROVIDER: 'openai_compatible'
     });
   }
 }
@@ -151,16 +168,16 @@ module.exports = (async () => {
 
   const fallback = await runRequest({
     context: { primaryModelPoolEnabled: true, fallbackEnabled: true, includeAllSlots: true },
-    responseForCall: (index) => index <= 4
+    responseForCall: (index) => index <= 5
       ? Promise.reject(buildError(502, `main slot ${index} unavailable`))
       : okResponse('fallback reply')
   });
-  assert.strictEqual(fallback.calls.length, 5);
+  assert.strictEqual(fallback.calls.length, 6);
   assert.deepStrictEqual(
-    fallback.calls.slice(0, 4).map((call) => call.body.model),
-    ['slot-model-two', 'slot-model-three', 'slot-model-four', 'slot-model-one']
+    fallback.calls.slice(0, 5).map((call) => call.body.model),
+    ['slot-model-two', 'slot-model-three', 'slot-model-four', 'slot-model-five', 'slot-model-one']
   );
-  assert.strictEqual(fallback.calls[4].body.model, 'fallback-model');
+  assert.strictEqual(fallback.calls[5].body.model, 'fallback-model');
   assert.strictEqual(fallback.reply.content, 'fallback reply');
 
   await assert.rejects(

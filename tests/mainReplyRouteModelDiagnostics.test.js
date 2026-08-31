@@ -36,10 +36,13 @@ module.exports = (async () => {
 
   try {
     process.env.DATA_DIR = tempDir;
+    process.env.MIZUKIBOT_ENV_FILE = path.join(__dirname, '.main-model-diagnostics-missing.env');
     process.env.API_KEY = 'wrong-key';
     process.env.API_BASE_URL = 'https://example.com/wrong-provider/v1/chat/completions';
     process.env.AI_MODEL = 'wrong-model';
     process.env.AI_RETRIES = '0';
+    process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+    process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     process.env.AI_FALLBACK_ENABLED = 'false';
     process.env.ADMIN_AI_FALLBACK_ENABLED = 'false';
     process.env.HUMANIZER_AGENT_ENABLED = 'false';

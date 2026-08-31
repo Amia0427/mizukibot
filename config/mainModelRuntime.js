@@ -1,15 +1,26 @@
-const MAIN_MODEL_SLOT_COUNT = 4;
+const MAIN_MODEL_ENV_KEY_PATTERN = /^MAIN_MODEL_([1-9]\d*)_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER)$/;
 
 function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function discoverMainModelSlots(env = process.env) {
+  return [...new Set(
+    Object.keys(env)
+      .map((key) => {
+        const match = key.match(MAIN_MODEL_ENV_KEY_PATTERN);
+        return match ? Number(match[1]) : null;
+      })
+      .filter((slot) => Number.isSafeInteger(slot))
+  )].sort((left, right) => left - right);
+}
+
 function buildSlotConfig(slot, pick) {
   const prefix = `MAIN_MODEL_${slot}`;
-  const apiBaseUrl = pick(`${prefix}_API_BASE_URL`, '');
-  const apiKey = pick(`${prefix}_API_KEY`, '');
-  const model = pick(`${prefix}_MODEL`, '');
-  const provider = pick(`${prefix}_API_PROVIDER`, '');
+  const apiBaseUrl = normalizeText(pick(`${prefix}_API_BASE_URL`, ''));
+  const apiKey = normalizeText(pick(`${prefix}_API_KEY`, ''));
+  const model = normalizeText(pick(`${prefix}_MODEL`, ''));
+  const provider = normalizeText(pick(`${prefix}_API_PROVIDER`, ''));
   if (!apiBaseUrl || !apiKey || !model) return null;
 
   return {
@@ -27,10 +38,10 @@ function buildSlotConfig(slot, pick) {
 }
 
 function buildLegacyConfig(pick) {
-  const apiBaseUrl = pick('API_BASE_URL', 'https://api2.gemai.cc/v1/chat/completions');
-  const apiKey = pick('API_KEY', '');
-  const model = pick('AI_MODEL', 'gemini-3-pro-preview');
-  const provider = pick('API_PROVIDER', '');
+  const apiBaseUrl = normalizeText(pick('API_BASE_URL', 'https://api2.gemai.cc/v1/chat/completions'));
+  const apiKey = normalizeText(pick('API_KEY', ''));
+  const model = normalizeText(pick('AI_MODEL', 'gemini-3-pro-preview'));
+  const provider = normalizeText(pick('API_PROVIDER', ''));
   if (!apiBaseUrl || !apiKey || !model) return null;
 
   return {
@@ -47,12 +58,10 @@ function buildLegacyConfig(pick) {
   };
 }
 
-function buildMainModelRuntimeConfig({ pick }) {
-  const slotConfigs = [];
-  for (let slot = 1; slot <= MAIN_MODEL_SLOT_COUNT; slot += 1) {
-    const config = buildSlotConfig(slot, pick);
-    if (config) slotConfigs.push(config);
-  }
+function buildMainModelRuntimeConfig({ pick, env = process.env }) {
+  const slotConfigs = discoverMainModelSlots(env)
+    .map((slot) => buildSlotConfig(slot, pick))
+    .filter(Boolean);
 
   const hasSlotOne = slotConfigs.some((item) => item.slot === 1);
   const configs = hasSlotOne ? slotConfigs : [buildLegacyConfig(pick), ...slotConfigs].filter(Boolean);
@@ -64,6 +73,6 @@ function buildMainModelRuntimeConfig({ pick }) {
 }
 
 module.exports = {
-  MAIN_MODEL_SLOT_COUNT,
+  discoverMainModelSlots,
   buildMainModelRuntimeConfig
 };

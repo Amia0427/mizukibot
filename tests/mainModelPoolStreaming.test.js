@@ -19,8 +19,18 @@ function buildError(message) {
   return new Error(message);
 }
 
+function clearMainModelEnv() {
+  for (const key of Object.keys(process.env)) {
+    if (/^MAIN_MODEL_\d+_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER)$/.test(key)) {
+      delete process.env[key];
+    }
+  }
+}
+
 function setStreamEnv({ fallbackEnabled = false } = {}) {
+  clearMainModelEnv();
   Object.assign(process.env, {
+    MIZUKIBOT_ENV_FILE: path.join(__dirname, '.main-model-stream-missing.env'),
     API_BASE_URL: 'https://legacy.example/v1/chat/completions',
     API_KEY: 'legacy-test-key',
     API_PROVIDER: 'openai_compatible',

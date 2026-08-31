@@ -21,78 +21,81 @@ function pickFrom(values = {}) {
     : fallback;
 }
 
+function buildRuntimeConfig(values) {
+  return require('../config/mainModelRuntime').buildMainModelRuntimeConfig({
+    pick: pickFrom(values),
+    env: values
+  });
+}
+
 try {
-  const { buildMainModelRuntimeConfig } = require('../config/mainModelRuntime');
-  const complete = buildMainModelRuntimeConfig({
-    pick: pickFrom({
-      MAIN_MODEL_1_API_BASE_URL: 'https://one.example/v1/chat/completions',
-      MAIN_MODEL_1_API_KEY: 'test-key-1',
-      MAIN_MODEL_1_MODEL: 'model-one',
-      MAIN_MODEL_1_API_PROVIDER: 'openai_compatible',
-      MAIN_MODEL_2_API_BASE_URL: 'https://two.example/v1/messages',
-      MAIN_MODEL_2_API_KEY: 'test-key-2',
-      MAIN_MODEL_2_MODEL: 'model-two',
-      MAIN_MODEL_2_API_PROVIDER: 'anthropic',
-      MAIN_MODEL_3_API_BASE_URL: 'https://three.example/v1/chat/completions',
-      MAIN_MODEL_3_API_KEY: 'test-key-3',
-      MAIN_MODEL_3_MODEL: 'model-three',
-      MAIN_MODEL_4_API_BASE_URL: 'https://four.example/v1/chat/completions',
-      MAIN_MODEL_4_API_KEY: 'test-key-4',
-      MAIN_MODEL_4_MODEL: 'model-four'
-    })
+  const complete = buildRuntimeConfig({
+    MAIN_MODEL_1_API_BASE_URL: 'https://one.example/v1/chat/completions',
+    MAIN_MODEL_1_API_KEY: 'test-key-1',
+    MAIN_MODEL_1_MODEL: 'model-one',
+    MAIN_MODEL_1_API_PROVIDER: 'openai_compatible',
+    MAIN_MODEL_2_API_BASE_URL: 'https://two.example/v1/messages',
+    MAIN_MODEL_2_API_KEY: 'test-key-2',
+    MAIN_MODEL_2_MODEL: 'model-two',
+    MAIN_MODEL_2_API_PROVIDER: 'anthropic',
+    MAIN_MODEL_5_API_BASE_URL: 'https://five.example/v1/chat/completions',
+    MAIN_MODEL_5_API_KEY: 'test-key-5',
+    MAIN_MODEL_5_MODEL: 'model-five',
+    MAIN_MODEL_9_API_BASE_URL: 'https://nine.example/v1/chat/completions',
+    MAIN_MODEL_9_API_KEY: 'test-key-9',
+    MAIN_MODEL_9_MODEL: 'model-nine',
+    MAIN_MODEL_X_API_BASE_URL: 'https://invalid.example/v1/chat/completions',
+    MAIN_MODEL_0_API_KEY: 'invalid-slot-zero-key',
+    MAIN_MODEL_10_OTHER: 'ignored'
   });
   assert.strictEqual(complete.MAIN_MODEL_POOL_CONFIGURED, true);
-  assert.deepStrictEqual(complete.MAIN_MODEL_CONFIGS.map((item) => item.slot), [1, 2, 3, 4]);
+  assert.deepStrictEqual(complete.MAIN_MODEL_CONFIGS.map((item) => item.slot), [1, 2, 5, 9]);
   assert.strictEqual(complete.MAIN_MODEL_CONFIGS[1].provider, 'anthropic');
   assert.strictEqual(complete.MAIN_MODEL_CONFIGS[3].provider, '');
-  assert.strictEqual(complete.MAIN_MODEL_CONFIGS[2].__mainApiKeySource, 'MAIN_MODEL_3_API_KEY');
+  assert.strictEqual(complete.MAIN_MODEL_CONFIGS[2].__mainApiKeySource, 'MAIN_MODEL_5_API_KEY');
 
-  const incomplete = buildMainModelRuntimeConfig({
-    pick: pickFrom({
-      MAIN_MODEL_1_API_BASE_URL: 'https://one.example/v1/chat/completions',
-      MAIN_MODEL_1_API_KEY: 'test-key-1',
-      MAIN_MODEL_1_MODEL: 'model-one',
-      MAIN_MODEL_2_API_BASE_URL: 'https://two.example/v1/chat/completions',
-      MAIN_MODEL_2_MODEL: 'model-two',
-      MAIN_MODEL_3_API_BASE_URL: 'https://three.example/v1/chat/completions',
-      MAIN_MODEL_3_API_KEY: 'test-key-3',
-      MAIN_MODEL_3_MODEL: 'model-three'
-    })
+  const incomplete = buildRuntimeConfig({
+    MAIN_MODEL_1_API_BASE_URL: 'https://one.example/v1/chat/completions',
+    MAIN_MODEL_1_API_KEY: 'test-key-1',
+    MAIN_MODEL_1_MODEL: 'model-one',
+    MAIN_MODEL_2_API_BASE_URL: 'https://two.example/v1/chat/completions',
+    MAIN_MODEL_2_MODEL: 'model-two',
+    MAIN_MODEL_3_API_BASE_URL: 'https://three.example/v1/chat/completions',
+    MAIN_MODEL_3_API_KEY: 'test-key-3',
+    MAIN_MODEL_3_MODEL: 'model-three',
+    MAIN_MODEL_7_API_BASE_URL: 'https://seven.example/v1/chat/completions',
+    MAIN_MODEL_7_API_KEY: 'test-key-7'
   });
   assert.deepStrictEqual(incomplete.MAIN_MODEL_CONFIGS.map((item) => item.slot), [1, 3]);
 
-  const legacy = buildMainModelRuntimeConfig({
-    pick: pickFrom({
-      API_BASE_URL: 'https://legacy.example/v1/chat/completions',
-      API_KEY: 'legacy-test-key',
-      AI_MODEL: 'legacy-model',
-      API_PROVIDER: 'openai_compatible'
-    })
+  const legacy = buildRuntimeConfig({
+    API_BASE_URL: 'https://legacy.example/v1/chat/completions',
+    API_KEY: 'legacy-test-key',
+    AI_MODEL: 'legacy-model',
+    API_PROVIDER: 'openai_compatible'
   });
   assert.strictEqual(legacy.MAIN_MODEL_POOL_CONFIGURED, false);
   assert.deepStrictEqual(legacy.MAIN_MODEL_CONFIGS.map((item) => item.id), ['legacy']);
 
-  const missingSlotOne = buildMainModelRuntimeConfig({
-    pick: pickFrom({
-      API_BASE_URL: 'https://legacy.example/v1/chat/completions',
-      API_KEY: 'legacy-test-key',
-      AI_MODEL: 'legacy-model',
-      MAIN_MODEL_2_API_BASE_URL: 'https://two.example/v1/chat/completions',
-      MAIN_MODEL_2_API_KEY: 'test-key-2',
-      MAIN_MODEL_2_MODEL: 'model-two'
-    })
+  const missingSlotOne = buildRuntimeConfig({
+    API_BASE_URL: 'https://legacy.example/v1/chat/completions',
+    API_KEY: 'legacy-test-key',
+    AI_MODEL: 'legacy-model',
+    MAIN_MODEL_5_API_BASE_URL: 'https://five.example/v1/chat/completions',
+    MAIN_MODEL_5_API_KEY: 'test-key-5',
+    MAIN_MODEL_5_MODEL: 'model-five'
   });
   assert.strictEqual(missingSlotOne.MAIN_MODEL_POOL_CONFIGURED, true);
-  assert.deepStrictEqual(missingSlotOne.MAIN_MODEL_CONFIGS.map((item) => item.id), ['legacy', 'slot_2']);
+  assert.deepStrictEqual(missingSlotOne.MAIN_MODEL_CONFIGS.map((item) => item.id), ['legacy', 'slot_5']);
   assert.strictEqual(missingSlotOne.MAIN_MODEL_CONFIGS[0].__mainApiKeySource, 'API_KEY');
 
   const snapshot = { ...process.env };
   try {
-    for (let slot = 1; slot <= 4; slot += 1) {
-      delete process.env[`MAIN_MODEL_${slot}_API_BASE_URL`];
-      delete process.env[`MAIN_MODEL_${slot}_API_KEY`];
-      delete process.env[`MAIN_MODEL_${slot}_MODEL`];
-      delete process.env[`MAIN_MODEL_${slot}_API_PROVIDER`];
+    process.env.MIZUKIBOT_ENV_FILE = path.join(__dirname, '.main-model-runtime-missing.env');
+    for (const key of Object.keys(process.env)) {
+      if (/^MAIN_MODEL_\d+_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER)$/.test(key)) {
+        delete process.env[key];
+      }
     }
     process.env.API_BASE_URL = 'https://env.example/v1/chat/completions';
     process.env.API_KEY = 'env-test-key';

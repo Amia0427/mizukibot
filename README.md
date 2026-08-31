@@ -954,7 +954,7 @@ data/       本地运行数据，默认不提交
 - 备用模型使用独立的 `AI_FALLBACK_API_BASE_URL`、`AI_FALLBACK_PROVIDER` 和 `AI_FALLBACK_API_KEY`；管理员 `ADMIN_AI_FALLBACK_ENABLED` 保持关闭，不受本次修改影响。
 - 验收：配置解析应显示普通用户 fallback `enabled=true`、`configured=true`、`active=false`；备用网关真实可用性需在触发故障切换时再验证。本次仅修改本地 `.env` 和文档，未推送远端。
 
-## 普通用户主回复多端点随机与故障切换（2026-08-30）
+## 普通用户主回复动态模型池（2026-08-31）
 
-- 普通用户标准主回复新增最多四个独立 `MAIN_MODEL_1_*` 至 `MAIN_MODEL_4_*` 槽位；每次请求随机选择起点，当前请求内失败立即切换未尝试槽位，全部失败后进入 `AI_FALLBACK_*`。
+- 普通用户标准主回复支持动态 `MAIN_MODEL_<数字>_*` 槽位；槽位编号可跳号并可继续扩展，每次请求随机选择起点，当前请求内失败立即切换未尝试槽位，全部失败后进入 `AI_FALLBACK_*`（2026-08-31）。
 - 旧 `API_BASE_URL`、`API_KEY`、`AI_MODEL`、`API_PROVIDER` 配置继续兼容；管理员、`normal_fast_reply`、图片和后台专用链路保持原模型选择。
