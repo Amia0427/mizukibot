@@ -2202,3 +2202,13 @@
 - 质量门禁（2026-08-30）：`npm run lint`（检查 916 个文件）、`npm run typecheck`、`npm run check:secrets:all`、`git diff --check` 及提交前暂存区检查全部通过；提交钩子再次完成 staged secret scan。
 - 全量回归（2026-08-30）：`npm test` 退出码为 1，失败仅为既有 `agentPrompts.test.js` 断言和 `checkPromptsIntegration.test.js` 对未被 manifest/allowlist 引用的私有 `prompts/ADULT.txt` 检查；本需求新增测试及其余项目测试通过，未修改 `prompts/admin.txt` 或其他提示词资产。
 - 小目标已完成（2026-08-30）：功能提交 `06b53b7e`（`feat: add normal user main model pool failover`）；维护日志随后单独提交，未推送远端，未纳入并行工作区改动。
+
+## 普通用户主模型池动态槽位扩展（2026-08-31）
+
+- 实现范围：主模型配置由固定读取 `MAIN_MODEL_1_*` 至 `MAIN_MODEL_4_*` 改为动态扫描 `MAIN_MODEL_<正整数>_*`；槽位编号允许跳号，完整配置的槽位按数字升序读取，可直接继续添加 `MAIN_MODEL_5_*`、`MAIN_MODEL_6_*` 等变量。不完整槽位、非数字槽位名和无关环境变量均不参与候选池。
+- 兼容边界：旧 `API_BASE_URL`、`API_KEY`、`AI_MODEL`、`API_PROVIDER` 配置继续兼容；槽位 1 缺失时旧配置仍作为兼容候选，槽位 1 存在时不隐式追加旧配置。主模型随机顺序、当前请求内故障切换、备用模型、管理员/快速回复/图片及后台专用链路边界保持不变。
+- 测试调整：配置、路由和流式测试增加动态槽位覆盖，并隔离本机 `.env` 与 TLS 仿真对测试的影响；测试使用的 key 均为占位值，未写入真实凭据。未修改 `prompts/admin.txt`，未纳入 `.belt/notices/survey-q-use_case`、`.codex/config.toml`、`tests/messageReplyRuntimeFreshness.test.js` 或其他并行/未跟踪改动。
+- 定向验收（2026-08-31）：10 个计划内 Node.js 语法检查全部通过；`mainModelRuntimeConfig.test.js`、`mainModelPool.test.js`、`mainModelPoolRouting.test.js`、`mainModelPoolStreaming.test.js`、`mainModelFallback.test.js`、`mainModelGenerationParams.test.js`、`normalFastReplyConfig.test.js`、`mainReplyRouteModelDiagnostics.test.js` 全部通过。
+- 质量门禁（2026-08-31）：`npm run lint`（检查 916 个文件）、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 全部通过。
+- 全量回归（2026-08-31）：`npm test` 退出码为 1，失败仅为既有 `agentPrompts.test.js` 断言和 `checkPromptsIntegration.test.js` 对未被 manifest/allowlist 引用的私有 `prompts/ADULT.txt` 检查；本次动态主模型池相关测试及其余项目测试通过，未修改无关提示词资产。
+- 小目标已完成（2026-08-31）：功能提交 `7fdba8f3`（`feat: support dynamic main model pool slots`）；维护日志随后单独提交。本次不推送远端。
