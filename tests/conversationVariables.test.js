@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { deriveStage } = require('../utils/conversationVariables/definitions');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-conversation-variables-'));
 process.env.DATA_DIR = tempRoot;
@@ -14,6 +15,10 @@ const variables = require('../utils/conversationVariables');
 
 module.exports = (() => {
   variables.resetDbForTests();
+
+  assert.strictEqual(deriveStage({ affection: 100, trust: 29.1, familiarity: 100 }), 'friend');
+  assert.strictEqual(deriveStage({ affection: 100, trust: 19, familiarity: 100 }), 'acquaintance');
+  assert.strictEqual(deriveStage({ affection: 100, trust: 100, familiarity: 100 }), 'intimate_companion');
 
   const empty = variables.getSnapshot({ userId: 'new-user', now: 1_000 });
   assert.strictEqual(empty.relationship.stage, 'stranger');

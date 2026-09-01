@@ -109,9 +109,10 @@ function deriveStage(state = {}) {
   const trust = Number(state.trust || 0);
   const familiarity = Number(state.familiarity || 0);
   const score = stageScore(state);
+  const establishedFamiliarity = affection >= 80 && familiarity >= 65 && trust >= 20;
   if (score >= 82 && trust >= 70 && familiarity >= 65) return 'intimate_companion';
   if (score >= 65 && trust >= 50 && familiarity >= 45) return 'close';
-  if (score >= 40 && trust >= 30 && familiarity >= 25) return 'friend';
+  if (score >= 40 && familiarity >= 25 && (trust >= 30 || establishedFamiliarity)) return 'friend';
   if (score >= 18 || familiarity >= 15 || affection >= 20 || trust >= 20) return 'acquaintance';
   return 'stranger';
 }
