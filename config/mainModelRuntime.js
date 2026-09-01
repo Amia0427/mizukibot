@@ -1,7 +1,12 @@
-const MAIN_MODEL_ENV_KEY_PATTERN = /^MAIN_MODEL_([1-9]\d*)_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER)$/;
+const MAIN_MODEL_ENV_KEY_PATTERN = /^MAIN_MODEL_([1-9]\d*)_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER|WEIGHT)$/;
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function normalizeWeight(value) {
+  const weight = Number(value);
+  return Number.isFinite(weight) && weight > 0 ? weight : 1;
 }
 
 function discoverMainModelSlots(env = process.env) {
@@ -21,6 +26,7 @@ function buildSlotConfig(slot, pick) {
   const apiKey = normalizeText(pick(`${prefix}_API_KEY`, ''));
   const model = normalizeText(pick(`${prefix}_MODEL`, ''));
   const provider = normalizeText(pick(`${prefix}_API_PROVIDER`, ''));
+  const rawWeight = normalizeText(pick(`${prefix}_WEIGHT`, ''));
   if (!apiBaseUrl || !apiKey || !model) return null;
 
   return {
@@ -30,10 +36,12 @@ function buildSlotConfig(slot, pick) {
     apiKey,
     model,
     provider,
+    weight: normalizeWeight(rawWeight),
     __mainModelSource: `${prefix}_MODEL`,
     __mainProviderSource: provider ? `${prefix}_API_PROVIDER` : 'auto',
     __mainApiBaseUrlSource: `${prefix}_API_BASE_URL`,
-    __mainApiKeySource: `${prefix}_API_KEY`
+    __mainApiKeySource: `${prefix}_API_KEY`,
+    __mainWeightSource: rawWeight ? `${prefix}_WEIGHT` : 'default:1'
   };
 }
 
@@ -51,10 +59,12 @@ function buildLegacyConfig(pick) {
     apiKey,
     model,
     provider,
+    weight: 1,
     __mainModelSource: 'AI_MODEL',
     __mainProviderSource: provider ? 'API_PROVIDER' : 'auto',
     __mainApiBaseUrlSource: 'API_BASE_URL',
-    __mainApiKeySource: 'API_KEY'
+    __mainApiKeySource: 'API_KEY',
+    __mainWeightSource: 'default:1'
   };
 }
 

@@ -372,7 +372,8 @@ function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = '
     mainModelPoolEnabled: resolvedConfig?.__mainModelPoolEnabled === true,
     mainModelPoolSlot: resolvedConfig?.__mainModelPoolSlot,
     mainModelPoolAttempt: resolvedConfig?.__mainModelPoolAttempt,
-    mainModelPoolSize: resolvedConfig?.__mainModelPoolSize
+    mainModelPoolSize: resolvedConfig?.__mainModelPoolSize,
+    mainModelPoolWeight: resolvedConfig?.__mainModelPoolWeight
   });
   return {
     ...trace,
@@ -413,6 +414,7 @@ function logResolvedModelCall(context = {}, resolvedConfig = null, source = 'v2_
     mainModelPoolSlot: trace.mainModelPoolSlot,
     mainModelPoolAttempt: trace.mainModelPoolAttempt,
     mainModelPoolSize: trace.mainModelPoolSize,
+    mainModelPoolWeight: trace.mainModelPoolWeight,
     adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
     adminConfigWarnings: trace.adminConfigWarnings
   };

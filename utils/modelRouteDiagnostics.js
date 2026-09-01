@@ -86,7 +86,8 @@ function buildModelRouteDiagnostics(input = {}) {
     mainModelPoolEnabled: input.mainModelPoolEnabled === true || existing.mainModelPoolEnabled === true,
     mainModelPoolSlot: normalizeText(input.mainModelPoolSlot || existing.mainModelPoolSlot),
     mainModelPoolAttempt: normalizeNumber(input.mainModelPoolAttempt ?? existing.mainModelPoolAttempt),
-    mainModelPoolSize: normalizeNumber(input.mainModelPoolSize ?? existing.mainModelPoolSize)
+    mainModelPoolSize: normalizeNumber(input.mainModelPoolSize ?? existing.mainModelPoolSize),
+    mainModelPoolWeight: normalizeNumber(input.mainModelPoolWeight ?? existing.mainModelPoolWeight)
   };
 }
 
@@ -112,7 +113,8 @@ function pickModelRouteDiagnosticFields(input = {}) {
     mainModelPoolEnabled: diagnostics.mainModelPoolEnabled === true,
     mainModelPoolSlot: normalizeText(diagnostics.mainModelPoolSlot),
     mainModelPoolAttempt: normalizeNumber(diagnostics.mainModelPoolAttempt),
-    mainModelPoolSize: normalizeNumber(diagnostics.mainModelPoolSize)
+    mainModelPoolSize: normalizeNumber(diagnostics.mainModelPoolSize),
+    mainModelPoolWeight: normalizeNumber(diagnostics.mainModelPoolWeight)
   };
 }
 
@@ -139,6 +141,7 @@ function createModelRouteTracePatch(diagnostics = {}) {
     mainModelPoolSlot: picked.mainModelPoolSlot,
     mainModelPoolAttempt: picked.mainModelPoolAttempt,
     mainModelPoolSize: picked.mainModelPoolSize,
+    mainModelPoolWeight: picked.mainModelPoolWeight,
     modelRouteDiagnostic: picked
   };
 }

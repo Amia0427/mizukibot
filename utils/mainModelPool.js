@@ -2,6 +2,11 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeWeight(value) {
+  const weight = Number(value);
+  return Number.isFinite(weight) && weight > 0 ? weight : 1;
+}
+
 function normalizeCandidates(candidates = []) {
   const normalized = [];
   const seen = new Set();
@@ -20,19 +25,32 @@ function normalizeCandidates(candidates = []) {
       apiBaseUrl,
       apiKey,
       model,
-      provider
+      provider,
+      weight: normalizeWeight(candidate.weight)
     });
   }
   return normalized;
 }
 
-function shuffleMainModelCandidates(candidates = [], random = Math.random) {
-  const shuffled = normalizeCandidates(candidates);
-  for (let index = shuffled.length - 1; index > 0; index -= 1) {
-    const targetIndex = Math.floor(random() * (index + 1));
-    [shuffled[index], shuffled[targetIndex]] = [shuffled[targetIndex], shuffled[index]];
+function nextWeightedIndex(candidates, random) {
+  const totalWeight = candidates.reduce((total, item) => total + normalizeWeight(item.weight), 0);
+  const draw = Math.max(0, Math.min(0.9999999999999999, Number(random()) || 0)) * totalWeight;
+  let remaining = draw;
+  for (let index = 0; index < candidates.length; index += 1) {
+    remaining -= normalizeWeight(candidates[index].weight);
+    if (remaining < 0) return index;
   }
-  return shuffled;
+  return candidates.length - 1;
+}
+
+function shuffleMainModelCandidates(candidates = [], random = Math.random) {
+  const pool = normalizeCandidates(candidates);
+  const ordered = [];
+  while (pool.length > 0) {
+    const index = nextWeightedIndex(pool, random);
+    ordered.push(pool.splice(index, 1)[0]);
+  }
+  return ordered;
 }
 
 function summarizeFailure(error, candidate, attempt) {
@@ -41,6 +59,7 @@ function summarizeFailure(error, candidate, attempt) {
     attempt,
     model: normalizeText(candidate?.model),
     provider: normalizeText(candidate?.provider),
+    weight: normalizeWeight(candidate?.weight),
     status: Number(error?.response?.status || 0) || null,
     error: normalizeText(error?.message || error).slice(0, 400)
   };
@@ -59,7 +78,8 @@ async function runMainModelPool(candidates, action, options = {}) {
       __mainModelPoolEnabled: true,
       __mainModelPoolSlot: normalizeText(candidate.id || candidate.slot),
       __mainModelPoolAttempt: index + 1,
-      __mainModelPoolSize: ordered.length
+      __mainModelPoolSize: ordered.length,
+      __mainModelPoolWeight: normalizeWeight(candidate.weight)
     };
     try {
       return await action(resolvedConfig);

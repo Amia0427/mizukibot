@@ -24,7 +24,7 @@ function buildError(status, message) {
 
 function clearMainModelEnv() {
   for (const key of Object.keys(process.env)) {
-    if (/^MAIN_MODEL_\d+_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER)$/.test(key)) {
+    if (/^MAIN_MODEL_\d+_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER|WEIGHT)$/.test(key)) {
       delete process.env[key];
     }
   }
@@ -46,22 +46,27 @@ function setPoolEnv({ fallbackEnabled = false, includeAllSlots = false } = {}) {
     MAIN_MODEL_1_API_KEY: 'slot-test-key-1',
     MAIN_MODEL_1_MODEL: 'slot-model-one',
     MAIN_MODEL_1_API_PROVIDER: 'openai_compatible',
+    MAIN_MODEL_1_WEIGHT: '3',
     MAIN_MODEL_2_API_BASE_URL: 'https://two.example/v1/chat/completions',
     MAIN_MODEL_2_API_KEY: 'slot-test-key-2',
     MAIN_MODEL_2_MODEL: 'slot-model-two',
     MAIN_MODEL_2_API_PROVIDER: 'openai_compatible',
+    MAIN_MODEL_2_WEIGHT: '1',
     MAIN_MODEL_3_API_BASE_URL: '',
     MAIN_MODEL_3_API_KEY: '',
     MAIN_MODEL_3_MODEL: '',
     MAIN_MODEL_3_API_PROVIDER: '',
+    MAIN_MODEL_3_WEIGHT: '',
     MAIN_MODEL_4_API_BASE_URL: '',
     MAIN_MODEL_4_API_KEY: '',
     MAIN_MODEL_4_MODEL: '',
     MAIN_MODEL_4_API_PROVIDER: '',
+    MAIN_MODEL_4_WEIGHT: '',
     MAIN_MODEL_5_API_BASE_URL: '',
     MAIN_MODEL_5_API_KEY: '',
     MAIN_MODEL_5_MODEL: '',
     MAIN_MODEL_5_API_PROVIDER: '',
+    MAIN_MODEL_5_WEIGHT: '',
     ADMIN_USER_IDS: 'admin-1',
     ADMIN_API_BASE_URL: 'https://admin.example/v1/chat/completions',
     ADMIN_API_KEY: 'admin-test-key',
@@ -83,14 +88,17 @@ function setPoolEnv({ fallbackEnabled = false, includeAllSlots = false } = {}) {
       MAIN_MODEL_3_API_KEY: 'slot-test-key-3',
       MAIN_MODEL_3_MODEL: 'slot-model-three',
       MAIN_MODEL_3_API_PROVIDER: 'openai_compatible',
+      MAIN_MODEL_3_WEIGHT: '1',
       MAIN_MODEL_4_API_BASE_URL: 'https://four.example/v1/chat/completions',
       MAIN_MODEL_4_API_KEY: 'slot-test-key-4',
       MAIN_MODEL_4_MODEL: 'slot-model-four',
       MAIN_MODEL_4_API_PROVIDER: 'openai_compatible',
+      MAIN_MODEL_4_WEIGHT: '1',
       MAIN_MODEL_5_API_BASE_URL: 'https://five.example/v1/chat/completions',
       MAIN_MODEL_5_API_KEY: 'slot-test-key-5',
       MAIN_MODEL_5_MODEL: 'slot-model-five',
-      MAIN_MODEL_5_API_PROVIDER: 'openai_compatible'
+      MAIN_MODEL_5_API_PROVIDER: 'openai_compatible',
+      MAIN_MODEL_5_WEIGHT: '1'
     });
   }
 }
@@ -141,8 +149,8 @@ module.exports = (async () => {
       : okResponse('second slot reply')
   });
   assert.strictEqual(switched.calls.length, 2);
-  assert.strictEqual(switched.calls[0].body.model, 'slot-model-two');
-  assert.strictEqual(switched.calls[1].body.model, 'slot-model-one');
+  assert.strictEqual(switched.calls[0].body.model, 'slot-model-one');
+  assert.strictEqual(switched.calls[1].body.model, 'slot-model-two');
   assert.strictEqual(switched.reply.content, 'second slot reply');
   assert.notStrictEqual(
     switched.calls[0].body.__requestHeaders.Authorization,
@@ -154,7 +162,7 @@ module.exports = (async () => {
     responseForCall: () => okResponse('primary reply')
   });
   assert.strictEqual(primarySuccess.calls.length, 1);
-  assert.strictEqual(primarySuccess.calls[0].body.model, 'slot-model-two');
+  assert.strictEqual(primarySuccess.calls[0].body.model, 'slot-model-one');
   assert.strictEqual(primarySuccess.reply.content, 'primary reply');
 
   const emptyResponse = await runRequest({
@@ -175,7 +183,7 @@ module.exports = (async () => {
   assert.strictEqual(fallback.calls.length, 6);
   assert.deepStrictEqual(
     fallback.calls.slice(0, 5).map((call) => call.body.model),
-    ['slot-model-two', 'slot-model-three', 'slot-model-four', 'slot-model-five', 'slot-model-one']
+    ['slot-model-one', 'slot-model-two', 'slot-model-three', 'slot-model-four', 'slot-model-five']
   );
   assert.strictEqual(fallback.calls[5].body.model, 'fallback-model');
   assert.strictEqual(fallback.reply.content, 'fallback reply');

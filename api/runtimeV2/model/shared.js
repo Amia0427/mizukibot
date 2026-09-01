@@ -713,6 +713,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
           mainModelPoolSlot: poolConfig.__mainModelPoolSlot,
           mainModelPoolAttempt: poolConfig.__mainModelPoolAttempt,
           mainModelPoolSize: poolConfig.__mainModelPoolSize,
+          mainModelPoolWeight: poolConfig.__mainModelPoolWeight,
           model: getModelName(poolConfig),
           provider: resolveMainProvider(getApiBaseUrl(poolConfig), getModelName(poolConfig), poolConfig)
         });
@@ -724,6 +725,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
             mainModelPoolSlot: poolConfig.__mainModelPoolSlot,
             mainModelPoolAttempt: poolConfig.__mainModelPoolAttempt,
             mainModelPoolSize: poolConfig.__mainModelPoolSize,
+            mainModelPoolWeight: poolConfig.__mainModelPoolWeight,
             model: getModelName(poolConfig),
             provider: resolveMainProvider(getApiBaseUrl(poolConfig), getModelName(poolConfig), poolConfig)
           });
@@ -734,6 +736,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
             mainModelPoolSlot: poolConfig.__mainModelPoolSlot,
             mainModelPoolAttempt: poolConfig.__mainModelPoolAttempt,
             mainModelPoolSize: poolConfig.__mainModelPoolSize,
+            mainModelPoolWeight: poolConfig.__mainModelPoolWeight,
             model: getModelName(poolConfig),
             provider: resolveMainProvider(getApiBaseUrl(poolConfig), getModelName(poolConfig), poolConfig),
             mainModelPoolSwitchToNext: poolConfig.__mainModelPoolAttempt < poolConfig.__mainModelPoolSize

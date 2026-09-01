@@ -21,7 +21,7 @@ function buildError(message) {
 
 function clearMainModelEnv() {
   for (const key of Object.keys(process.env)) {
-    if (/^MAIN_MODEL_\d+_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER)$/.test(key)) {
+    if (/^MAIN_MODEL_\d+_(?:API_BASE_URL|API_KEY|MODEL|API_PROVIDER|WEIGHT)$/.test(key)) {
       delete process.env[key];
     }
   }
@@ -44,10 +44,12 @@ function setStreamEnv({ fallbackEnabled = false } = {}) {
     MAIN_MODEL_1_API_KEY: 'slot-test-key-1',
     MAIN_MODEL_1_MODEL: 'slot-model-one',
     MAIN_MODEL_1_API_PROVIDER: 'openai_compatible',
+    MAIN_MODEL_1_WEIGHT: '3',
     MAIN_MODEL_2_API_BASE_URL: 'https://two.example/v1/chat/completions',
     MAIN_MODEL_2_API_KEY: 'slot-test-key-2',
     MAIN_MODEL_2_MODEL: 'slot-model-two',
     MAIN_MODEL_2_API_PROVIDER: 'openai_compatible',
+    MAIN_MODEL_2_WEIGHT: '1',
     MAIN_MODEL_3_API_BASE_URL: '',
     MAIN_MODEL_3_API_KEY: '',
     MAIN_MODEL_3_MODEL: '',
@@ -101,7 +103,7 @@ module.exports = (async () => {
     return true;
   });
   assert.strictEqual(beforeFirstText.calls.length, 2);
-  assert.deepStrictEqual(beforeFirstText.calls.map((call) => call.body.__trace.mainModelPoolSlot), ['slot_2', 'slot_1']);
+  assert.deepStrictEqual(beforeFirstText.calls.map((call) => call.body.__trace.mainModelPoolSlot), ['slot_1', 'slot_2']);
   assert.strictEqual(beforeFirstText.result.visibleText, 'switched stream reply');
 
   const partialOptions = { fallbackEnabled: true };

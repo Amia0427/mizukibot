@@ -161,19 +161,23 @@ function resolveNormalUserMainModelConfigs(userId = '', overrides = null, option
   return candidates.map((candidate) => ({
     id: candidate.id,
     slot: candidate.slot,
+    weight: candidate.weight,
     ...resolveRoleAwareMainModelConfig(userId, {
       model: candidate.model,
       provider: candidate.provider,
       apiBaseUrl: candidate.apiBaseUrl,
-      apiKey: candidate.apiKey
+      apiKey: candidate.apiKey,
+      weight: candidate.weight
     }, options),
     provider: normalizeText(candidate.provider),
     __mainModelSource: normalizeText(candidate.__mainModelSource) || `MAIN_MODEL_${candidate.slot}_MODEL`,
     __mainProviderSource: normalizeText(candidate.__mainProviderSource) || 'auto',
     __mainApiBaseUrlSource: normalizeText(candidate.__mainApiBaseUrlSource) || `MAIN_MODEL_${candidate.slot}_API_BASE_URL`,
     __mainApiKeySource: normalizeText(candidate.__mainApiKeySource) || `MAIN_MODEL_${candidate.slot}_API_KEY`,
+    __mainWeightSource: normalizeText(candidate.__mainWeightSource) || 'default:1',
     __mainModelPoolEnabled: true,
     __mainModelPoolSlot: normalizeText(candidate.id || candidate.slot),
+    __mainModelPoolWeight: candidate.weight,
     __mainFallbackActive: false,
     __mainFallbackScope: primaryConfig.__mainFallbackScope || 'default',
     __mainFallbackReason: primaryConfig.__mainFallbackReason || ''
