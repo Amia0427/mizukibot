@@ -2221,3 +2221,9 @@
 - 质量门禁（2026-08-31）：`npm run lint`（检查 916 个文件）、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 全部通过。
 - 全量回归（2026-08-31）：`npm test` 退出码为 1，失败仅为既有 `agentPrompts.test.js` 断言和 `checkPromptsIntegration.test.js` 对未被 manifest/allowlist 引用的私有 `prompts/ADULT.txt` 检查；本次动态主模型池相关测试及其余项目测试通过，未修改无关提示词资产。
 - 小目标已完成（2026-08-31）：功能提交 `7fdba8f3`（`feat: support dynamic main model pool slots`）；维护日志随后单独提交。本次不推送远端。
+
+## 陪伴功能更新公告（2026-09-01 08:45 +08:00）
+
+- 新增面向 QQ 用户的[陪伴功能更新公告](companion-update-announcement-2026-09-01.md)，提供可直接发布的群公告短版和更新日志长版，统一介绍待跟进事项、按需回顾、用户可控记忆、共读共看共听、按需语音和 PWA 陪伴房间。
+- 文案按当前实现保留私聊、默认关闭、固定用户绑定、离线只读、语音失败回退和不下载/播放媒体等边界；同步在 README 增加公告入口。
+- 验收：人工逐项对照 `README.md`、`docs/qq-companion-room-2026-08-14.md`、`.env.example` 和已完成的 companion 定向验收记录；`git diff --check` 已通过。本轮只修改用户文档，不修改业务代码、不推送远端。
