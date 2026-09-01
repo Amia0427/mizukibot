@@ -2228,3 +2228,11 @@
 - 文案按当前实现保留私聊、默认关闭、固定用户绑定、离线只读、语音失败回退和不下载/播放媒体等边界；同步在 README 增加公告入口。
 - 验收：人工逐项对照 `README.md`、`docs/qq-companion-room-2026-08-14.md`、`.env.example` 和已完成的 companion 定向验收记录；`git diff --check` 已通过。本轮只修改用户文档，不修改业务代码、不推送远端。
 - 小目标已完成（2026-09-01 08:45 +08:00）：公告提交 `2c14651f` 已完成；本次未纳入 `.belt/`、`.codex/config.toml`、`prompts/guanxi/07.txt` 及其他并行工作区改动，未推送远端。
+
+## 普通用户主模型池权重（2026-09-01 11:18 +08:00）
+
+- 实现范围：新增 `MAIN_MODEL_<数字>_WEIGHT` 可选配置，缺省和无效值按 `1` 处理；普通用户标准主回复的主模型池改为按权重生成本次请求内无放回候选顺序。同一 endpoint、API key、model、provider 组合仍先去重，重复槽位不会放大概率。
+- 配置与诊断：`.env.example` 已将 `MAIN_MODEL_1_WEIGHT=3`、其他示例槽位权重设为 `1`；`docs/env-configuration.md` 和 `README.md` 已补充 2026-09-01 权重说明。模型调用日志、route diagnostics 和 request trace 增加脱敏的 `mainModelPoolWeight`，不记录 API key。
+- 验收：`node --check config/mainModelRuntime.js`、`node --check utils/mainModelPool.js`、`node --check utils/mainModelConfigResolver.js`、`node --check utils/modelRouteDiagnostics.js`、`node --check api/runtimeV2/model/shared.js`、`node --check api/runtimeV2/model/service.js` 全部通过；`node tests/mainModelRuntimeConfig.test.js`、`node tests/mainModelPool.test.js`、`node tests/mainModelPoolRouting.test.js`、`node tests/mainModelPoolStreaming.test.js` 全部通过。
+- 质量门禁：`npm run lint`、`npm run typecheck`、`npm run check:secrets:all`、`git diff --check` 和 `git diff --cached --check` 全部通过。
+- 小目标已完成：功能提交 `2f67c91a`（`feat: add weighted main model pool slots`）；未修改 `.env`、`prompts/admin.txt` 或其他提示词资产，未纳入 `.belt/`、`.codex/config.toml`、`prompts/guanxi/07.txt` 及其他并行/未跟踪改动，未推送远端。
