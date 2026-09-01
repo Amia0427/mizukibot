@@ -24,7 +24,9 @@
 
 复验记录（2026-08-26 21:55 +08:00）：正式动态链路和紧凑回退分支已跳过 persona 状态中重复的 `[GuanxiStage]` 消息，阶段规则仍以独立动态块注入一次；阶段接入、快速回复和运行时边界测试通过。
 
-复验记录（2026-09-01 09:07 +08:00）：真实 SQLite 用户 `1052258894` 的快照为 `affection=100`、`familiarity=100`、`trust=29.1`，修复前阶段为 `acquaintance/初识`，修复后阶段为 `friend/普通朋友`；仍未越过“亲近朋友”和“亲密伙伴”的信任门槛。阶段推导回归、主回复阶段提示词测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。
+复验记录（2026-09-01 09:07 +08:00）：真实 SQLite 用户 `1052258894` 的快照为 `affection=100`、`familiarity=100`、`trust=29.1`，修复前阶段为 `acquaintance/初识`，修复后阶段为 `friend/普通朋友`；阶段提示词来源同步为 `guanxi/03.txt`，仍未越过“亲近朋友”和“亲密伙伴”的信任门槛。阶段推导回归、正式/快速主回复阶段提示词测试、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。
+
+运行复核（2026-09-01 09:08 +08:00）：本地 bot 通过 `restart-bot.cmd restart confirm` 完成受控重启，健康检查为 `healthy=True`；主进程和 post-reply worker 均为 Running。`restart-bot.cmd status` 显示主进程 PID `30524`、worker PID `37956`。
 
 ## 运行入口
 
