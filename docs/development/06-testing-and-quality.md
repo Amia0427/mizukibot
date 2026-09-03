@@ -98,7 +98,7 @@ node scripts/run-tests.js tests/mainProcessLifecycle.test.js tests/serverLifecyc
 
 ```bash
 node scripts/run-tests.js tests/messageIngressDispatcher.test.js tests/routeExecution.test.js
-node scripts/run-tests.js tests/langgraphV2.test.js tests/directToolLoop.test.js tests/runtimeStreamingCoordinator.test.js
+node scripts/run-tests.js tests/langgraphV2.test.js tests/reactAgentLoop.test.js tests/runtimeStreamingCoordinator.test.js
 ```
 
 路由规则还要覆盖相近语句不误命中、权限差异、route meta 和最终 executor；节点改动要覆盖成功、可重试失败、终止事件和持久化状态。

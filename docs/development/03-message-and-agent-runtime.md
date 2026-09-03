@@ -23,7 +23,7 @@
 
 Runtime V2 的模型请求协议固定为两条：Anthropic provider 使用 `/v1/messages`；其余 provider（包括 Gemini 模型和历史 `gemini_native` 别名）使用 OpenAI-compatible `/chat/completions`。请求准备层会把旧 `/responses`、Gemini `generateContent`/`streamGenerateContent` URL 以及 Google Gemini OpenAI-compatible 根路径统一改写为 Chat Completions，流式行为通过请求体 `stream=true` 表达。
 
-`config.OPENAI_MAIN_API_MODE=responses` 不再改变运行时协议；`src/model/http/gemini-native.chunk.js` 仅保留历史 prompt/golden 兼容代码，不是可达的生产请求适配器。修改模型路由时应验证最终 `prepared.requestUrl`、`prepared.provider` 和请求体 `messages`，不要只检查模型名或配置值。
+`config.OPENAI_MAIN_API_MODE=responses` 不再改变运行时协议；旧 Gemini Native 请求适配器及其专属配置已经删除。修改模型路由时应验证最终 `prepared.requestUrl`、`prepared.provider` 和请求体 `messages`，不要只检查模型名或配置值。
 
 验收记录（2026-08-21 21:35 +08:00，实现提交 `67607faf`）：协议归一化、provider 诊断、主回复流式、缓存、reasoning、图片内联、提示词和管理诊断定向测试通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过。
 
@@ -273,7 +273,7 @@ post-reply job 的任务依赖定义在 [`../../utils/postReplyWorker/taskRegist
 
 任务状态、attempt、lease 和 completedTasks 用于幂等恢复。新增后台步骤必须声明依赖、fatal/nonfatal 策略、压力下是否可跳过，并让 job result 保持 JSON 可序列化。
 
-`core/researchTaskQueue.js` 与 `core/researchSubagent.js` 仍保留历史代码，但生产入口已经断开，不会产生新研究任务；已有 research brief 仍可读取。
+旧 research 队列和子代理执行代码已经删除，不会产生新研究任务；`utils/sessionResearchCache.js` 继续为已有 research brief 提供只读兼容。
 
 ## 关键开发契约
 

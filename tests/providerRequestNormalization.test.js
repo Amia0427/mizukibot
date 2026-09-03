@@ -32,7 +32,6 @@ module.exports = (async () => {
     process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
-    process.env.GEMINI_SYSTEM_PROMPT_PATH = path.join(__dirname, 'fixtures', 'gemini-system-prompt.txt');
     clearProjectCache();
 
     const httpClient = require('../api/httpClient');

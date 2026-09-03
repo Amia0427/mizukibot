@@ -4,10 +4,6 @@ const path = require('path');
 
 const { buildDynamicPrompt: buildDynamicPromptImpl } = require('../api/runtimeV2/context/service');
 const {
-  buildGeminiNativeRequestBody,
-  clearGeminiNativePromptCache
-} = require('../src/model/http/gemini-native.chunk');
-const {
   buildMainStableSystemBlocks,
   buildReviewStageSystemPrompt
 } = require('../utils/stagePromptContracts');
@@ -39,11 +35,6 @@ function buildDynamicPrompt(userInfo, userId, question, customPrompt = null, opt
     personaModuleCandidates: staticPersonaModuleCandidates,
     ...promptOptions
   });
-}
-
-function countOccurrences(text = '', needle = '') {
-  if (!needle) return 0;
-  return String(text || '').split(needle).length - 1;
 }
 
 function assertGeminiPromptDoesNotPushSamplingDegeneration(text = '') {
@@ -708,60 +699,30 @@ module.exports = (async () => {
   }
 
   const geminiPromptFile = path.join(__dirname, '..', 'prompts', 'GEMINI.txt');
-  const previousGeminiSystemPromptPath = process.env.GEMINI_SYSTEM_PROMPT_PATH;
-  process.env.GEMINI_SYSTEM_PROMPT_PATH = geminiPromptFile;
-  clearGeminiNativePromptCache();
-  try {
-    const geminiPromptText = fs.readFileSync(geminiPromptFile, 'utf8');
-    assertGeminiPromptDoesNotPushSamplingDegeneration(geminiPromptText);
+  const geminiPromptText = fs.readFileSync(geminiPromptFile, 'utf8');
+  assertGeminiPromptDoesNotPushSamplingDegeneration(geminiPromptText);
 
-    const nonGeminiBlocks = buildMainStableSystemBlocks({
-      modelName: 'claude-opus-4-6',
-      routeMeta: { chatType: 'private' }
-    });
-    const nonGeminiSnapshot = buildPromptSnapshot(nonGeminiBlocks, {
-      stage: 'main',
-      modelName: 'claude-opus-4-6'
-    });
-    assert.ok(!nonGeminiSnapshot.assembledBlocks.some((item) => item.id === 'gemini_system_prompt'));
+  const nonGeminiBlocks = buildMainStableSystemBlocks({
+    modelName: 'claude-opus-4-6',
+    routeMeta: { chatType: 'private' }
+  });
+  const nonGeminiSnapshot = buildPromptSnapshot(nonGeminiBlocks, {
+    stage: 'main',
+    modelName: 'claude-opus-4-6'
+  });
+  assert.ok(!nonGeminiSnapshot.assembledBlocks.some((item) => item.id === 'gemini_system_prompt'));
 
-    const geminiBlocks = buildMainStableSystemBlocks({
-      modelName: 'gemini-3-flash-preview',
-      routeMeta: { chatType: 'private' }
-    });
-    const geminiSnapshot = buildPromptSnapshot(geminiBlocks, {
-      stage: 'main',
-      modelName: 'gemini-3-flash-preview'
-    });
-    const geminiStableBlock = geminiSnapshot.assembledBlocks.find((item) => item.id === 'gemini_system_prompt');
-    assert.ok(geminiStableBlock, 'Gemini model-specific prompt should survive stable prompt cache isolation');
-    assertGeminiPromptDoesNotPushSamplingDegeneration(geminiStableBlock.content);
-
-    const nativeGeminiBody = await buildGeminiNativeRequestBody({
-      messages: geminiSnapshot.renderedSystemMessages.concat([
-        { role: 'user', content: '今天有点累，随便聊两句' }
-      ]),
-      model: 'gemini-3-flash-preview'
-    });
-    const nativeSystemInstruction = String(nativeGeminiBody.systemInstruction?.parts?.[0]?.text || '');
-    assert.strictEqual(countOccurrences(nativeSystemInstruction, '[GeminiRuntimeAdapter]'), 1);
-    const geminiPromptAnchor = geminiPromptText.split(/\r?\n/).find((line) => line.trim())?.trim() || '## Gemini 主回复适配';
-    assert.strictEqual(
-      countOccurrences(nativeSystemInstruction, geminiPromptAnchor),
-      1,
-      'Gemini native adapter should not duplicate prompts/GEMINI.txt when manifest already injected it'
-    );
-    assertGeminiPromptDoesNotPushSamplingDegeneration(nativeSystemInstruction);
-    const genericGeminiPath = path.join(__dirname, '..', '通用gemini.txt');
-    if (fs.existsSync(genericGeminiPath)) {
-      assert.ok(!nativeSystemInstruction.includes('Entropy\'s Elegy Project'));
-      assert.ok(!nativeSystemInstruction.includes('CHARACTER COMPLIANCE OVERRIDE'));
-    }
-  } finally {
-    if (previousGeminiSystemPromptPath === undefined) delete process.env.GEMINI_SYSTEM_PROMPT_PATH;
-    else process.env.GEMINI_SYSTEM_PROMPT_PATH = previousGeminiSystemPromptPath;
-    clearGeminiNativePromptCache();
-  }
+  const geminiBlocks = buildMainStableSystemBlocks({
+    modelName: 'gemini-3-flash-preview',
+    routeMeta: { chatType: 'private' }
+  });
+  const geminiSnapshot = buildPromptSnapshot(geminiBlocks, {
+    stage: 'main',
+    modelName: 'gemini-3-flash-preview'
+  });
+  const geminiStableBlock = geminiSnapshot.assembledBlocks.find((item) => item.id === 'gemini_system_prompt');
+  assert.ok(geminiStableBlock, 'Gemini model-specific prompt should survive stable prompt cache isolation');
+  assertGeminiPromptDoesNotPushSamplingDegeneration(geminiStableBlock.content);
 
   console.log('promptGoldenSnapshots.test.js passed');
   process.exit(0);

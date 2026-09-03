@@ -230,7 +230,7 @@ agent_decide -> humanize -> final_validate -> persist -> END
 
 `core/router` 是工具授权的唯一来源，只有 `route.meta.allowedTools` 明确列出的工具可以暴露给模型；后续执行层只能取交集收窄，不能扩权。无工具路由保留流式回复，工具路由缓冲中间轮次，只发送最终答案。不要绕过 `persist` 节点自行复制回复后写入逻辑。
 
-`core/researchTaskQueue.js` 与 `core/researchSubagent.js` 仅为历史研究 brief 兼容保留，生产消息流不再入队；历史 brief 仍可读取。
+旧 research 队列和子代理执行代码已经删除。`utils/sessionResearchCache.js` 仅保留历史 research brief 的读取兼容，当前生产消息流不会创建新的 research brief。
 
 ## 7. 数据所有权
 

@@ -39,7 +39,6 @@ module.exports = (async () => {
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
     process.env.MODEL_HTTP_USER_AGENT = browserUA;
-    process.env.GEMINI_SYSTEM_PROMPT_PATH = path.join(__dirname, 'fixtures', 'gemini-system-prompt.txt');
     clearProjectCache();
 
     const { runProviderRequestDiagnostics } = require('../utils/providerRequestDiagnostics');

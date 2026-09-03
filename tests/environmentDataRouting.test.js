@@ -6,7 +6,6 @@ const { GLOBAL_TOOL_NAME_SET } = require('../api/globalToolRuntime');
 const { TOOL_EXECUTORS } = require('../api/toolExecutors');
 const { TOOL_SCHEMAS } = require('../api/toolSchemas');
 const { detectIntent } = require('../core/router');
-const { buildDirectChatToolCatalog } = require('../core/directChatToolCatalog');
 const { resolveRouteExecution } = require('../core/routeExecution');
 const {
   deriveEarthquakeToolArgs,
@@ -199,13 +198,6 @@ assert.throws(
 );
 
 module.exports = (async () => {
-  const toolCatalog = buildDirectChatToolCatalog({ userId: 'u1' });
-  const earthquakeDescriptor = toolCatalog.find((item) => item.name === 'skill_earthquake_latest');
-  const cloudDescriptor = toolCatalog.find((item) => item.name === 'skill_weather_cloud');
-  assert.strictEqual(earthquakeDescriptor.readOnly, true);
-  assert.strictEqual(cloudDescriptor.readOnly, false);
-  assert.strictEqual(cloudDescriptor.writeCapable, true);
-
   const runtimeConfig = { COMPANION_TOOL_MODE_ENABLED: true };
   const earthquakeExecution = resolveRouteExecution(genericEarthquakeRoute, runtimeConfig);
   assert.strictEqual(earthquakeExecution.allowTools, true);

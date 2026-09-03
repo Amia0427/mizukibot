@@ -71,7 +71,6 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'messageReplyRuntimeControl.test.js'),
   path.join(__dirname, '..', 'tests', 'messageTelemetry.test.js'),
   path.join(__dirname, '..', 'tests', 'messageBackgroundTasks.test.js'),
-  path.join(__dirname, '..', 'tests', 'directToolLoop.test.js'),
   path.join(__dirname, '..', 'tests', 'promptCompiler.test.js'),
   path.join(__dirname, '..', 'tests', 'promptSecurity.test.js'),
   path.join(__dirname, '..', 'tests', 'promptStageContracts.test.js'),

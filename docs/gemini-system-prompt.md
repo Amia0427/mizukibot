@@ -1,5 +1,7 @@
 # Gemini 系统提示词资产
 
+更新 2026-09-03 21:46 +08:00：Gemini Native 请求适配器及其专属配置已删除；`prompts/GEMINI.txt` 继续通过 prompt manifest 按 Gemini 模型名进入 OpenAI-compatible 主回复，不再生成 `systemInstruction`。
+
 更新 2026-06-02 20:43 +08:00：新增 `prompts/GEMINI.txt`，作为 Gemini 模型独立系统提示词资产。
 
 更新 2026-06-02 21:39 +08:00：将 `prompts/GEMINI.txt` 从通用写作提示词收敛为 MizukiBot QQ 群聊瑞希运行适配层，只补充 Gemini 在群聊、被动感知、图片/引用、记忆证据和工具结果场景的输出纪律，不重复 persona 正文。
@@ -23,10 +25,8 @@
 ## 使用方式
 
 - `prompts/GEMINI.txt` 已在 `prompts/prompt-manifest.json` 中注册为 `gemini_system_prompt`，当模型名包含 `gemini` 时作为稳定系统块进入主回复 prompt。
-- Gemini native provider 会在 `systemInstruction` 前部写入 `[GeminiRuntimeAdapter]`。如果上游 system messages 已包含 manifest 注入的 `prompts/GEMINI.txt`，native provider 不再重复追加全文；如果没有，则补入 `[GeminiRuntimeAdapter]\nGEMINI.txt`。
-- `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED=false` 可关闭自动注入；`GEMINI_SYSTEM_PROMPT_PATH` 可指向替代文件。
 - 该文件只做模型适配，不写独立人设、世界观、叙事文风或安全绕过。
-- 仓库根目录的 `通用gemini.txt` 若存在，只作为本地诊断输入；其中通用预设、anti-refusal 或 compliance override 文案不得进入 manifest、native adapter 或提交。
+- 仓库根目录的 `通用gemini.txt` 若存在，只作为本地诊断输入；其中通用预设、anti-refusal 或 compliance override 文案不得进入 manifest 或提交。
 - Gemini 最近风格去重属于运行时动态块，不写入 `prompts/GEMINI.txt`，也不改变模型采样参数。
 - Gemini 最近风格信号诊断只读读取派生信号文件；缺失时返回 `missing` 摘要，不负责采集或修复运行时数据。
 
@@ -40,4 +40,4 @@
 
 - `GEMINI.txt` 是稳定模型适配文本，不是角色卡、世界书或通用写作预设。
 - 项目特化只写适配规则：QQ 短消息、上下文证据使用、工具结果转述和 Gemini 出戏防护；瑞希人设仍以 persona 目录为准。
-- 后续若调整 manifest 优先级或 native 注入策略，应单独评估预算裁剪、重复注入和与 `persona/02_style.txt` 的冲突。
+- 后续若调整 manifest 优先级，应单独评估预算裁剪、重复注入和与 `persona/02_style.txt` 的冲突。

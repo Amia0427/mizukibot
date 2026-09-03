@@ -1,11 +1,12 @@
 # Env Configuration
 
-更新时间：2026-08-21 21:35 +08:00
+更新时间：2026-09-03 21:46 +08:00
 
 ## 模型协议边界
 
 - Gemini Native 已永久禁用。Gemini 模型名和历史 `gemini_native`/`gemini`/`google_gemini` provider 别名统一按 `openai_compatible` 处理，最终请求使用 `/chat/completions`。
 - `OPENAI_MAIN_API_MODE=responses` 仍可被旧配置读取，但不再选择 Responses 协议；只有 Anthropic provider 使用 `/v1/messages`。旧 `generateContent`、`streamGenerateContent` 和 `/responses` URL 会在请求准备阶段归一化。
+- 2026-09-03：不可达的 Gemini Native 请求适配器和 `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED`、`GEMINI_SYSTEM_PROMPT_PATH`、`GEMINI_ROLEPLAY_GUIDELINES_*` 失效配置已删除；下方早期记录只描述历史行为。
 
 ## 管理员模型
 
