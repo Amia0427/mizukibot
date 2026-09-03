@@ -24,8 +24,10 @@ const {
   STAGE_PROMPT_FILES
 } = require('../utils/guanxiPrompt');
 const { composePersonaMemoryState, renderPersonaMemoryPrompt } = require('../utils/personaMemoryState');
-const { buildBaseDynamicPrompt } = require('../src/runtime-v2/context/render');
+const { buildBaseDynamicPrompt, buildDynamicPrompt } = require('../src/runtime-v2/context/render');
 const { buildNormalFastReplyMessages } = require('../core/normalFastReplyRuntime');
+const { createMessageSideEffects } = require('../core/messageSideEffects');
+const { favorites, getUserAffinityState, getUserProfile, updateFavor } = require('../utils/memory');
 
 const STAGE_VALUES = {
   stranger: { affection: 0, trust: 0, familiarity: 0 },
@@ -124,6 +126,7 @@ module.exports = (async () => {
   assert.strictEqual(shouldInjectGuanxiPrompt({ surface: 'direct_chat', isAdmin: true }), false);
   assert.strictEqual(shouldInjectGuanxiPrompt({ surface: 'qzone_diary' }), false);
   assert.strictEqual(shouldInjectGuanxiPrompt({ surface: 'passive_reply' }), false);
+  assert.strictEqual(shouldInjectGuanxiPrompt({ surface: 'tool_call' }), false);
 
   const userId = 'guanxi-user';
   setRelationship(userId, 'stranger', 1000);
@@ -155,6 +158,49 @@ module.exports = (async () => {
   assert.ok(secondFormalText.includes('25时'));
   assert.ok(!secondFormalText.includes('阶段一：初次认识的网友'));
   assert.ok(!secondFormalText.includes('阶段四：无话不谈的闺蜜/兄弟'));
+
+  const staleMemoryContext = {
+    affinityState: { relationship: 'playful_affection', attitude: '过期关系' },
+    profile: { relation_stage: '初识' },
+    persona: {},
+    segments: {},
+    summary: 'none',
+    memoryForPrompt: 'none'
+  };
+  const fullFormal = await buildDynamicPrompt(
+    { level: '初识', points: -2, relationship: 'playful_affection' },
+    userId,
+    '继续聊聊',
+    null,
+    {
+      ...buildBaseOptions(userId),
+      memoryContext: staleMemoryContext,
+      includeOptionalContextBlocks: false
+    }
+  );
+  const fullFormalText = getMessagesText(fullFormal.promptSegments.systemPrompt);
+  assert.ok(fullFormalText.includes('[GuanxiStage]'));
+  assert.ok(fullFormalText.includes('阶段三：密友'));
+  assert.ok(!fullFormalText.includes('[Affinity] 初识'));
+  assert.ok(!fullFormalText.includes('[AffinityPoints] -2'));
+  assert.ok(!fullFormalText.includes('playful_affection'));
+  assert.ok(!fullFormalText.includes('relationship_state=playful_affection'));
+
+  favorites[userId] = { points: -2, level: '陌生人', relationship: 'playful_affection' };
+  assert.strictEqual(getUserAffinityState(userId).level, '普通朋友');
+  assert.strictEqual(getUserProfile(userId).relation_stage, '普通朋友');
+  const sideEffects = createMessageSideEffects({
+    config: { PASSIVE_AWARENESS_CONTEXT_SIZE: 4 },
+    updateFavor,
+    getUserAffinityState,
+    saveData: () => {},
+    recordMemoryScope: () => {},
+    appendGroupMessage: () => {},
+    recordSocialHumanGroupMessage: () => {},
+    recordStyleHumanGroupMessage: () => {},
+    maybeSendMemeFollowup: async () => {}
+  });
+  assert.strictEqual(sideEffects.updateUserPresence(userId, '继续聊聊', '').level, '普通朋友');
 
   const directState = await composePersonaMemoryState({
     userId,

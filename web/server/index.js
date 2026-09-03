@@ -1,7 +1,7 @@
 ﻿
 const express = require('express');
 const config = require('../../config');
-const { favorites, memories } = require('../../utils/memory');
+const { favorites, memories, getUserAffinityState } = require('../../utils/memory');
 const { getLatestReasoning } = require('../../api/parser');
 const { listTasks, loadTask } = require('../../utils/agentRuntime');
 const { listRecentModelCalls } = require('../../utils/modelCallTracker');
@@ -478,14 +478,17 @@ function createWebApp(options = {}) {
   app.get('/', (req, res) => {
     const favorHtml = Object.entries(favorites)
       .map(([id, d]) => {
-        const safePoints = Number.isFinite(Number(d?.points)) ? Number(d.points) : 0;
-        const relationship = String(d?.relationship || d?.level || '陌生人').trim() || '陌生人';
-        const attitude = String(d?.attitude || '').trim() || '-';
+        const affinity = getUserAffinityState(id);
+        const safePoints = Number.isFinite(Number(affinity?.points)) ? Number(affinity.points) : 0;
+        const level = String(affinity?.level || d?.level || '陌生人').trim() || '陌生人';
+        const relationship = String(affinity?.relationship || level).trim() || '陌生人';
+        const attitude = String(affinity?.attitude || d?.attitude || '').trim() || '-';
         const lastReason = String(d?.last_affinity_reason || '').trim() || '-';
-        const lastUpdated = Number(d?.last_affinity_update_at || 0) > 0
-          ? new Date(Number(d.last_affinity_update_at)).toLocaleString()
+        const lastAffinityUpdateAt = Number(affinity?.last_affinity_update_at || d?.last_affinity_update_at || 0);
+        const lastUpdated = lastAffinityUpdateAt > 0
+          ? new Date(lastAffinityUpdateAt).toLocaleString()
           : '-';
-        return `<tr><td>${escapeHtml(id)}</td><td>${escapeHtml(d?.level || '')}</td><td>${safePoints}</td><td>${escapeHtml(relationship)}</td><td>${escapeHtml(attitude)}</td><td>${escapeHtml(lastReason)}</td><td>${escapeHtml(lastUpdated)}</td></tr>`;
+        return `<tr><td>${escapeHtml(id)}</td><td>${escapeHtml(level)}</td><td>${safePoints}</td><td>${escapeHtml(relationship)}</td><td>${escapeHtml(attitude)}</td><td>${escapeHtml(lastReason)}</td><td>${escapeHtml(lastUpdated)}</td></tr>`;
       })
       .join('');
 

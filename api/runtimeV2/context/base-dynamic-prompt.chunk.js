@@ -257,6 +257,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     topRouteType,
     surface: chatSurface,
     memoryContext,
+    personaMemoryState,
     sharedShortTermContext,
     continuitySignals: options?.continuitySignals,
     options
@@ -482,7 +483,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         continuity: shortTermContinuityMeta
       }
     }));
-    promptBlocks.push(createPromptBlock('affinity_level', 'Affinity Level', `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`, {
+    if (!personaMemoryState?.evidence?.variableSnapshot) promptBlocks.push(createPromptBlock('affinity_level', 'Affinity Level', `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`, {
       stage: 'main',
       priority: 320,
       authority: 'memory_fact',
@@ -492,7 +493,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         optional: true
       }
     }));
-    promptBlocks.push(createPromptBlock('affinity_points', 'Affinity Points', `[AffinityPoints] ${affinity.points}`, {
+    if (!personaMemoryState?.evidence?.variableSnapshot) promptBlocks.push(createPromptBlock('affinity_points', 'Affinity Points', `[AffinityPoints] ${affinity.points}`, {
       stage: 'main',
       priority: 321,
       authority: 'memory_fact',
@@ -525,7 +526,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       }
     }));
     promptBlocks.push(
-      ...buildRelationshipPromptLines(memoryContext)
+      ...buildRelationshipPromptLines(memoryContext, personaMemoryState.relationshipState)
         .map((line, index) => createPromptBlock(
           `relationship_${index + 1}`,
           `Relationship ${index + 1}`,

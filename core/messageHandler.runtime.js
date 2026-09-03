@@ -6,6 +6,7 @@ const {
   chatHistory,
   shortTermMemory,
   updateFavor,
+  getUserAffinityState,
   saveData,
   hasFreshGroupBinding,
   clearGroupBindingsByGroupId,
@@ -914,7 +915,8 @@ function createMessageHandler({
     recordSocialHumanGroupMessage,
     recordStyleHumanGroupMessage,
     saveData,
-    updateFavor
+    updateFavor,
+    getUserAffinityState
   });
   const proactiveGreetingFlow = createProactiveGreetingFlow({
     config,

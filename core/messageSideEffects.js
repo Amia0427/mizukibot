@@ -6,7 +6,8 @@ function createMessageSideEffects({
   recordSocialHumanGroupMessage,
   recordStyleHumanGroupMessage,
   saveData,
-  updateFavor
+  updateFavor,
+  getUserAffinityState
 } = {}) {
   function recordInboundHumanMessage({
     groupId,
@@ -50,8 +51,17 @@ function createMessageSideEffects({
   }
 
   function updateUserPresence(senderId, cleanText, groupId) {
-    const userInfo = updateFavor(senderId, cleanText || '分享了图片', groupId);
-    userInfo.last_seen_at = Date.now();
+    const legacyUserInfo = updateFavor(senderId, cleanText || '分享了图片', groupId);
+    const currentUserInfo = typeof getUserAffinityState === 'function'
+      ? getUserAffinityState(senderId)
+      : legacyUserInfo;
+    const userInfo = {
+      ...legacyUserInfo,
+      ...currentUserInfo,
+      group_id: legacyUserInfo.group_id,
+      last_group_seen_at: legacyUserInfo.last_group_seen_at,
+      last_seen_at: Date.now()
+    };
     saveData();
     recordMemoryScope(senderId, { groupId });
     return userInfo;

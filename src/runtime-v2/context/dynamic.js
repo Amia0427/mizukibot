@@ -456,6 +456,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     topRouteType,
     surface: promptMaterials?.surface,
     memoryContext: promptMaterials?.memoryContext || fallbackMemoryContext,
+    personaMemoryState: promptMaterials?.personaMemoryState,
     sharedShortTermContext,
     continuitySignals: options?.continuitySignals,
     options
@@ -866,6 +867,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   }
   if (combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity')) {
     runtimeAddedIds.push('short_term_continuity');
+  }
+  if (combinedDynamicBlocks.some((item) => item?.id === 'guanxi_stage')) {
+    runtimeAddedIds.push('guanxi_stage');
   }
   const collectedMemoryContext = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
     ? promptMaterials.memoryContext

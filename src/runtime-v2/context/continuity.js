@@ -12,9 +12,14 @@ const { buildRuntimePrompt } = require('../../../utils/runtimePrompts');
 const { resolveChatSurface } = require('../../../utils/chatLivenessContext');
 const { formatDateInTz, formatTimeInTz, formatWeekdayInTz, getTimezone } = require('../../../utils/time');
 
-function buildRelationshipPromptLines(memoryContext = {}) {
+function buildRelationshipPromptLines(memoryContext = {}, relationshipState = {}) {
   const persona = memoryContext?.persona && typeof memoryContext.persona === 'object' ? memoryContext.persona : {};
-  const relationship = String(memoryContext?.profile?.relation_stage || '陌生人').trim() || '陌生人';
+  const relationship = String(
+    relationshipState?.relationship
+    || memoryContext?.affinityState?.relationship
+    || memoryContext?.profile?.relation_stage
+    || '陌生人'
+  ).trim() || '陌生人';
   const attitude = String(memoryContext?.affinityState?.attitude || '').trim() || String(persona?.relationshipStyle || '').trim() || String(memoryContext?.impressionText || '').trim() || '中立、保持距离';
   const replyStylePolicy = String(persona?.replyStyle || '').trim()
     || require('../../../utils/memory').buildReplyStylePolicy(relationship);
@@ -87,6 +92,7 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
   const memoryContext = input.memoryContext && typeof input.memoryContext === 'object' ? input.memoryContext : {};
   const continuitySignals = input.continuitySignals && typeof input.continuitySignals === 'object' ? input.continuitySignals : {};
   const sharedShortTermContext = input.sharedShortTermContext && typeof input.sharedShortTermContext === 'object' ? input.sharedShortTermContext : {};
+  const personaMemoryState = input.personaMemoryState && typeof input.personaMemoryState === 'object' ? input.personaMemoryState : {};
   const timezone = normalizeText(options.timezone || routeMeta.timezone || routeMeta.userTimezone || getTimezone(), 'Asia/Shanghai');
   const currentDate = normalizeRuntimeDate(options.currentTime || options.current_time || options.journalNow || routeMeta.currentTime || routeMeta.current_time || routeMeta.timestamp);
   const groupId = String(routeMeta.groupId || routeMeta.group_id || '').trim();
@@ -97,7 +103,16 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
   const directedContext = routeMeta.directedContext && typeof routeMeta.directedContext === 'object' ? routeMeta.directedContext : {};
   const addressee = directedContext.addressee && typeof directedContext.addressee === 'object' ? directedContext.addressee : {};
   const currentUser = resolveCurrentUserForRoleplay(userInfo, routeMeta, input.userId);
-  const relationStage = compactRuntimeLineValue(memoryContext?.profile?.relation_stage || memoryContext?.relationshipState?.stage || userInfo.level || 'unknown', 48);
+  const relationStage = compactRuntimeLineValue(
+    personaMemoryState?.relationshipState?.relationship
+    || personaMemoryState?.evidence?.variableSnapshot?.relationship?.stageLabel
+    || memoryContext?.affinityState?.relationship
+    || memoryContext?.profile?.relation_stage
+    || memoryContext?.relationshipState?.stage
+    || userInfo.level
+    || 'unknown',
+    48
+  );
   const recentEvents = compactRuntimeLineValue(memoryContext.promptSummaryText || memoryContext.summary || sharedShortTermContext.shortTermSummary || '', 120);
   const continuity = summarizeContinuitySignalsForRoleplay(continuitySignals);
   const latestMessage = compactRuntimeLineValue(input.question || routeMeta.userText || routeMeta.cleanText || routeMeta.rawText, 160);

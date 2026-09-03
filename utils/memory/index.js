@@ -430,10 +430,12 @@ function clearGroupBindingsByGroupId(groupId) {
  */
 function getUserProfile(userId) {
   const profile = ensureUserMemory(userId).profile;
-  const affinity = ensureUserFavorite(userId);
+  const affinity = getUserAffinityState(userId);
   const nextRelationStage = normalizeRelationship(
-    isAdminAffinityUser(userId) ? ADMIN_PROTECTED_AFFINITY.relationship : affinity.relationship,
-    isAdminAffinityUser(userId) ? ADMIN_PROTECTED_AFFINITY.relationship : (profile.relation_stage || '陌生人')
+    isAdminAffinityUser(userId)
+      ? ADMIN_PROTECTED_AFFINITY.relationship
+      : (affinity.relationship || affinity.level || profile.relation_stage || '陌生人'),
+    isAdminAffinityUser(userId) ? ADMIN_PROTECTED_AFFINITY.relationship : '陌生人'
   );
   if (profile.relation_stage !== nextRelationStage) {
     profile.relation_stage = nextRelationStage;
