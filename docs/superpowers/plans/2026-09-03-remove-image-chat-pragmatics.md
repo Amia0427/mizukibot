@@ -18,8 +18,8 @@
 - Modify: `tests/imageSummaryVisionLiteBudget.test.js`
 - Modify: `tests/runtimeContextModuleBoundary.test.js`
 
-- [ ] 更新测试，要求视觉消息仅保留用户文本和必要图片元数据，不再出现图片意图标签或图片聊天行为规则。
-- [ ] 运行定向测试，确认旧实现下测试失败。
+- [x] 更新测试，要求视觉消息仅保留用户文本和必要图片元数据，不再出现图片意图标签或图片聊天行为规则。
+- [x] 运行定向测试，确认旧实现下测试失败。
 
 ### Task 2: 删除提示词及其运行时注入
 
@@ -31,10 +31,10 @@
 - Modify: `api/runtimeV2/context/vision.chunk.js`
 - Modify: `api/runtimeV2/model/shared.js`
 
-- [ ] 删除提示词资产、manifest 注册和内置回退文本。
-- [ ] 删除视觉消息中的图片意图推断与行为提示注入。
-- [ ] 保留用户文本预算、图片数量、多图 URL、视觉路由和 caption worker。
-- [ ] 运行定向测试、prompt 校验、lint、typecheck 和差异检查。
+- [x] 删除提示词资产、manifest 注册和内置回退文本。
+- [x] 删除视觉消息中的图片意图推断与行为提示注入。
+- [x] 保留用户文本预算、图片数量、多图 URL、视觉路由和 caption worker。
+- [x] 运行定向测试、prompt 校验、lint、typecheck 和差异检查。
 
 ### Task 3: 提交代码并记录验收
 
@@ -43,6 +43,10 @@
 - Modify after implementation commit: `docs/meme-manager.md`
 - Modify after implementation commit: `docs/superpowers/plans/2026-09-03-remove-image-chat-pragmatics.md`
 
-- [ ] 仅暂存本任务文件并提交实现，不纳入其他代理的工作区改动。
-- [ ] 在实现提交后，以 `2026-09-03 21:53 +08:00` 时间戳追加完成说明和验收结果。
-- [ ] 提交文档更新，不推送远端。
+- [x] 仅暂存本任务文件并提交实现，不纳入其他代理的工作区改动。
+- [x] 在实现提交后，以 `2026-09-03 21:53 +08:00` 时间戳追加完成说明和验收结果。
+- [x] 提交文档更新，不推送远端。
+
+## 完成记录
+
+2026-09-03 21:53 +08:00：小目标已完成。实现提交 `260494a8` 删除了图片聊天专用提示词和所有运行时注入点；4 项视觉定向测试、lint、typecheck、差异检查通过，prompt 检查确认已删除资产不再残留，仅保留既有 `ADULT.txt` 未纳入 manifest 的失败。

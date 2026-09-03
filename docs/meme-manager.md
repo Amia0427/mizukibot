@@ -1,5 +1,7 @@
 # Meme Manager
 
+更新 2026-09-03 21:53 +08:00：已删除 `prompts/runtime/image-chat-pragmatics.txt`、图片意图推断及运行时注入，图片聊天改为直接依据用户原文、图片和通用角色提示自然回应；表情包图库、自动选择器、图片路由和视觉 caption worker 未修改。验收：视觉定向测试、lint、typecheck、差异检查通过；prompt 检查只剩仓库既有 `ADULT.txt` 清单问题。实现提交：`260494a8`。
+
 更新 2026-06-15 07:29 +08:00：完成 `自然输出表情包by小梨7651232717192372859.docx` 低 token 接入方案。结论是不导入全文、不导入内嵌图片、不开启表情 follow-up，只把“读情绪而非像素报告、不要显式说表情/贴纸/发图、低信息确认不过度发挥、哭/笑哭/爆炸按情绪夸张理解、表情不抢主回复”蒸馏进 `prompts/runtime/image-chat-pragmatics.txt` 的图片/表情包路径。验收：`node tests/runtimeV2VisionMessageContent.test.js`、`npm run check:prompts`、`node --check tests/runtimeV2VisionMessageContent.test.js` 通过。小目标完成：自然表情输出素材已低 token 接入，仅影响视觉消息提示词。
 
 更新 2026-05-24 22:05 +08:00：表情包自动 follow-up 已关闭。`MEME_MANAGER_FOLLOWUP_ENABLED=false` 时 `maybeSendMemeFollowup` 会在 selector LLM 前直接返回 `followup-disabled`，不会选择素材，也不会向 NapCat 发送图片；图库、标注和 `/meme` 管理命令保留。
