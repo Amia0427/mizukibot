@@ -30,6 +30,8 @@
 
 最终入口复核（2026-09-04 01:27 +08:00）：真实用户 `1052258894` 的 SQLite 快照为 `affection=100`、`trust=31.1`、`familiarity=100`，阶段为 `friend/普通朋友`；旧 `favorites.json` 仍保存 `陌生人/playful_affection`，但 `getUserAffinityState`、`getUserProfile`、`updateUserPresence` 和最终正式提示词均以 SQLite 阶段为准。完整正式提示词只包含 `[GuanxiStage]` 的 `guanxi/03.txt`，不包含旧关系、`[Affinity] 初识` 或 `[AffinityPoints] -2`；正式/快速链路、管理员边界和非主回复边界回归通过。`node scripts/check-prompts.js` 仍仅被既有未登记的 `prompts/ADULT.txt` 阻塞，未修改该无关文件。
 
+重启验收（2026-09-04 02:39 +08:00）：执行 `restart-bot.cmd restart confirm` 后，主进程 PID `14580` 和 post-reply worker PID `40856` 均为 Running，返回 `healthy=True`，`data/bot-runtime.err.log` 为空。重启后尚未产生新的普通用户请求，因此 `request-trace.ndjson` 和 `model-calls.ndjson` 没有新版本普通请求的阶段块日志；代码级真实用户探针仍确认 `1052258894` 为 `friend/普通朋友`，选择 `guanxi/03.txt`。
+
 ## 运行入口
 
 主接口位于 `utils/conversationVariables/index.js`：`getSnapshot`、`applyProposal`、`getEvents`、`setOverride` 和 `clearOverride`。模型提案统一为 `relationship` 与 `character` 两组增量，旧 `affinity` 字段仍可被兼容解析，但不再拥有独立写入权威。

@@ -143,6 +143,7 @@
 - 修复（2026-09-01 09:07 +08:00）：高好感、高熟悉度用户不会因信任度在普通朋友阈值附近的小幅波动退回“初识”；真实用户 `1052258894` 的 `100/29.1/100` 快照由 `acquaintance/初识` 调整为 `friend/普通朋友`，阶段提示词同步切换到 `guanxi/03.txt`，更高阶段仍保留信任门槛。
 - 运行复核（2026-09-01 09:08 +08:00）：本地 bot 通过 `restart-bot.cmd restart confirm` 完成受控重启，健康检查为 `healthy=True`；主进程和 post-reply worker 均为 Running，未推送远端。
 - 最终入口复核（2026-09-04 01:27 +08:00）：真实用户 `1052258894` 的 SQLite 快照为 `100/31.1/100`，阶段为 `friend/普通朋友`，完整正式提示词只加载 `prompts/guanxi/03.txt`；旧 `favorites.json` 的 `陌生人/playful_affection` 已被排除，`getUserAffinityState`、`getUserProfile` 和 `updateUserPresence` 均返回 SQLite 关系。阶段推导、正式/快速主回复和管理员/非主回复边界回归通过；`check-prompts` 仍受既有 `prompts/ADULT.txt` 未登记阻塞，未修改该无关文件。
+- 重启验收（2026-09-04 02:39 +08:00）：`restart-bot.cmd restart confirm` 返回 `healthy=True`，主进程 PID `14580`、post-reply worker PID `40856` 均为 Running；重启后的 `bot-runtime.err.log` 为空。重启后尚未产生新的普通用户请求，因此 `request-trace.ndjson` 和 `model-calls.ndjson` 中没有可用于证明新请求阶段块的样本；代码级真实用户探针仍确认 `1052258894` 为 `friend/普通朋友` 并选择 `guanxi/03.txt`。
 
 ## 主回复提示词运行时重构 2026-08-17
 
