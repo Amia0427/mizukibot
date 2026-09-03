@@ -21,24 +21,9 @@ module.exports = (async () => {
 
   assert.ok(Array.isArray(content), 'vision message content should be multi-part');
   assert.strictEqual(content[0].type, 'text');
-  assert.ok(content[0].text.includes('用户原文：对比这两张'));
-  assert.ok(content[0].text.includes('图片数量：2'));
-  assert.ok(content[0].text.includes('用户图片意图：analyze_image'));
-  assert.ok(content[0].text.includes('表情包、贴纸、梗图、反应图'));
-  assert.ok(content[0].text.includes('适用于 meme_reaction'));
-  assert.ok(content[0].text.includes('适用于 explain_image'));
-  assert.ok(content[0].text.includes('适用于 analyze_image'));
-  assert.ok(content[0].text.includes('接梗反应'));
-  assert.ok(content[0].text.includes('简短解释'));
-  assert.ok(content[0].text.includes('认真分析'));
-  assert.ok(content[0].text.includes('只回 1-2 句'));
-  assert.ok(content[0].text.includes('读情绪，不按像素报告动作'));
-  assert.ok(content[0].text.includes('不要说“表情/贴纸/我发图/我给你发”'));
-  assert.ok(content[0].text.includes('[OK]/[收到]这类低信息确认只轻轻接住或不扩写'));
-  assert.ok(content[0].text.includes('[哭]/[笑哭]/[爆炸]按委屈、好笑、崩溃等情绪夸张理解'));
-  assert.ok(content[0].text.includes('表情只做氛围，不抢主回复'));
-  assert.ok(content[0].text.includes('不确定梗或来源时可以说“我感觉你是在表达……'));
-  assert.ok(content[0].text.includes('认真看图并回答问题，不要硬接梗'));
+  assert.strictEqual(content[0].text, '用户原文：对比这两张\n\n图片数量：2');
+  assert.ok(!content[0].text.includes('用户图片意图'));
+  assert.ok(!content[0].text.includes('图片聊天语用规则'));
   assert.ok(!content[0].text.includes('VisionCaptionJSON'));
   assert.deepStrictEqual(
     content
@@ -50,14 +35,10 @@ module.exports = (async () => {
     ]
   );
 
-  assert.ok(textFor('').includes('用户图片意图：meme_reaction'));
-  assert.ok(textFor('哈哈哈').includes('用户图片意图：meme_reaction'));
-  assert.ok(textFor('绷不住了').includes('用户图片意图：meme_reaction'));
-  assert.ok(textFor('这图什么意思').includes('用户图片意图：explain_image'));
-  assert.ok(textFor('啥梗').includes('用户图片意图：explain_image'));
-  assert.ok(textFor('帮我看哪里错了').includes('用户图片意图：analyze_image'));
-  assert.ok(textFor('图里写了啥').includes('用户图片意图：analyze_image'));
-  assert.ok(textFor('识别一下文字').includes('用户图片意图：analyze_image'));
+  assert.strictEqual(textFor(''), '用户原文：用户仅发送了图片。\n\n图片数量：1');
+  assert.strictEqual(textFor('哈哈哈'), '用户原文：哈哈哈\n\n图片数量：1');
+  assert.strictEqual(textFor('这图什么意思'), '用户原文：这图什么意思\n\n图片数量：1');
+  assert.strictEqual(textFor('识别一下文字'), '用户原文：识别一下文字\n\n图片数量：1');
 
   config.VISION_ROUTE_USER_TEXT_MAX_TOKENS = 64;
   const repeatedContext = '很长的引用内容';

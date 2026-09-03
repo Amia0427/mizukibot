@@ -109,7 +109,7 @@ module.exports = (async () => {
   assert.ok(Array.isArray(capturedMessages));
   const serialized = JSON.stringify(capturedMessages);
   assert.ok(!serialized.includes('prepared full context should not be reused'));
-  assert.ok(serialized.includes('用户图片意图'));
+  assert.ok(!serialized.includes('用户图片意图'));
 
   const request = buildMainModelRequest(state.request.modelConfig, {
     messages: capturedMessages,

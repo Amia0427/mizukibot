@@ -628,13 +628,6 @@
         "include_in_system_prompt": false
       },
       {
-        "id": "runtime_image_chat_pragmatics",
-        "path": "runtime/image-chat-pragmatics.txt",
-        "required": false,
-        "kind": "runtime_template",
-        "include_in_system_prompt": false
-      },
-      {
         "id": "runtime_roleplay_inner_protocol",
         "path": "runtime/roleplay-inner-protocol.txt",
         "required": false,

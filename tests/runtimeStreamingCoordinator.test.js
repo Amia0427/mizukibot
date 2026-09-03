@@ -560,8 +560,7 @@ module.exports = (async () => {
     buildVisionMessageContent: (text) => text,
     buildVisionLiteTextContent: (text, imageCount) => [
       `用户原文：${trimTextByTokenBudget(text, 512, 'tail')}`,
-      `图片数量：${imageCount}`,
-      '用户图片意图：analyze_image'
+      `图片数量：${imageCount}`
     ].join('\n'),
     buildV2CanonicalSegments: (_state, input) => {
       arrayVisionCanonicalInput = input;
@@ -619,6 +618,7 @@ module.exports = (async () => {
   assert.strictEqual(arrayVisionUserContent.filter((part) => part.type === 'image_url').length, 1);
   const arrayVisionUserText = String(arrayVisionUserContent.find((part) => part.type === 'text')?.text || '');
   assert.ok(arrayVisionUserText.includes('真正的问题：总结这张图'));
+  assert.ok(!arrayVisionUserText.includes('用户图片意图'));
   assert.ok(!arrayVisionUserText.includes('BEGIN_OVERSIZED_ARRAY_TEXT'), 'array-shaped vision text should be trimmed instead of returned unchanged');
   assert.ok(arrayVisionUserText.length < oversizedArrayText.length / 4, 'array-shaped vision text should be compacted before model dispatch');
 

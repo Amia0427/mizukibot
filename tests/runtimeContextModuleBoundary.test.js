@@ -77,7 +77,7 @@ const EXPECTED_FUNCTION_OWNERS = Object.fromEntries([
   ['base.js', 'buildBaseDynamicPrompt'],
   ['render-runtime.js', 'renderPromptLayers'],
   ['dynamic.js', 'buildDynamicPrompt'],
-  ['vision-runtime.js', 'normalizeVisionImageUrls inferVisionChatIntent buildVisionTextPart normalizeVisionEvidenceText buildVisionLiteTextContent buildVisionMessageContent shouldBypassHumanizerForPolicy']
+  ['vision-runtime.js', 'normalizeVisionImageUrls buildVisionTextPart normalizeVisionEvidenceText buildVisionLiteTextContent buildVisionMessageContent shouldBypassHumanizerForPolicy']
 ].flatMap(([file, names]) => names.split(' ').map((name) => [name, file])));
 const MUST_STAY_LAZY = [
   '../utils/memoryContext', '../utils/personaMemoryState', '../utils/memosPlannerRecall',
@@ -200,9 +200,9 @@ function assertLegacyBaseline() {
     .flatMap((statement) => statement.declarationList.declarations)
     .flatMap((declaration) => bindingNames(declaration.name));
   const bindings = topLevelBindings(source);
-  assert.strictEqual(functions.length, 110, 'legacy top-level function count');
+  assert.strictEqual(functions.length, 109, 'legacy top-level function count');
   assert.strictEqual(variables.length, 5, 'legacy top-level variable count');
-  assert.strictEqual(bindings.size, 115, 'legacy unique top-level binding count');
+  assert.strictEqual(bindings.size, 114, 'legacy unique top-level binding count');
   const locations = new Map();
   for (const [name, declaration] of bindings) {
     const position = declaration.getStart(source);

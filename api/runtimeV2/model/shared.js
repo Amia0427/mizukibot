@@ -497,7 +497,6 @@ function buildVisionSummaryCompactUserContent(message = {}, options = {}) {
     text: [
       `用户原文：${compactText}`,
       `图片数量：${imageCount}`,
-      '用户图片意图：analyze_image',
       '约束：这是图片总结/图片问答降载后的输入，只依据用户文本、可见 OCR 和视觉证据摘要回答。'
     ].join('\n\n')
   }].concat(imageParts);

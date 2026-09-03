@@ -1,7 +1,6 @@
 'use strict';
 
 const { trimTextByTokenBudget } = require('../../../utils/contextBudget');
-const { buildRuntimePrompt } = require('../../../utils/runtimePrompts');
 const runtimeConfig = require('../../../config');
 
 function normalizeVisionImageUrls(imageUrl = null, imageUrlsOrOptions = null) {
@@ -27,43 +26,17 @@ function normalizeVisionImageUrls(imageUrl = null, imageUrlsOrOptions = null) {
     });
 }
 
-function inferVisionChatIntent(question = '') {
-  const text = String(question || '').trim();
-  if (!text) return 'meme_reaction';
-
-  if (/(帮我看|看看哪里|哪里错|哪错|报错|错误|bug|截图|作业|题目|识别|ocr|OCR|文字|写了啥|写的啥|图里写|图上写|图里有|图里是什么|有什么|这是谁|是谁|什么角色|哪个角色|对比|比较|分析)/i.test(text)) {
-    return 'analyze_image';
-  }
-
-  if (/(什么意思|啥意思|什么梗|啥梗|什么含义|啥含义|看不懂|没看懂|解释(?:一下|下)?|这图.*?意思|这张图.*?意思)/i.test(text)) {
-    return 'explain_image';
-  }
-
-  if (/(哈哈+|笑死|绷不住|蚌埠住|无语|草|艹|救命|啊这|绝了|麻了|破防|崩溃|裂开|乐|汗流浃背|急了|尬|哭死|乐死|离谱|抽象)/i.test(text)) {
-    return 'meme_reaction';
-  }
-
-  return 'unknown';
-}
-
 function buildVisionTextPart(question = '', imageCount = 0) {
   const rawUserText = String(question || '').trim();
   const userTextBudget = Math.max(256, Number(runtimeConfig.VISION_ROUTE_USER_TEXT_MAX_TOKENS || 6000) || 6000);
   const userText = rawUserText
     ? trimTextByTokenBudget(rawUserText, userTextBudget, 'tail')
-    : 'Please answer with the provided image context.';
+    : '用户仅发送了图片。';
   const count = Math.max(1, Number(imageCount || 0) || 1);
-  const imageIntent = rawUserText ? inferVisionChatIntent(userText) : 'meme_reaction';
-  const pragmaticsPrompt = buildRuntimePrompt('image-chat-pragmatics', {
-    imageCount: String(count),
-    imageIntent
-  });
   return [
     `用户原文：${userText}`,
-    `图片数量：${count}`,
-    `用户图片意图：${imageIntent}`,
-    pragmaticsPrompt
-  ].filter(Boolean).join('\n\n');
+    `图片数量：${count}`
+  ].join('\n\n');
 }
 
 function normalizeVisionEvidenceText(text = '', tokenBudget = null) {
