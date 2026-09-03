@@ -1,5 +1,11 @@
 # MizukiBot
 
+## 退役运行时代码清理 2026-09-03 22:11 +08:00
+
+- 删除已断开生产入口的旧 `directToolLoop`、`directChatToolCatalog`、research 队列/子代理执行链和 Gemini Native 请求适配器，共删除约 2216 行；同步删除专属测试、失效配置，并更新当前架构、运行时、测试和 Gemini prompt 文档。
+- 保留 `sessionResearchCache`、Gemini prompt/provider 兼容别名与 OpenAI-compatible 归一化逻辑、`core/tgBot.js` 和受保护的 legacy-retained chunk；历史 research brief 继续只读兼容。
+- 验收：16 个聚焦/相邻测试通过，`npm run lint` 检查 911 个 JavaScript 文件通过，`npm run typecheck` 和差异检查通过；完整 664 项有 4 个既有失败，原因见维护日志。本次未推送远端。
+
 ## 图片聊天提示词简化 2026-09-03 21:53 +08:00
 
 - 删除图片聊天专用行为提示词、图片意图推断和对应运行时注入；图片消息现在只携带用户原文、图片数量和实际图片内容，由通用角色提示自然决定回复方式。
@@ -284,7 +290,7 @@
 ## 运行维护 2026-08-04 +08:00
 
 - 实现提交 `87cf7d4` 已移除 direct-chat Planner 与预生成计划链，消息处理统一进入 LangGraph 原生 `agent_decide -> execute_tools` 循环；Router `allowedTools` 成为不可扩权的授权上界，工具轮次、调用总数、重复调用和副作用 checkpoint 由同一 Agent 状态管理。
-- `researchTaskQueue/researchSubagent` 代码保留但已断开生产入口；普通聊天、前台工具请求、后台消息和任务续写共用同一工具决策与限制语义。
+- 旧 `researchTaskQueue/researchSubagent` 执行链已删除；普通聊天、前台工具请求、后台消息和任务续写共用同一工具决策与限制语义，历史 research brief 仅保留读取兼容。
 - 验收：ReAct、checkpoint、Router、共享链接、卡片、记忆、Web 搜索及 OpenAI/Anthropic/Gemini 协议定向测试退出 0；`npm run lint`、`npm run typecheck`、`npm run check:agent:static` 均退出 0；完整 `npm test` 用时 158.5 秒并退出 0。当前分支未推送远端。
 
 ## 运行维护 2026-08-02 17:21 +08:00

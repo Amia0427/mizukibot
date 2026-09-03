@@ -2236,3 +2236,13 @@
 - 验收：`node --check config/mainModelRuntime.js`、`node --check utils/mainModelPool.js`、`node --check utils/mainModelConfigResolver.js`、`node --check utils/modelRouteDiagnostics.js`、`node --check api/runtimeV2/model/shared.js`、`node --check api/runtimeV2/model/service.js` 全部通过；`node tests/mainModelRuntimeConfig.test.js`、`node tests/mainModelPool.test.js`、`node tests/mainModelPoolRouting.test.js`、`node tests/mainModelPoolStreaming.test.js` 全部通过。
 - 质量门禁：`npm run lint`、`npm run typecheck`、`npm run check:secrets:all`、`git diff --check` 和 `git diff --cached --check` 全部通过。
 - 小目标已完成：功能提交 `2f67c91a`（`feat: add weighted main model pool slots`）；未修改 `.env`、`prompts/admin.txt` 或其他提示词资产，未纳入 `.belt/`、`.codex/config.toml`、`prompts/guanxi/07.txt` 及其他并行/未跟踪改动，未推送远端。
+## 运行维护 2026-09-03 22:11 +08:00
+
+- 小目标：清理已弃用、已废弃且已断开生产入口的旧运行时代码，收口到当前 Runtime V2 ReAct、统一工具注册和 OpenAI-compatible 模型协议。
+- 删除：`api/runtimeV2/runtime/directToolLoop.js`、`core/directChatToolCatalog.js`、`core/researchTaskQueue.js`、`core/researchSubagent.js`、`src/model/http/gemini-native.chunk.js` 及对应专属测试，共删除约 2216 行；同步移除旧测试清单项和 Gemini Native/research 执行链独占配置。
+- 保留：`utils/sessionResearchCache.js` 及其 TTL/容量/扫描配置、历史 research brief 只读兼容、Gemini prompt/provider 兼容别名、OpenAI-compatible 归一化逻辑、`core/tgBot.js` 和 legacy-retained chunk；未删除任何受保护 chunk。
+- 验收：16 个聚焦/相邻测试通过：环境数据、session research cache、主上下文、prompt golden、provider normalization/diagnostics、LangGraph V2、ReAct、流式协调、工具授权、主模型配置、运行时延迟配置、开发文档、src facade、chunk 入口和测试运行器；`npm run lint` 检查 911 个 JavaScript 文件通过，`npm run typecheck` 和 `git diff --check` 通过。
+- 完整回归：664 项中 4 项既有失败：`agentPrompts.test.js`、`checkPromptsIntegration.test.js`、`promptCheckGovernance.test.js` 均因当前 HEAD 已存在的 `prompts/ADULT.txt` 未纳入 manifest/allowlist；`memeManagerMonkeyPatch.test.js` 因独立的图片分析模型配置优先级问题失败。本次未修改图片分析配置，也未修复这些基线问题。
+- 其他门禁：`npm run check:prompts` 仍被既有 `prompts/ADULT.txt` 治理清单问题阻断；`npm run publish:check` 仍被当前 HEAD 中既有的 `prompts/guanxi/*`、`prompts/main-reply/*` 白名单问题阻断。系统 Node 为 `v24.14.1`，高于项目声明的 Node 20，验收结果据此如实记录。
+- 边界：未删除 `core/tgBot.js`、`sessionResearchCache`、Gemini 兼容资产或受保护 chunk；未纳入并行工作区改动，未推送远端。
+- 小目标已完成：实现提交 `1d765565`；本记录与 README/计划收口另行提交。
