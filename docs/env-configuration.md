@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-09-03 21:46 +08:00
+更新时间：2026-09-04 17:40 +08:00
 
 ## 模型协议边界
 
@@ -30,6 +30,16 @@
 - `NAPCAT_ACTION_TIMEOUT_MS=30000`：机器人调用 NapCat HTTP action 的总超时。
 - `NAPCAT_MESSAGE_SEND_TIMEOUT_MS=25000`：`send_msg`、`send_private_msg` 和 `send_group_msg` 传给 NapCat 的内部发送等待上限。该值应小于 `NAPCAT_ACTION_TIMEOUT_MS`，预留 HTTP 响应余量；调用方显式传入 `params.timeout` 时保留调用方值。
 - NapCat `onebot11` 配置的 `timeout.baseTimeout` 过低时，QQ 内部 `NodeIKernelMsgService/sendMsg` 可能在消息实际回调前超时。机器人现在对消息 action 显式传递该等待值，不改变“响应不确定时不自动重发”的重复消息保护策略。
+
+## QQ 语音输入
+
+- `VOICE_INPUT_ENABLED=false`：是否识别 QQ 私聊和群聊的 `record` 消息；默认关闭，关闭时不调用 NapCat `get_record` 或外部 ASR。
+- `VOICE_INPUT_API_URL=https://api.siliconflow.cn/v1/audio/transcriptions`、`VOICE_INPUT_API_KEY`、`VOICE_INPUT_MODEL=XingChenAGI/XingChenASR-V3.2-Ultra`：独立语音识别端点、凭据和模型，不复用主回复模型密钥；启用后缺任一项会在启动时明确失败。
+- `VOICE_INPUT_TIMEOUT_MS=60000`：单次 ASR 请求超时；失败不自动重试。
+- `VOICE_INPUT_MAX_BYTES=5242880`：NapCat 转换后的单个 MP3 最大字节数，默认 5 MiB。
+- `VOICE_INPUT_MAX_CONCURRENCY=4`：跨消息同时执行的 NapCat 转换和 ASR 请求上限；同一消息内多段语音保持原顺序逐段处理。
+- 转写结果以 `[语音转写]` 文本进入现有消息链；纯语音全部失败时，私聊或群聊 @Bot 返回固定提示，普通群聊静默消费。该能力只支持语音和歌词文本理解，不提供音乐本体分析。
+- 自动验收（2026-09-04 17:40 +08:00）：配置缺失失败、文件流请求、大小限制、并发限制、重复消息去重和失败分流测试通过；`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过；全量 `npm test` 仅有既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 失败，原因是 `prompts/ADULT.txt` 未被 prompt manifest/allowlist 引用；真实 API 可用性待专用 Key 验证。
 
 ## QQ 私聊状态栏
 

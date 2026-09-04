@@ -58,6 +58,7 @@ const { initializeWeatherAlertRuntime } = require('./src/features/weather-alerts
 const { createEmailGreetingCommandHandler } = require('./src/features/email-greetings/commands');
 const { initializeEmailGreetingRuntime } = require('./src/features/email-greetings/runtime');
 const { createCompanionRoomRuntime } = require('./src/features/companion-room');
+const { createVoiceInputService } = require('./src/features/voice-input');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -490,6 +491,12 @@ async function sendWithRetry(payload, retries = 1, waitMs = 500) {
   });
 }
 
+const voiceInputService = createVoiceInputService({
+  config,
+  actionClient: napcatActionClient,
+  sendWithRetry
+});
+
 const weixinMainRuntime = createWeixinMainRuntime({
   config,
   store: platformRuntime.weixinStore,
@@ -577,11 +584,14 @@ async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = pre
     return false;
   }
   if (preparePacket(msg)) return false;
+  const voiceResult = await (options.voiceInputService || voiceInputService).prepare(msg);
+  if (voiceResult.consumed) return false;
+  const voicePreparedMessage = voiceResult.message || msg;
   const qqAdapter = platformRuntime.registry.get('qq');
-  const normalized = qqAdapter.normalize(msg);
+  const normalized = qqAdapter.normalize(voicePreparedMessage);
   const prepared = normalized
-    ? mergeQqLegacyMessage(msg, platformRuntime.registry.prepareInbound(normalized))
-    : msg;
+    ? mergeQqLegacyMessage(voicePreparedMessage, platformRuntime.registry.prepareInbound(normalized))
+    : voicePreparedMessage;
   return acceptIncomingMessage(prepared, source, options);
 }
 const napcatLogFollower = createNapcatLogFollower({

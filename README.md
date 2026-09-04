@@ -1,5 +1,12 @@
 # MizukiBot
 
+## QQ 语音输入与歌词文本评价 2026-09-04 17:40 +08:00
+
+- 新增可选 QQ 语音输入：私聊和群聊 `record` 消息先由同机 NapCat 转为 MP3，再通过硅基流动 `XingChenAGI/XingChenASR-V3.2-Ultra` 转写，并作为 `[语音转写]` 文本进入现有命令、连续消息、路由、记忆和回复链路；群聊仍沿用原有回复规则。
+- 功能默认关闭，使用独立 `VOICE_INPUT_*` 配置，单音频限制 5 MiB、最多 4 路并发且不自动重试；纯语音失败时仅私聊或群聊 @Bot 给出提示，普通群聊静默消费。
+- 用户明确要求评价、赏析或分析歌词时，现有文本模型可以依据转写结果评价歌词；本功能不分析旋律、和声、编曲、演唱或混音，也不保证歌曲人声的识别准确率。
+- 自动验收（2026-09-04 17:40 +08:00）：语音 API 客户端、QQ 语音服务、NapCat 入站集成及相邻平台回归测试通过；`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过；`npm test` 仅保留两个既有 prompt manifest/allowlist 失败（`agentPrompts.test.js`、`checkPromptsIntegration.test.js`，均由 `prompts/ADULT.txt` 未被引用导致）。真实硅基流动和 QQ 端到端验收需配置专用 API Key 后执行。
+
 ## 退役运行时代码清理 2026-09-03 22:11 +08:00
 
 - 删除已断开生产入口的旧 `directToolLoop`、`directChatToolCatalog`、research 队列/子代理执行链和 Gemini Native 请求适配器，共删除约 2216 行；同步删除专属测试、失效配置，并更新当前架构、运行时、测试和 Gemini prompt 文档。

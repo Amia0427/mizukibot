@@ -1,6 +1,6 @@
 # 消息与 Agent 运行时
 
-本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-08-21 21:35 +08:00。
+本文面向需要修改消息入口、路由、Agent 图、工具执行、回复发送或后台副作用的开发者。它描述当前分支真实运行链路，而不是目录名暗示的理想架构。最后核验：2026-09-04 17:40 +08:00。
 
 读完后应能回答：一条 OneBot 消息在哪里被接收、在哪些位置可能提前返回、何时进入 Runtime V2、工具如何受策略约束、回复如何防重复与过期，以及回复后的持久化为何不应阻塞用户可见结果。
 
@@ -100,7 +100,9 @@ WebSocket `close` 会记录离线状态并按递增延时重连，上限 30 秒�
 flowchart TD
     A["NapCat WebSocket / HTTP reverse"] --> B["prepareNapCatEventPacket"]
     B -->|action response| X["NapCat action client 消费"]
-    B -->|event| C["messageIngressDispatcher"]
+    B -->|QQ record event| V["voice-input: get_record + ASR"]
+    B -->|其他 event| C["messageIngressDispatcher"]
+    V --> C
     C --> D["handleIncomingMessage"]
     D --> E["去重、权限、连续消息、并发锁"]
     E --> F["被动群感知或特殊命令"]
@@ -124,7 +126,15 @@ WebSocket `message` 与 HTTP reverse handler 都调用 `acceptNapCatIncomingMess
 - 让 `napcatActionClient.handleMessage()` 消费带 echo 的 action 响应。
 - 只有非 action 响应事件才继续进入消息处理器。
 
-这里不应放业务路由。Transport 的职责是解析、连接状态、认证、重连和把事件交给统一入口。
+QQ `record` 事件随后由独立 `voice-input` 服务调用 NapCat `get_record` 转 MP3，并以文件流调用外部 ASR；转写后的 record 被替换为普通文本，再由 QQ adapter 统一标准化。语音服务只负责媒体适配和转写，不决定群聊是否回复，也不建立新的消息协议。
+
+语音消息在进入通用消息处理器前另做 90 秒消息 ID 去重，避免 WebSocket 与 HTTP reverse 重复投递造成重复 ASR 调用；普通消息仍由 handler 内原有去重器负责。纯语音全部失败时，私聊或群聊 @Bot 在入口直接返回固定提示，普通群聊静默消费；有原始文字或部分转写成功时继续进入主链。
+
+这里不应放业务路由。Transport 的职责是解析、连接状态、认证、重连和把事件交给统一入口；语音转写属于 QQ 输入适配，不得扩展成音乐评价路由。
+
+自动验收（2026-09-04 17:40 +08:00）：文件流 ASR、NapCat record 转换、顺序替换、去重、限流、失败分流和标准化入站测试通过；lint、类型检查、密钥扫描和差异检查通过；全量 `npm test` 仅有既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 失败，原因是 `prompts/ADULT.txt` 未被 prompt manifest/allowlist 引用；真实硅基流动与 QQ 端到端验收待配置专用 API Key。
+
+小目标已完成（2026-09-04 17:46 +08:00）：QQ 语音输入已接入现有消息入口和文本处理链；本次完成范围为自动化实现与门禁验证，真实供应商请求、QQ 私聊/群聊和歌词评价仍需专用 Key 及实际语音执行。
 
 ### 2. 进程级入口队列控制总压力
 
