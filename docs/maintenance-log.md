@@ -2246,3 +2246,10 @@
 - 其他门禁：`npm run check:prompts` 仍被既有 `prompts/ADULT.txt` 治理清单问题阻断；`npm run publish:check` 仍被当前 HEAD 中既有的 `prompts/guanxi/*`、`prompts/main-reply/*` 白名单问题阻断。系统 Node 为 `v24.14.1`，高于项目声明的 Node 20，验收结果据此如实记录。
 - 边界：未删除 `core/tgBot.js`、`sessionResearchCache`、Gemini 兼容资产或受保护 chunk；未纳入并行工作区改动，未推送远端。
 - 小目标已完成：实现提交 `1d765565`；本记录与 README/计划收口另行提交。
+## 运行维护 2026-09-05
+
+- 真实复测：上游 `https://api.penguinsama.com/api/draw/openai/v1/models` 返回 `{"object":"list","data":[]}`；按此前已知的 `nano-banana-pro`、`nano-banana-2`、`flux-2-pro`、`flux-2-klein-4b`、`grok-imagine` 和 `gpt-image-2` 逐个请求 `/images/generations`，6 个请求均返回 `HTTP 503 Service Unavailable`。
+- 原始错误：对 `gpt-image-2` 取得的响应体为 `GPT Image 2 维护中（站长已拉闸）`。本次失败属于上游整体维护/服务不可用，不能据此判断某个模型永久不可用，也不切换当前项目配置。
+- 再次逐模型复测（2026-09-05 17:01 +08:00）：`nano-banana-pro` 返回“Nano Banana Pro 维护中（站长已拉闸）”；`nano-banana-2` 返回“Nano Banana 2 维护中（站长已拉闸）”；`flux-2-pro` 返回“Flux 2 Pro 维护中（站长已拉闸）”；`flux-2-klein-4b` 返回“Flux 2 Klein 维护中（站长已拉闸）”；`grok-imagine` 返回“Grok Imagine 维护中（站长已拉闸）”；`gpt-image-2` 返回“GPT Image 2 维护中（站长已拉闸）”。6 个请求均为 `HTTP 503`，没有可用模型。
+- 请求验收：使用项目当前完整 Images 请求体（`1024x1024`、`high`、`vivid`、`auto`、PNG、`output_compression=0`、`response_format=b64_json`）直连 `/images/generations`；`GET /models` 仍返回空列表。项目错误映射对该 `503` 响应返回“生图供应商暂时异常”，“生图请求参数无效”仅对应 `HTTP 400`。
+- 边界：未修改业务代码、`.env` 或模型配置；未输出密钥和图片 Base64，未推送远端。

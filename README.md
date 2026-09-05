@@ -140,6 +140,10 @@
 
 2026-08-27 真实验收：`nano-banana-pro`、`nano-banana-2`、`flux-2-pro`、`flux-2-klein-4b`、`grok-imagine` 和 `gpt-image-2` 均成功返回 `HTTP 200` 与 `data[0].b64_json`；`gpt-image-2` 使用项目完整参数再次生成成功。
 
+2026-09-05 复测：上游 `/models` 返回空列表；按上次已知的 6 个模型逐个使用项目完整参数请求时均返回 `HTTP 503 Service Unavailable`，代表性响应为“GPT Image 2 维护中（站长已拉闸）”。本次无法据此确认任何模型当前可用，未修改模型配置。
+
+2026-09-05 17:01 +08:00 再次逐模型复测：`nano-banana-pro`、`nano-banana-2`、`flux-2-pro`、`flux-2-klein-4b`、`grok-imagine` 和 `gpt-image-2` 分别返回对应模型的“维护中（站长已拉闸）”错误，均为 `HTTP 503`；仍无可用生图模型可确认。
+
 ## 好感度阶段提示词 2026-08-23 +08:00
 
 - 正常私聊、群聊点名主回复和正式主回复链路会按当前关系阶段只注入一份 `prompts/guanxi/01.txt`–`05.txt` 规则；关系阶段变化会进入 session prompt cache fingerprint，下一轮实时切换。
