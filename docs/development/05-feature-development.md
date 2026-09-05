@@ -24,6 +24,14 @@
 
 如果一个需求同时改变路由、工具和存储，先把它拆成三个可独立测试的行为，再由现有组合根连接。不要新增一个同时解析消息、调用模型、写文件和发送 QQ 回复的“服务类”。
 
+## 2.6 按需语音输出的当前实现边界（2026-09-05）
+
+本阶段先以 QQ 为可用目标，语音能力的稳定出站边界是 `src/platforms/qqAdapter.js`：私聊使用 `send_private_msg`，群聊使用 `send_group_msg`，消息段为 OneBot `record`，音频使用 MP3 Buffer 的 `base64://` 形式。`companion_voice_reply` 只接收文本，投递目标必须由当前入站消息上下文提供，不能接受模型传入的平台、用户或群 ID。
+
+Provider 放在 `src/features/companion-voice/provider.js`，通过 `COMPANION_VOICE_PROVIDER` 在外部 OpenAI-compatible TTS 与本地 HTTP TTS 中显式二选一；服务层负责分段、顺序、并发和文字回退。QQ 发送错误中，NapCat 连接前失败属于 `not_submitted`，响应无法判断时属于 `unknown`；后者禁止自动重发或文字补发。
+
+截至 2026-09-05，QQ 自动测试、lint、typecheck、密钥扫描和差异检查已通过，真实 TTS/QQ 客户端尚未在当前验收环境执行。完整 `npm test` 仍有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js`（`prompts/ADULT.txt` 未被 manifest/allowlist 引用）和 `voiceInputIngress.test.js`（既有 `VOICE_INPUT_*` 配置期望不一致）失败，本轮未扩大范围修复。Discord 附件、微信 outbox 文件发送和微信 `voice_item` 实验代码暂不视为完成能力，后续实现必须分别补平台定向测试和真实平台验收，不要把 QQ 的 `record` 结构直接复用到其他平台。
+
 ## 2. 项目级设计约束
 
 ### 2.1 CommonJS 和稳定导出

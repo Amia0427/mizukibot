@@ -1,3 +1,6 @@
+const fs = require('fs/promises');
+const path = require('path');
+
 const { createIlinkClient } = require('./ilink-client');
 const { evaluateInboundMessage: defaultEvaluateInboundMessage } = require('./inbound');
 const { createWeixinMediaLoader, createWeixinMediaUploader } = require('./media');
@@ -39,6 +42,7 @@ function createWeixinWorkerRuntime(options = {}) {
   const queueLimit = Math.max(1, Number(options.queueLimit || 20) || 20);
   const cycleIntervalMs = Math.max(0, Number(options.cycleIntervalMs || 250) || 250);
   const heartbeatIntervalMs = Math.max(1_000, Number(options.heartbeatIntervalMs || 15_000) || 15_000);
+  const voiceSpoolDir = String(options.voiceSpoolDir || '').trim();
   const clients = new Map();
   const mediaLoaders = new Map();
   const mediaUploaders = new Map();
@@ -252,6 +256,30 @@ function createWeixinWorkerRuntime(options = {}) {
     return failure;
   }
 
+  function isWithinVoiceSpool(filePath) {
+    if (!voiceSpoolDir || !filePath) return false;
+    const root = path.resolve(voiceSpoolDir);
+    const target = path.resolve(filePath);
+    const relative = path.relative(root, target);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  }
+
+  async function cleanupOutboxAttachments(payload) {
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+    for (const attachment of attachments) {
+      const filePath = String(attachment?.path || '').trim();
+      if (!attachment?.cleanupAfterSend || !isWithinVoiceSpool(filePath)) continue;
+      try {
+        await fs.unlink(filePath);
+      } catch (error) {
+        if (error?.code !== 'ENOENT') logger.warn('[weixin-worker] voice spool cleanup failed', {
+          filePath,
+          errorCode: errorCode(error)
+        });
+      }
+    }
+  }
+
   async function processInboxOnce() {
     if (typeof options.dispatchInbox !== 'function') {
       return { claimed: 0, completed: 0, failed: 0 };
@@ -278,15 +306,18 @@ function createWeixinWorkerRuntime(options = {}) {
     if (payload.msg) {
       sourceMessage = payload.msg;
     } else {
-      const itemList = [];
+        const itemList = [];
       const text = String(payload.text || '').trim();
       if (text) itemList.push({ type: 1, text_item: { text } });
       if (Array.isArray(payload.attachments) && payload.attachments.length > 0) {
         const uploader = mediaUploaderFor(binding, client);
         for (const attachment of payload.attachments) {
-          const kind = attachment.kind === 'image' ? 'image' : 'file';
+          const kind = ['image', 'voice'].includes(attachment.kind) ? attachment.kind : 'file';
           const uploaded = await uploader({
             filePath: attachment.path,
+            fileName: attachment.name,
+            mimeType: attachment.mimeType,
+            voice: attachment.voice,
             kind,
             toUserId: item.peerId
           });
@@ -328,9 +359,12 @@ function createWeixinWorkerRuntime(options = {}) {
         const client = await clientFor(binding);
         await client.sendMessage(await outboxBody(item, binding, client));
         store.completeOutbox(item.id);
+        await cleanupOutboxAttachments(item.payload);
         completed += 1;
       } catch (error) {
-        store.failOutbox(item.id, retryInput(item, error));
+        const failure = retryInput(item, error);
+        store.failOutbox(item.id, failure);
+        if (!failure.retryAt) await cleanupOutboxAttachments(item.payload);
         failed += 1;
       }
     }

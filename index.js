@@ -59,6 +59,7 @@ const { createEmailGreetingCommandHandler } = require('./src/features/email-gree
 const { initializeEmailGreetingRuntime } = require('./src/features/email-greetings/runtime');
 const { createCompanionRoomRuntime } = require('./src/features/companion-room');
 const { createVoiceInputService } = require('./src/features/voice-input');
+const { initializeCompanionVoiceService } = require('./src/features/companion-voice');
 
 // Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_MAIN_LOCK_FILE
@@ -457,6 +458,12 @@ const privateMessageRecoveryStore = createPrivateMessageRecoveryStore({
 });
 const platformRuntime = createPlatformRuntime(config, { qqActionClient: napcatActionClient });
 const platformActionClient = platformRuntime.actionClient;
+initializeCompanionVoiceService({
+  config,
+  canSendAudio: platformRuntime.canSendAudio,
+  sendAudio: platformRuntime.sendAudio,
+  sendText: platformRuntime.sendText
+});
 setPlatformAdminResolver((userId) => platformRuntime.identityStore.isAdminPrincipal(userId));
 setPlatformIdentityAliasResolver((userId) => platformRuntime.identityStore.getAliases(userId));
 runtimeReadiness.setDetailsProvider(() => platformRuntime.getReadinessSnapshot());

@@ -29,6 +29,8 @@ const {
   buildOutboundMessageMeta,
   recordOutboundMessageEvent
 } = require('../core/outboundMessageDiagnostics');
+const { createDeliveryTarget } = require('../src/platforms/contracts');
+const { sendQqAudio } = require('../src/platforms/qqAdapter');
 const { getDeliveryContext } = require('../src/platforms/deliveryContext');
 const { isPlatformAdminPrincipal } = require('../src/platforms/admin');
 
@@ -216,18 +218,20 @@ async function sendPrivateMessage(userId = '', message = '', options = {}) {
 }
 
 async function sendPrivateVoiceMessage(userId = '', audio = null, options = {}) {
-  const actionClient = options.actionClient || getNapCatActionClient();
   const targetUserId = normalizeText(userId);
   const buffer = Buffer.isBuffer(audio) ? audio : Buffer.from(audio || []);
   if (!targetUserId) throw new Error('userId is required');
   if (!buffer.length) throw new Error('voice audio is required');
-  await actionClient.callAction('send_private_msg', {
-    user_id: targetUserId,
-    message: [{
-      type: 'record',
-      data: { file: `base64://${buffer.toString('base64')}` }
-    }]
+  const result = await sendQqAudio(createDeliveryTarget({
+    platform: 'qq',
+    chatType: 'private',
+    conversationId: targetUserId,
+    externalUserId: targetUserId
+  }), buffer, {
+    ...options,
+    actionClient: options.actionClient || getNapCatActionClient()
   });
+  if (result.status !== 'accepted') throw new Error(`QQ voice send ${result.status}`);
   return {
     success: true,
     reason: 'private voice sent'

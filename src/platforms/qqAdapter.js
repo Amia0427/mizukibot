@@ -1,10 +1,16 @@
 const {
   createInboundMessage
 } = require('./contracts');
+const { getNapCatActionClient, isNapCatOfflineError } = require('../../api/napcatActionClient');
+const {
+  buildOutboundMessageMeta,
+  recordOutboundMessageEvent
+} = require('../../core/outboundMessageDiagnostics');
 
 const CAPABILITIES = Object.freeze([
   'text',
   'image',
+  'audio',
   'reply',
   'mention',
   'typing',
@@ -98,11 +104,89 @@ function mergeQqLegacyMessage(rawMessage = {}, legacyMessage = {}) {
   };
 }
 
+function normalizeAudioBuffer(audio) {
+  if (Buffer.isBuffer(audio)) return audio;
+  return Buffer.isBuffer(audio?.buffer) ? audio.buffer : Buffer.alloc(0);
+}
+
+function qqTargetId(target = {}) {
+  return String(target.conversationId || target.externalUserId || '').trim();
+}
+
+function qqSendFailureStatus(error) {
+  if (error?.retryable === true) return 'not_submitted';
+  if (error?.retcode !== null && error?.retcode !== undefined) return 'not_submitted';
+  if (isNapCatOfflineError(error)) return 'not_submitted';
+  return 'unknown';
+}
+
+async function sendQqText(target, text, options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const content = String(text || '').trim();
+  const targetId = qqTargetId(target);
+  if (!targetId || !content) return false;
+  const isPrivate = String(target.chatType || '').toLowerCase() === 'private';
+  await actionClient.callAction(isPrivate ? 'send_private_msg' : 'send_group_msg', isPrivate
+    ? { user_id: targetId, message: content }
+    : { group_id: targetId, message: content });
+  return true;
+}
+
+async function sendQqAudio(target, audio, options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const buffer = normalizeAudioBuffer(audio);
+  const targetId = qqTargetId(target);
+  if (!targetId || !buffer.length) return { status: 'not_submitted', mode: 'record' };
+  const isPrivate = String(target.chatType || '').toLowerCase() === 'private';
+  const action = isPrivate ? 'send_private_msg' : 'send_group_msg';
+  const params = isPrivate
+    ? { user_id: targetId, message: [{ type: 'record', data: { file: `base64://${buffer.toString('base64')}` } }] }
+    : { group_id: targetId, message: [{ type: 'record', data: { file: `base64://${buffer.toString('base64')}` } }] };
+  const outboundMeta = buildOutboundMessageMeta(options, {
+    source: 'qq_adapter',
+    triggerReason: 'audio_message'
+  });
+  const outboundPayload = {
+    channel: isPrivate ? 'private' : 'group',
+    action,
+    targetId,
+    audioBytes: buffer.length
+  };
+  const startedAt = Date.now();
+  recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
+  try {
+    await actionClient.callAction(action, params);
+  } catch (error) {
+    const status = qqSendFailureStatus(error);
+    recordOutboundMessageEvent('send_failure', outboundMeta, {
+      ...outboundPayload,
+      status,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      error: error?.message || String(error || '')
+    });
+    return { status, mode: 'record' };
+  }
+  recordOutboundMessageEvent('send_success', outboundMeta, {
+    ...outboundPayload,
+    status: 'accepted',
+    durationMs: Math.max(0, Date.now() - startedAt)
+  });
+  return { status: 'accepted', mode: 'record' };
+}
+
 function createQqAdapter(options = {}) {
   return {
     platform: 'qq',
     capabilities: CAPABILITIES,
     normalize: (message) => normalizeQqMessage(message, options),
+    sendAudio: (target, audio, sendOptions = {}) => sendQqAudio(target, audio, {
+      ...sendOptions,
+      actionClient: options.actionClient
+    }),
+    sendText: (target, text, sendOptions = {}) => sendQqText(target, text, {
+      ...sendOptions,
+      actionClient: options.actionClient
+    }),
     async start() {},
     async stop() {},
     getHealth: () => typeof options.getHealth === 'function'
@@ -115,5 +199,7 @@ module.exports = {
   CAPABILITIES,
   createQqAdapter,
   mergeQqLegacyMessage,
-  normalizeQqMessage
+  normalizeQqMessage,
+  sendQqAudio,
+  sendQqText
 };

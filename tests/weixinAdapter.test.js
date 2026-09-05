@@ -1,9 +1,13 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const { createWeixinAdapter } = require('../src/platforms/weixin/adapter');
 
 module.exports = (async () => {
   const calls = [];
+  const voiceSpoolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-weixin-voice-'));
   const binding = {
     accountId: 'bot-1',
     ilinkBotId: 'bot-1',
@@ -59,6 +63,7 @@ module.exports = (async () => {
     enabled: true,
     store,
     createClientId: () => 'client-1',
+    voiceSpoolDir,
     now: () => 2_000
   });
 
@@ -97,6 +102,93 @@ module.exports = (async () => {
     payload: { text: 'reply', attachments: [] }
   }]);
 
+  assert.deepStrictEqual(await adapter.sendAudio(target, {
+    buffer: Buffer.from('voice-bytes'),
+    mimeType: 'audio/mpeg',
+    format: 'mp3',
+    fileName: 'mizuki-voice.mp3'
+  }), { status: 'accepted', mode: 'file' });
+  const voiceQueueCall = calls.shift();
+  assert.strictEqual(voiceQueueCall[0], 'enqueueOutbox');
+  assert.strictEqual(voiceQueueCall[1].payload.attachments[0].name, 'mizuki-voice.mp3');
+  assert.strictEqual(voiceQueueCall[1].payload.attachments[0].mimeType, 'audio/mpeg');
+  assert.strictEqual(voiceQueueCall[1].payload.attachments[0].cleanupAfterSend, true);
+  assert.strictEqual(fs.existsSync(voiceQueueCall[1].payload.attachments[0].path), true);
+
+  const nativeVoiceSpoolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-weixin-native-voice-'));
+  const nativeCalls = [];
+  let nativeClientIdCalls = 0;
+  const nativeAdapter = createWeixinAdapter({
+    enabled: true,
+    store: {
+      getBindingByAccountId: () => binding,
+      enqueueOutbox(input) {
+        nativeCalls.push(input);
+        return { inserted: true, item: input };
+      }
+    },
+    createClientId: () => {
+      nativeClientIdCalls += 1;
+      return 'native-client';
+    },
+    voiceSpoolDir: nativeVoiceSpoolDir,
+    nativeVoiceEnabled: true,
+    nativeVoiceEncoder: async (input) => {
+      assert.strictEqual(fs.existsSync(input.inputPath), true);
+      fs.writeFileSync(input.outputPath, 'silk-bytes');
+      return {
+        filePath: input.outputPath,
+        fileName: input.fileName,
+        mimeType: 'audio/silk',
+        encodeType: 6,
+        sampleRate: 16000,
+        bitsPerSample: 16,
+        playTimeMs: 1200
+      };
+    }
+  });
+  assert.deepStrictEqual(await nativeAdapter.sendAudio(target, {
+    buffer: Buffer.from('native-voice'),
+    mimeType: 'audio/mpeg',
+    fileName: 'mizuki-voice.mp3'
+  }), { status: 'accepted', mode: 'file' });
+  assert.strictEqual(nativeClientIdCalls, 2);
+  assert.strictEqual(nativeCalls[0].payload.attachments[0].kind, 'voice');
+  assert.strictEqual(nativeCalls[0].payload.attachments[0].mimeType, 'audio/silk');
+  assert.deepStrictEqual(nativeCalls[0].payload.attachments[0].voice, {
+    encodeType: 6,
+    sampleRate: 16000,
+    bitsPerSample: 16,
+    playTimeMs: 1200
+  });
+
+  const fallbackVoiceSpoolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-weixin-native-fallback-'));
+  const fallbackCalls = [];
+  const fallbackAdapter = createWeixinAdapter({
+    enabled: true,
+    store: {
+      getBindingByAccountId: () => binding,
+      enqueueOutbox(input) {
+        fallbackCalls.push(input);
+        return { inserted: true, item: input };
+      }
+    },
+    createClientId: () => 'fallback-client',
+    voiceSpoolDir: fallbackVoiceSpoolDir,
+    nativeVoiceEnabled: true,
+    nativeVoiceEncoder: async () => {
+      throw new Error('native encoder unavailable');
+    }
+  });
+  await fallbackAdapter.sendAudio(target, {
+    buffer: Buffer.from('fallback-voice'),
+    mimeType: 'audio/mpeg',
+    fileName: 'fallback.mp3'
+  });
+  assert.strictEqual(fallbackCalls[0].payload.attachments[0].kind, 'file');
+  assert.strictEqual(fallbackCalls[0].payload.attachments[0].mimeType, 'audio/mpeg');
+  assert.strictEqual(fs.existsSync(fallbackCalls[0].payload.attachments[0].path), true);
+
   assert.strictEqual(await adapter.sendText({ ...target, chatType: 'group' }, 'blocked'), false);
   assert.strictEqual(await adapter.sendText({ ...target, conversationId: 'stranger', externalUserId: 'stranger' }, 'blocked'), false);
   assert.strictEqual(calls.length, 0, 'forged targets must not reach outbox');
@@ -127,6 +219,9 @@ module.exports = (async () => {
   assert.strictEqual(calls[0][0], 'appendAudit');
   assert.strictEqual(calls[0][1].reason, 'inbox_binding_mismatch');
   assert.deepStrictEqual(calls[1], ['completeInbox', 2]);
+  fs.rmSync(voiceSpoolDir, { recursive: true, force: true });
+  fs.rmSync(nativeVoiceSpoolDir, { recursive: true, force: true });
+  fs.rmSync(fallbackVoiceSpoolDir, { recursive: true, force: true });
 
   console.log('weixinAdapter.test.js passed');
 })().catch((error) => {

@@ -15,6 +15,12 @@ function createRegistryError(code, message) {
   return error;
 }
 
+function audioModeForPlatform(platform) {
+  if (platform === 'qq') return 'record';
+  if (platform === 'weixin') return 'file';
+  return 'attachment';
+}
+
 function collectLegacyMessageParts(message) {
   const textParts = [];
   const images = [];
@@ -87,6 +93,42 @@ function createPlatformRegistry(options = {}) {
 
   function get(platform) {
     return adapters.get(normalizeText(platform).toLowerCase()) || null;
+  }
+
+  function canSendAudio(target) {
+    const platform = normalizeText(target?.platform).toLowerCase();
+    const adapter = get(platform);
+    return Boolean(
+      target
+      && adapter
+      && adapter.enabled !== false
+      && Array.isArray(adapter.capabilities)
+      && adapter.capabilities.includes('audio')
+      && typeof adapter.sendAudio === 'function'
+      && (platform !== 'weixin' || normalizeText(target.chatType).toLowerCase() === 'private')
+    );
+  }
+
+  async function sendAudio(target, audio, options = {}) {
+    const mode = audioModeForPlatform(normalizeText(target?.platform).toLowerCase());
+    if (!canSendAudio(target)) return { status: 'not_submitted', mode };
+    try {
+      const result = await get(target.platform).sendAudio(target, audio, options);
+      if (result && ['accepted', 'not_submitted', 'unknown'].includes(result.status)) {
+        return { status: result.status, mode: result.mode || mode };
+      }
+      return result === false
+        ? { status: 'not_submitted', mode }
+        : { status: 'accepted', mode };
+    } catch (_) {
+      return { status: 'unknown', mode };
+    }
+  }
+
+  async function sendText(target, text, options = {}) {
+    const adapter = get(target?.platform);
+    if (!adapter || adapter.enabled === false || typeof adapter.sendText !== 'function') return false;
+    return adapter.sendText(target, text, options);
   }
 
   function prepareInbound(message) {
@@ -252,9 +294,12 @@ function createPlatformRegistry(options = {}) {
   return {
     get,
     getHealth,
+    canSendAudio,
     prepareInbound,
     register,
     routeLegacyAction,
+    sendAudio,
+    sendText,
     startEnabled,
     stopAll
   };

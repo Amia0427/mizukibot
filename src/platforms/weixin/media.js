@@ -1,7 +1,11 @@
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 const fs = require('fs/promises');
 const path = require('path');
+const { promisify } = require('util');
 const { TextDecoder } = require('util');
+
+const execFileAsync = promisify(execFile);
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_TEXT_CHARS = 32_000;
@@ -14,6 +18,7 @@ const MIME_TYPES = Object.freeze({
   '.json': 'application/json',
   '.log': 'text/plain',
   '.md': 'text/markdown',
+  '.mp3': 'audio/mpeg',
   '.png': 'image/png',
   '.txt': 'text/plain',
   '.webp': 'image/webp'
@@ -200,6 +205,20 @@ function buildOutboundMessageItem(kind, name, uploaded) {
       }
     };
   }
+  if (kind === 'voice') {
+    const voice = uploaded.voice || {};
+    return {
+      type: 3,
+      voice_item: {
+        media,
+        encode_type: Number(voice.encodeType || 6),
+        playtime: Math.max(0, Number(voice.playTimeMs || 0) || 0),
+        bits_per_sample: Number(voice.bitsPerSample || 16),
+        sample_rate: Number(voice.sampleRate || 16000),
+        size: uploaded.rawSize
+      }
+    };
+  }
   return {
     type: 4,
     file_item: {
@@ -235,8 +254,8 @@ function createWeixinMediaUploader(options) {
     const plaintext = await readFile(filePath);
     if (plaintext.length > maxBytes) throw new Error('Weixin file exceeds the 20 MiB limit');
 
-    const kind = input.kind === 'image' ? 'image' : 'file';
-    const mediaType = kind === 'image' ? 1 : 3;
+    const kind = ['image', 'voice'].includes(input.kind) ? input.kind : 'file';
+    const mediaType = kind === 'image' ? 1 : kind === 'voice' ? 4 : 3;
     const filekey = randomBytes(16).toString('hex');
     const aesKey = randomBytes(16);
     const ciphertext = encryptAesEcb(plaintext, aesKey);
@@ -261,22 +280,81 @@ function createWeixinMediaUploader(options) {
     const downloadEncryptedQueryParam = response.headers.get('x-encrypted-param');
     if (!downloadEncryptedQueryParam) throw new Error('Weixin CDN upload response is missing x-encrypted-param');
 
-    const name = sanitizeFileName(path.basename(filePath));
+    const name = sanitizeFileName(input.fileName || path.basename(filePath));
     const uploaded = {
       filekey,
       aesKeyHex: aesKey.toString('hex'),
       rawSize: plaintext.length,
       ciphertextSize: ciphertext.length,
-      downloadEncryptedQueryParam
+      downloadEncryptedQueryParam,
+      voice: input.voice
     };
     return {
       ...uploaded,
       kind,
       name,
-      mimeType: mimeFromFilename(name),
+      mimeType: normalizeMimeType(input.mimeType) || mimeFromFilename(name),
       messageItem: buildOutboundMessageItem(kind, name, uploaded)
     };
   };
+}
+
+function createFfmpegNativeVoiceEncoder(options = {}) {
+  const ffmpegPath = String(options.ffmpegPath || 'ffmpeg').trim() || 'ffmpeg';
+  const run = options.execFile || execFileAsync;
+
+  return async function encodeNativeVoice(input = {}) {
+    const inputPath = String(input.inputPath || '').trim();
+    const outputPath = String(input.outputPath || '').trim();
+    if (!inputPath || !outputPath) throw new Error('native voice encoder paths are required');
+    await run(ffmpegPath, [
+      '-y',
+      '-i', inputPath,
+      '-ar', '16000',
+      '-ac', '1',
+      '-c:a', 'libsilk',
+      outputPath
+    ], { windowsHide: true });
+    const stat = await fs.stat(outputPath);
+    if (!stat.isFile() || stat.size === 0) throw new Error('ffmpeg produced no native voice audio');
+    return {
+      filePath: outputPath,
+      fileName: sanitizeFileName(input.fileName || 'voice.silk'),
+      mimeType: 'audio/silk',
+      encodeType: 6,
+      sampleRate: 16000,
+      bitsPerSample: 16,
+      playTimeMs: Number(input.playTimeMs || 0) || 0
+    };
+  };
+}
+
+function normalizeMimeType(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function cleanupWeixinVoiceSpool(options = {}) {
+  const spoolDir = String(options.spoolDir || '').trim();
+  if (!spoolDir) return { removed: 0 };
+  const maxAgeMs = Math.max(60_000, Number(options.maxAgeMs || 24 * 60 * 60_000) || 24 * 60 * 60_000);
+  const now = Number(typeof options.now === 'function' ? options.now() : Date.now());
+  let entries;
+  try {
+    entries = await fs.readdir(spoolDir, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { removed: 0 };
+    throw error;
+  }
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const filePath = path.join(spoolDir, entry.name);
+    const stat = await fs.stat(filePath);
+    if (now - stat.mtimeMs <= maxAgeMs) continue;
+    await fs.unlink(filePath);
+    removed += 1;
+  }
+  return { removed };
 }
 
 module.exports = {
@@ -285,6 +363,8 @@ module.exports = {
   cleanupWeixinMediaCache,
   createWeixinMediaLoader,
   createWeixinMediaUploader,
+  cleanupWeixinVoiceSpool,
+  createFfmpegNativeVoiceEncoder,
   decryptAesEcb,
   encryptAesEcb,
   extractTextFile,

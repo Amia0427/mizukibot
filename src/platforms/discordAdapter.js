@@ -2,7 +2,7 @@ const path = require('path');
 
 const { createInboundMessage } = require('./contracts');
 
-const CAPABILITIES = Object.freeze(['text', 'image', 'reply', 'mention', 'typing', 'reaction', 'forward', 'history']);
+const CAPABILITIES = Object.freeze(['text', 'image', 'audio', 'reply', 'mention', 'typing', 'reaction', 'forward', 'history']);
 const NATIVE_COMMANDS = Object.freeze([
   { name: 'help', description: '查看机器人命令' },
   {
@@ -145,6 +145,7 @@ function createDiscordAdapter(options = {}) {
     .map(normalizeText)
     .filter(Boolean);
   const pendingInteractions = new Map();
+  const completedInteractionIds = new Set();
   let client = options.client || null;
   let status = enabled ? 'stopped' : 'disabled';
   let lastError = '';
@@ -271,13 +272,16 @@ function createDiscordAdapter(options = {}) {
     if (interaction) {
       await interaction.editReply({ content });
       pendingInteractions.delete(interaction.id);
+      completedInteractionIds.add(interaction.id);
       return true;
     }
     const channel = await resolveChannel(target);
     const replyTo = normalizeText(sendOptions.replyToMessageId);
     await channel.send({
       content,
-      ...(replyTo ? { reply: { messageReference: replyTo, failIfNotExists: false } } : {})
+      ...(!completedInteractionIds.has(replyTo) && replyTo
+        ? { reply: { messageReference: replyTo, failIfNotExists: false } }
+        : {})
     });
     return true;
   }
@@ -288,11 +292,43 @@ function createDiscordAdapter(options = {}) {
     if (interaction) {
       await interaction.editReply({ files: [file] });
       pendingInteractions.delete(interaction.id);
+      completedInteractionIds.add(interaction.id);
       return true;
     }
     const channel = await resolveChannel(target);
     await channel.send({ files: [file] });
     return true;
+  }
+
+  async function sendAudio(target, audio, sendOptions = {}) {
+    const buffer = Buffer.isBuffer(audio) ? audio : audio?.buffer;
+    const name = normalizeText(audio?.fileName) || 'voice.mp3';
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) return { status: 'not_submitted', mode: 'attachment' };
+    const file = { attachment: buffer, name };
+    try {
+      const interaction = pendingInteractions.get(normalizeText(sendOptions.replyToMessageId));
+      if (interaction) {
+        await interaction.editReply({ files: [file] });
+        pendingInteractions.delete(interaction.id);
+        completedInteractionIds.add(interaction.id);
+        return { status: 'accepted', mode: 'attachment' };
+      }
+      const channel = await resolveChannel(target);
+      const replyTo = normalizeText(sendOptions.replyToMessageId);
+      await channel.send({
+        files: [file],
+        ...(!completedInteractionIds.has(replyTo) && replyTo
+          ? { reply: { messageReference: replyTo, failIfNotExists: false } }
+          : {})
+      });
+      return { status: 'accepted', mode: 'attachment' };
+    } catch (error) {
+      const status = Number(error?.status || error?.statusCode || 0) >= 400
+        && Number(error?.status || error?.statusCode || 0) < 500
+        ? 'not_submitted'
+        : 'unknown';
+      return { status, mode: 'attachment' };
+    }
   }
 
   async function setTyping(target) {
@@ -324,6 +360,7 @@ function createDiscordAdapter(options = {}) {
 
   async function stop() {
     pendingInteractions.clear();
+    completedInteractionIds.clear();
     if (client?.destroy) client.destroy();
     status = enabled ? 'stopped' : 'disabled';
   }
@@ -341,6 +378,7 @@ function createDiscordAdapter(options = {}) {
     getHealth: () => ({ status, lastError, startedAt }),
     markDegraded,
     react,
+    sendAudio,
     sendImage,
     sendText,
     setTyping,

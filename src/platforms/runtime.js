@@ -133,6 +133,7 @@ function createPlatformRuntime(config, options = {}) {
     resolvePreferredPrivateTarget
   });
   registry.register(createQqAdapter({
+    actionClient: qqActionClient,
     getHealth() {
       const connection = qqActionClient.getConnectionState();
       return {
@@ -161,6 +162,9 @@ function createPlatformRuntime(config, options = {}) {
     enabled: config.WEIXIN_ENABLED,
     store: weixinStore,
     pollIntervalMs: config.WEIXIN_INBOX_POLL_INTERVAL_MS,
+    voiceSpoolDir: config.WEIXIN_VOICE_SPOOL_DIR,
+    nativeVoiceEnabled: config.COMPANION_VOICE_WEIXIN_NATIVE_ENABLED,
+    ffmpegPath: config.COMPANION_VOICE_WEIXIN_FFMPEG_PATH,
     getWorkerHealth: options.getWeixinWorkerHealth || (() => getWeixinWorkerHealth({
       stateFile: config.WEIXIN_WORKER_STATE_FILE,
       maxAgeMs: config.WEIXIN_WORKER_READINESS_MAX_AGE_MS
@@ -195,6 +199,7 @@ function createPlatformRuntime(config, options = {}) {
   return {
     actionClient,
     bindWeixinIdentity,
+    canSendAudio: (target) => registry.canSendAudio(target),
     close,
     closeStores,
     getReadinessSnapshot,
@@ -202,6 +207,8 @@ function createPlatformRuntime(config, options = {}) {
     identityStore,
     registry,
     resolvePrivateTarget: resolvePreferredPrivateTarget,
+    sendAudio: (target, audio, sendOptions = {}) => registry.sendAudio(target, audio, sendOptions),
+    sendText: (target, text, sendOptions = {}) => registry.sendText(target, text, sendOptions),
     unbindWeixinIdentity,
     weixinStore,
     start: (onMessage) => registry.startEnabled(onMessage),

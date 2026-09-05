@@ -465,7 +465,6 @@ function normalizeCompanionMemoryArgs(args = {}) {
 function normalizeCompanionVoiceArgs(args = {}) {
   const text = String(args.text || '').replace(/\s+/g, ' ').trim();
   if (!text) throw new Error('companion_voice_reply requires text');
-  if (text.length > 300) throw new Error('companion_voice_reply text too long');
   return { text };
 }
 

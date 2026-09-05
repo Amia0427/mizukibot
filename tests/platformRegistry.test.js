@@ -13,7 +13,7 @@ module.exports = (async () => {
   const weixinCalls = [];
   const adapter = {
     platform: 'discord',
-    capabilities: ['text', 'image', 'reaction'],
+    capabilities: ['text', 'image', 'audio', 'reaction'],
     async sendText(target, text, options) {
       sent.push({ type: 'text', target, text, options });
       return true;
@@ -21,6 +21,10 @@ module.exports = (async () => {
     async sendImage(target, image, options) {
       sent.push({ type: 'image', target, image, options });
       return true;
+    },
+    async sendAudio(target, audio, options) {
+      sent.push({ type: 'audio', target, audio, options });
+      return { status: 'accepted', mode: 'attachment' };
     },
     async react(target, messageId, emoji) {
       sent.push({ type: 'reaction', target, messageId, emoji });
@@ -95,6 +99,14 @@ module.exports = (async () => {
     assert.deepStrictEqual(sent.map((item) => item.type), ['text', 'image', 'reaction']);
     assert.strictEqual(sent[0].options.mentionExternalUserId, 'u1');
     assert.strictEqual(sent[0].options.replyToMessageId, 'm1');
+
+    assert.strictEqual(registry.canSendAudio(inbound.deliveryTarget), true);
+    assert.deepStrictEqual(await registry.sendAudio(inbound.deliveryTarget, {
+      buffer: Buffer.from('audio'),
+      mimeType: 'audio/mpeg',
+      format: 'mp3',
+      fileName: 'voice.mp3'
+    }), { status: 'accepted', mode: 'attachment' });
 
     const unknownWeixin = createInboundMessage({
       platform: 'weixin',

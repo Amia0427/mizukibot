@@ -6,7 +6,10 @@ const path = require('path');
 const config = require('../config');
 const { createWeixinStore } = require('../src/platforms/weixin/store');
 const { createWeixinWorkerRuntime } = require('../src/platforms/weixin/worker-runtime');
-const { cleanupWeixinMediaCache } = require('../src/platforms/weixin/media');
+const {
+  cleanupWeixinMediaCache,
+  cleanupWeixinVoiceSpool
+} = require('../src/platforms/weixin/media');
 const { acquireWeixinWorkerSingleInstance } = require('../utils/weixinWorkerSupervisor');
 
 if (config.WEIXIN_ENABLED !== true) {
@@ -51,6 +54,7 @@ const runtime = createWeixinWorkerRuntime({
   fetch: globalThis.fetch,
   allowedOutboundRoots: config.WEIXIN_OUTBOUND_ALLOWED_ROOTS,
   mediaCacheDir: config.WEIXIN_MEDIA_CACHE_DIR,
+  voiceSpoolDir: config.WEIXIN_VOICE_SPOOL_DIR,
   cycleIntervalMs: config.WEIXIN_INBOX_POLL_INTERVAL_MS,
   heartbeatIntervalMs: config.WEIXIN_WORKER_HEARTBEAT_MS,
   onState: writeState
@@ -80,11 +84,19 @@ void cleanupWeixinMediaCache({
   cacheDir: config.WEIXIN_MEDIA_CACHE_DIR,
   maxAgeMs: config.WEIXIN_MEDIA_MAX_AGE_MS
 }).catch((error) => console.error('[weixin-worker] media cleanup failed', error?.message || error));
+void cleanupWeixinVoiceSpool({
+  spoolDir: config.WEIXIN_VOICE_SPOOL_DIR,
+  maxAgeMs: config.WEIXIN_MEDIA_MAX_AGE_MS
+}).catch((error) => console.error('[weixin-worker] voice spool cleanup failed', error?.message || error));
 mediaCleanupTimer = setInterval(() => {
   void cleanupWeixinMediaCache({
     cacheDir: config.WEIXIN_MEDIA_CACHE_DIR,
     maxAgeMs: config.WEIXIN_MEDIA_MAX_AGE_MS
   }).catch((error) => console.error('[weixin-worker] media cleanup failed', error?.message || error));
+  void cleanupWeixinVoiceSpool({
+    spoolDir: config.WEIXIN_VOICE_SPOOL_DIR,
+    maxAgeMs: config.WEIXIN_MEDIA_MAX_AGE_MS
+  }).catch((error) => console.error('[weixin-worker] voice spool cleanup failed', error?.message || error));
 }, Math.min(config.WEIXIN_MEDIA_MAX_AGE_MS, 60 * 60_000));
 mediaCleanupTimer.unref?.();
 runtime.start();

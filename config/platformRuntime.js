@@ -51,10 +51,15 @@ function buildPlatformRuntimeConfig({ dataDir, pick, pickBool, pickList, pickNum
     WEIXIN_CREDENTIAL_MASTER_KEY: pick('WEIXIN_CREDENTIAL_MASTER_KEY', ''),
     WEIXIN_DB_FILE: pick('WEIXIN_DB_FILE', path.join(dataDir, 'weixin.sqlite')),
     WEIXIN_MEDIA_CACHE_DIR: pick('WEIXIN_MEDIA_CACHE_DIR', path.join(dataDir, 'weixin-media')),
+    WEIXIN_VOICE_SPOOL_DIR: pick(
+      'WEIXIN_VOICE_SPOOL_DIR',
+      path.join(dataDir, 'weixin-media', 'outbound-voice')
+    ),
     WEIXIN_MEDIA_MAX_AGE_MS: Math.max(60_000, pickNum('WEIXIN_MEDIA_MAX_AGE_MS', 24 * 60 * 60_000)),
     WEIXIN_OUTBOUND_ALLOWED_ROOTS: pickList('WEIXIN_OUTBOUND_ALLOWED_ROOTS', [
       path.join(dataDir, 'create-agent', 'output'),
-      path.join(dataDir, 'weixin-media')
+      path.join(dataDir, 'weixin-media'),
+      path.join(dataDir, 'weixin-media', 'outbound-voice')
     ]),
     WEIXIN_INBOX_POLL_INTERVAL_MS: Math.max(50, pickNum('WEIXIN_INBOX_POLL_INTERVAL_MS', 250)),
     WEIXIN_QR_TTL_MS: Math.max(60_000, pickNum('WEIXIN_QR_TTL_MS', 5 * 60_000)),

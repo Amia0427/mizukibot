@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const { evaluateInboundMessage } = require('../src/platforms/weixin/inbound');
 const { createWeixinWorkerRuntime } = require('../src/platforms/weixin/worker-runtime');
@@ -255,6 +258,58 @@ const { createWeixinWorkerRuntime } = require('../src/platforms/weixin/worker-ru
     { type: 1, text_item: { text: 'hello' } },
     { type: 2, image_item: { media: {} } }
   ]);
+
+  const voiceSpoolDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-weixin-worker-voice-'));
+  const voicePath = path.join(voiceSpoolDir, 'request-id-mizuki-voice.mp3');
+  fs.writeFileSync(voicePath, 'voice');
+  const voiceUploads = [];
+  const voiceRuntime = createWeixinWorkerRuntime({
+    autoRun: false,
+    voiceSpoolDir,
+    store: {
+      claimOutbox: () => [{
+        id: 10,
+        attempts: 1,
+        accountId: 'bot-1',
+        peerId: 'wx-user-1',
+        clientId: 'voice-client',
+        payload: {
+          text: '',
+          attachments: [{
+            kind: 'voice',
+            path: voicePath,
+            name: 'mizuki-voice.silk',
+            mimeType: 'audio/silk',
+            voice: {
+              encodeType: 6,
+              sampleRate: 16000,
+              bitsPerSample: 16,
+              playTimeMs: 1200
+            },
+            cleanupAfterSend: true
+          }]
+        }
+      }],
+      getWorkerBindingByAccountId: () => binding,
+      getContextToken: () => 'voice-context',
+      completeOutbox: (id) => assert.strictEqual(id, 10)
+    },
+    createClient: () => ({
+      notifyStart: async () => {},
+      sendMessage: async () => {}
+    }),
+    createMediaUploader: () => async (input) => {
+      voiceUploads.push(input);
+      return { messageItem: { type: 3, voice_item: { media: {}, playtime: input.voice.playTimeMs } } };
+    }
+  });
+  assert.deepStrictEqual(await voiceRuntime.processOutboxOnce(), { claimed: 1, completed: 1, failed: 0 });
+  assert.strictEqual(voiceUploads[0].kind, 'voice');
+  assert.strictEqual(voiceUploads[0].fileName, 'mizuki-voice.silk');
+  assert.strictEqual(voiceUploads[0].mimeType, 'audio/silk');
+  assert.strictEqual(voiceUploads[0].voice.playTimeMs, 1200);
+  assert.strictEqual(fs.existsSync(voicePath), false);
+  fs.rmSync(voiceSpoolDir, { recursive: true, force: true });
   assert.strictEqual(sentBodies[0].msg.from_user_id, 'bot-1');
 
   let forgedSendCalled = false;

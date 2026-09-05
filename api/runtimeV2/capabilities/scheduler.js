@@ -439,6 +439,14 @@ function buildToolContext(state, overrides = {}, helpers = {}) {
     routePolicyKey: normalizeText(request.routePolicyKey),
     topRouteType: normalizeText(request.topRouteType),
     routeMeta,
+    platform: normalizeText(routeMeta.platform || routeMeta.channel).toLowerCase(),
+    deliveryTarget: routeMeta.deliveryTarget || routeMeta.delivery_target || null,
+    replyToMessageId: normalizeText(
+      routeMeta.messageId
+      || routeMeta.message_id
+      || request.messageId
+      || request.replyToMessageId
+    ),
     reviewMode: normalizeText(request.reviewMode),
     taskType: normalizeText(routeMeta.taskType || routeMeta.task_type),
     sessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id),

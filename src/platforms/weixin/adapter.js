@@ -1,8 +1,11 @@
 const crypto = require('crypto');
+const fs = require('fs/promises');
+const path = require('path');
 
 const { createInboundMessage } = require('../contracts');
+const { createFfmpegNativeVoiceEncoder, sanitizeFileName } = require('./media');
 
-const WEIXIN_CAPABILITIES = Object.freeze(['text', 'image', 'file']);
+const WEIXIN_CAPABILITIES = Object.freeze(['text', 'image', 'file', 'audio']);
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -35,6 +38,10 @@ function createWeixinAdapter(options = {}) {
   const getWorkerHealth = typeof options.getWorkerHealth === 'function'
     ? options.getWorkerHealth
     : null;
+  const voiceSpoolDir = normalizeText(options.voiceSpoolDir);
+  const nativeVoiceEnabled = options.nativeVoiceEnabled === true;
+  const nativeVoiceEncoder = options.nativeVoiceEncoder
+    || createFfmpegNativeVoiceEncoder({ ffmpegPath: options.ffmpegPath });
   let timer = null;
   let running = false;
   let inFlight = null;
@@ -154,6 +161,71 @@ function createWeixinAdapter(options = {}) {
     return enqueue(target, { text: '', attachments: [{ kind, path: filePath }] });
   }
 
+  async function sendAudio(target, audio) {
+    const binding = bindingForTarget(target);
+    const buffer = Buffer.isBuffer(audio) ? audio : audio?.buffer;
+    if (!binding || !Buffer.isBuffer(buffer) || buffer.length === 0 || !voiceSpoolDir) {
+      return { status: 'not_submitted', mode: 'file' };
+    }
+    const fileName = sanitizeFileName(audio?.fileName || 'voice.mp3');
+    const spoolId = normalizeText(createClientId());
+    const sourcePath = path.join(voiceSpoolDir, `${spoolId}-${fileName}`);
+    await fs.mkdir(voiceSpoolDir, { recursive: true });
+    await fs.writeFile(sourcePath, buffer);
+    let filePath = sourcePath;
+    let kind = 'file';
+    let outputFileName = fileName;
+    let outputMimeType = normalizeText(audio?.mimeType) || 'audio/mpeg';
+    let voice = null;
+    if (nativeVoiceEnabled) {
+      const nativeFileName = `${path.parse(fileName).name}.silk`;
+      const nativePath = path.join(voiceSpoolDir, `${spoolId}-${nativeFileName}`);
+      try {
+        const encoded = await nativeVoiceEncoder({
+          inputPath: sourcePath,
+          outputPath: nativePath,
+          fileName: nativeFileName,
+          playTimeMs: audio?.playTimeMs
+        });
+        filePath = encoded.filePath;
+        outputFileName = sanitizeFileName(encoded.fileName || nativeFileName);
+        outputMimeType = normalizeText(encoded.mimeType) || 'audio/silk';
+        kind = 'voice';
+        voice = {
+          encodeType: encoded.encodeType,
+          sampleRate: encoded.sampleRate,
+          bitsPerSample: encoded.bitsPerSample,
+          playTimeMs: encoded.playTimeMs
+        };
+        await fs.unlink(sourcePath);
+      } catch (error) {
+        await fs.unlink(nativePath).catch(() => {});
+        console.warn('[weixin] native voice experiment fell back to file', error?.message || error);
+      }
+    }
+    try {
+      const queued = await enqueue(target, {
+        text: '',
+        attachments: [{
+          kind,
+          path: filePath,
+          name: outputFileName,
+          mimeType: outputMimeType,
+          cleanupAfterSend: true,
+          ...(voice ? { voice } : {})
+        }]
+      });
+      if (!queued) {
+        await fs.unlink(filePath);
+        return { status: 'not_submitted', mode: 'file' };
+      }
+      return { status: 'accepted', mode: 'file' };
+    } catch (error) {
+      await fs.unlink(filePath).catch(() => {});
+      throw error;
+    }
+  }
+
   function schedule() {
     if (!running || inFlight) return;
     inFlight = processInboxOnce()
@@ -191,6 +263,7 @@ function createWeixinAdapter(options = {}) {
       return worker ? { status: worker.status === 'online' ? 'online' : 'degraded', worker } : { status: 'online' };
     },
     processInboxOnce,
+    sendAudio,
     sendFile: (target, filePath) => sendAttachment(target, filePath, 'file'),
     sendImage: (target, filePath) => sendAttachment(target, filePath, 'image'),
     sendText,

@@ -34,7 +34,7 @@ module.exports = (async () => {
   const schema = getToolSchemaByName('companion_voice_reply');
   assert.ok(schema);
   assert.deepStrictEqual(schema.function.parameters.required, ['text']);
-  assert.strictEqual(schema.function.parameters.properties.text.maxLength, 300);
+  assert.strictEqual(schema.function.parameters.properties.text.maxLength, undefined);
   assert.strictEqual(typeof getToolExecutor('companion_voice_reply'), 'function');
   assert.ok(COMPANION_TOOL_PRESET.includes('companion_voice_reply'));
   assert.deepStrictEqual(enforceToolPolicy('companion_voice_reply', {
@@ -56,8 +56,17 @@ module.exports = (async () => {
   const executor = getToolExecutor('companion_voice_reply');
   assert.strictEqual(await executor({
     text: '群聊不应发送',
-    __context: { userId: 'voice-user', chatType: 'group', platform: 'qq' }
-  }), '语音回复只支持 QQ 私聊。');
+    __context: {
+      userId: 'voice-user',
+      chatType: 'group',
+      platform: 'qq',
+      deliveryTarget: {
+        platform: 'qq',
+        chatType: 'group',
+        conversationId: 'group-1'
+      }
+    }
+  }), '语音未发送，请直接用文字回复：群聊不应发送');
   assert.strictEqual(await executor({
     text: '配置关闭时保留这段文字',
     __context: { userId: 'voice-user', chatType: 'private', platform: 'qq' }

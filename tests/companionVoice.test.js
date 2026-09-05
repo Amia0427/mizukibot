@@ -1,6 +1,17 @@
 'use strict';
 
 const assert = require('assert');
+const { createDeliveryTarget } = require('../src/platforms/contracts');
+
+function target(platform, chatType) {
+  return createDeliveryTarget({
+    platform,
+    chatType,
+    containerId: platform === 'discord' ? 'guild-1' : 'bot-1',
+    conversationId: `${platform}-${chatType}`,
+    externalUserId: 'user-1'
+  });
+}
 
 module.exports = (async () => {
   const { createCompanionVoiceClient, createCompanionVoiceService } = require('../src/features/companion-voice');
@@ -90,6 +101,33 @@ module.exports = (async () => {
     reason: 'send_failed'
   });
 
-  await assert.rejects(service.reply('user-a', 'x'.repeat(301)), /voice text too long/);
+  const segmented = [];
+  const segmentedService = createCompanionVoiceService({
+    config: { COMPANION_VOICE_ENABLED: true, COMPANION_VOICE_MAX_CHARS: 300, COMPANION_VOICE_MAX_SEGMENTS: 4 },
+    provider: {
+      configured: true,
+      synthesize: async ({ text }) => ({
+        buffer: Buffer.from(text),
+        mimeType: 'audio/mpeg',
+        format: 'mp3',
+        fileName: 'voice.mp3'
+      })
+    },
+    canSendAudio: () => true,
+    sendAudio: async (_target, audio) => {
+      segmented.push(`audio:${audio.buffer.length}`);
+      return { status: 'accepted', mode: 'record' };
+    },
+    sendText: async (_target, text) => {
+      segmented.push(`text:${text.length}`);
+      return { status: 'accepted', mode: 'record' };
+    }
+  });
+  const segmentedResult = await segmentedService.reply({
+    text: 'x'.repeat(1500),
+    deliveryTarget: target('qq', 'private')
+  });
+  assert.strictEqual(segmentedResult.reason, 'partial_text_fallback');
+  assert.deepStrictEqual(segmented, ['audio:300', 'audio:300', 'audio:300', 'audio:300', 'text:300']);
   console.log('companionVoice.test.js passed');
 })();

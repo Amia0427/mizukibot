@@ -3,6 +3,7 @@ const { EventEmitter } = require('events');
 
 const { createDeliveryTarget } = require('../src/platforms/contracts');
 const { createDiscordAdapter } = require('../src/platforms/discordAdapter');
+const { createQqAdapter } = require('../src/platforms/qqAdapter');
 const { createPlatformRegistry } = require('../src/platforms/registry');
 const { createTelegramAdapter } = require('../src/platforms/telegramAdapter');
 
@@ -44,7 +45,7 @@ module.exports = (async () => {
       discordModule: {}
     });
     await discordAdapter.start({
-      onMessage: async () => { throw new Error('discord route failed'); }
+      onMessage: async () => {}
     });
     const discordTarget = createDeliveryTarget({
       platform: 'discord',
@@ -57,6 +58,13 @@ module.exports = (async () => {
       replyToMessageId: 'message-0'
     });
     await discordAdapter.sendImage(discordTarget, Buffer.from('image'));
+    const discordAudio = await discordAdapter.sendAudio(discordTarget, {
+      buffer: Buffer.from('audio'),
+      mimeType: 'audio/mpeg',
+      format: 'mp3',
+      fileName: 'mizuki-voice.mp3'
+    });
+    assert.deepStrictEqual(discordAudio, { status: 'accepted', mode: 'attachment' });
     await discordAdapter.setTyping(discordTarget);
     await discordAdapter.react(discordTarget, 'message-1', '👍');
     assert.strictEqual((await discordAdapter.fetchMessage(discordTarget, 'message-1')).text, 'fetched');
@@ -67,6 +75,75 @@ module.exports = (async () => {
     });
     assert.ok(discordCalls.some((item) => item.type === 'typing'));
     assert.ok(discordCalls.some((item) => item.type === 'reaction' && item.emoji === '👍'));
+    const discordAudioPayload = discordCalls.find((item) => item.type === 'send' && item.payload.files?.[0]?.name === 'mizuki-voice.mp3');
+    assert.strictEqual(discordAudioPayload.payload.files[0].attachment.toString(), 'audio');
+
+    const interactionEdits = [];
+    const interaction = {
+      id: 'interaction-1',
+      commandName: 'status',
+      guildId: '',
+      channelId: 'dm-channel',
+      channel: { isThread: () => false, name: 'DM' },
+      createdTimestamp: Date.now(),
+      user: { id: 'user-1', username: 'Alice' },
+      isChatInputCommand: () => true,
+      async deferReply() {},
+      async editReply(payload) { interactionEdits.push(payload); }
+    };
+    const interactionListener = discordClient.listeners('interactionCreate')[0];
+    await interactionListener(interaction);
+    const interactionAudio = await discordAdapter.sendAudio(
+      createDeliveryTarget({ platform: 'discord', chatType: 'private', conversationId: 'dm-channel' }),
+      { buffer: Buffer.from('interaction-audio'), fileName: 'interaction.mp3', mimeType: 'audio/mpeg', format: 'mp3' },
+      { replyToMessageId: 'interaction-1' }
+    );
+    assert.deepStrictEqual(interactionAudio, { status: 'accepted', mode: 'attachment' });
+    assert.strictEqual(interactionEdits[0].files[0].name, 'interaction.mp3');
+
+    const qqCalls = [];
+    const qqAdapter = createQqAdapter({
+      actionClient: {
+        async callAction(action, params) {
+          qqCalls.push({ action, params });
+        },
+        getConnectionState: () => ({ connected: true })
+      }
+    });
+    const qqPrivateTarget = createDeliveryTarget({ platform: 'qq', chatType: 'private', conversationId: 'qq-user', externalUserId: 'qq-user' });
+    const qqGroupTarget = createDeliveryTarget({ platform: 'qq', chatType: 'group', conversationId: 'qq-group' });
+    assert.deepStrictEqual(await qqAdapter.sendAudio(qqPrivateTarget, Buffer.from('private-audio')), { status: 'accepted', mode: 'record' });
+    assert.deepStrictEqual(await qqAdapter.sendAudio(qqGroupTarget, Buffer.from('group-audio')), { status: 'accepted', mode: 'record' });
+    assert.deepStrictEqual(qqCalls, [
+      {
+        action: 'send_private_msg',
+        params: {
+          user_id: 'qq-user',
+          message: [{ type: 'record', data: { file: `base64://${Buffer.from('private-audio').toString('base64')}` } }]
+        }
+      },
+      {
+        action: 'send_group_msg',
+        params: {
+          group_id: 'qq-group',
+          message: [{ type: 'record', data: { file: `base64://${Buffer.from('group-audio').toString('base64')}` } }]
+        }
+      }
+    ]);
+
+    const offlineQqAdapter = createQqAdapter({
+      actionClient: {
+        async callAction() {
+          const error = new Error('NapCat websocket is not connected');
+          error.code = 'NAPCAT_OFFLINE';
+          throw error;
+        }
+      }
+    });
+    assert.deepStrictEqual(await offlineQqAdapter.sendAudio(qqPrivateTarget, Buffer.from('offline-audio')), {
+      status: 'not_submitted',
+      mode: 'record'
+    });
 
     const discordListener = discordClient.listeners('messageCreate')[0];
     await assert.doesNotReject(discordListener({
@@ -137,7 +214,6 @@ module.exports = (async () => {
     });
     await registry.startEnabled(async () => {});
     assert.deepStrictEqual(new Set(started), new Set(['degraded:adapter start failed', 'healthy']));
-    assert.ok(errors.some((entry) => String(entry[0]).includes('discord')));
     assert.ok(errors.some((entry) => String(entry[0]).includes('telegram')));
 
     await Promise.all([discordAdapter.stop(), telegramAdapter.stop()]);

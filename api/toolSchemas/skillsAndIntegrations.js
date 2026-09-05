@@ -1303,15 +1303,14 @@ const skillsAndIntegrationsToolSchemas = [
     type: 'function',
     function: {
       name: 'companion_voice_reply',
-      description: '给当前 QQ 私聊用户发送一条原生语音。仅在用户明确要求语音、朗读或说给我听时调用；不要主动把普通回复转成语音。',
+      description: '给当前 QQ、微信私聊或 Discord 私聊/文字频道发送语音。仅在用户明确要求语音、朗读或说给我听时调用；不要主动把普通回复转成语音。',
       parameters: {
         type: 'object',
         additionalProperties: false,
         properties: {
           text: {
             type: 'string',
-            maxLength: 300,
-            description: '要用语音说出的完整短回复，最多 300 字'
+            description: '要用语音说出的完整回复；服务会按句末标点和单段长度分段，超出语音段数的尾部改用文字发送'
           }
         },
         required: ['text']

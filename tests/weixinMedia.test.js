@@ -10,6 +10,7 @@ const {
   createWeixinMediaLoader,
   createWeixinMediaUploader,
   cleanupWeixinMediaCache,
+  createFfmpegNativeVoiceEncoder,
   decryptAesEcb,
   encryptAesEcb,
   extractTextFile,
@@ -135,10 +136,11 @@ function binaryResponse(buffer, options = {}) {
   assert.strictEqual(oversizedFetches, 0, 'declared oversized files must be rejected before download');
 
   const uploadCalls = [];
-  const uploadFile = path.resolve('D:\\waifu\\data\\weixin-media\\reply.txt');
+  const uploadRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-weixin-upload-'));
+  const uploadFile = path.join(uploadRoot, 'reply.txt');
   const missingUploadRoot = path.resolve('D:\\waifu\\data\\create-agent\\output');
   const uploader = createWeixinMediaUploader({
-    allowedRoots: [missingUploadRoot, path.resolve('D:\\waifu\\data\\weixin-media')],
+    allowedRoots: [missingUploadRoot, uploadRoot],
     cdnBaseUrl: 'https://cdn.example',
     fetch: async (url, init) => {
       uploadCalls.push(['fetch', url, init]);
@@ -173,6 +175,47 @@ function binaryResponse(buffer, options = {}) {
   assert.strictEqual(uploaded.messageItem.file_item.file_name, 'reply.txt');
   assert.strictEqual(uploaded.messageItem.file_item.len, String(Buffer.byteLength('outbound text')));
 
+  const nativeEncoderCalls = [];
+  const nativeEncoderOutput = path.join(path.dirname(uploadFile), 'voice.silk');
+  const nativeEncoder = createFfmpegNativeVoiceEncoder({
+    ffmpegPath: 'custom-ffmpeg',
+    execFile: async (file, args, options) => {
+      nativeEncoderCalls.push({ file, args, options });
+      fs.writeFileSync(args[args.length - 1], 'silk');
+    }
+  });
+  const encoded = await nativeEncoder({
+    inputPath: uploadFile,
+    outputPath: nativeEncoderOutput,
+    fileName: 'voice.silk',
+    playTimeMs: 900
+  });
+  assert.strictEqual(nativeEncoderCalls[0].file, 'custom-ffmpeg');
+  assert.deepStrictEqual(nativeEncoderCalls[0].args.slice(0, 2), ['-y', '-i']);
+  assert.strictEqual(encoded.filePath, nativeEncoderOutput);
+  assert.strictEqual(encoded.mimeType, 'audio/silk');
+  assert.strictEqual(fs.readFileSync(nativeEncoderOutput).toString(), 'silk');
+  fs.rmSync(nativeEncoderOutput, { force: true });
+
+  const voiceUploaded = await uploader({
+    filePath: uploadFile,
+    kind: 'voice',
+    fileName: 'voice.silk',
+    mimeType: 'audio/silk',
+    voice: {
+      encodeType: 6,
+      sampleRate: 16000,
+      bitsPerSample: 16,
+      playTimeMs: 900
+    },
+    toUserId: 'wx-user'
+  });
+  assert.strictEqual(uploadCalls[2][1].media_type, 4);
+  assert.strictEqual(voiceUploaded.messageItem.type, 3);
+  assert.strictEqual(voiceUploaded.messageItem.voice_item.encode_type, 6);
+  assert.strictEqual(voiceUploaded.messageItem.voice_item.playtime, 900);
+  assert.strictEqual(voiceUploaded.messageItem.voice_item.sample_rate, 16000);
+
   let unsafeReads = 0;
   const restrictedUploader = createWeixinMediaUploader({
     allowedRoots: [path.resolve('D:\\waifu\\data\\weixin-media')],
@@ -193,6 +236,7 @@ function binaryResponse(buffer, options = {}) {
     /allowed outbound directories/
   );
   assert.strictEqual(unsafeReads, 0);
+  fs.rmSync(uploadRoot, { recursive: true, force: true });
 
   console.log('weixinMedia.test.js passed');
 })().catch((error) => {

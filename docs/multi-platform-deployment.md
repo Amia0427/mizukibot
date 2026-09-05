@@ -34,6 +34,12 @@ PLATFORM_GROUP_CONTEXT_MAX_MESSAGES=500
 
 `TG_PASSIVE_CHAT_IDS` 支持群 ID，也支持 `<chatId>:<topicId>` 精确开启某个 topic。`TG_ALLOWED_CHAT_IDS` 仅保留旧 Telegram 门面的兼容配置；当前主适配器的私聊向所有用户开放，仍受现有配额、并发、工具授权和安全策略约束。
 
+## 2.1 按需语音输出状态（2026-09-05）
+
+当前正式可用范围只有 QQ 私聊和群聊：启用 `COMPANION_VOICE_ENABLED=true` 后，明确要求语音时由 `companion_voice_reply` 生成 MP3，并通过 NapCat OneBot `record` 发送。外部 TTS 和本地 HTTP TTS 通过 `COMPANION_VOICE_PROVIDER` 显式选择，不会自动切换；普通文字回复、主动任务和没有当前投递目标的调用不会启动语音编排。
+
+Discord 语音附件、微信私聊音频文件 outbox 和微信原生 `voice_item` 当前均未完成正式验收，部署时不要按“多渠道语音已上线”对外承诺。微信原生路径默认关闭，FFmpeg、微信媒体上传字段和真实客户端显示仍属于后续实验范围。
+
 ## 3. 身份绑定
 
 绑定只能在私聊中操作：
@@ -51,6 +57,7 @@ PLATFORM_GROUP_CONTEXT_MAX_MESSAGES=500
 - Discord/TG 被动感知只在白名单开启。短期群记录按频道或 topic 保留 24 小时、最多 500 条，只供被动回复和群总结使用，不写长期群记忆，不进入 post-reply 学习。
 - 定时群消息保存平台和投递目标；旧任务缺少平台时按 QQ 处理。主动私聊使用统一人物最近活跃且当前在线的平台目标，并共用人物级冷却。
 - QZone、QQ 动态、自动日常发布和其他仅有 OneBot 实现的能力仍为 QQ 专属；不支持的 reaction、typing 或历史能力按能力表跳过。
+- 语音例外：目前只把 QQ `record` 作为可用出站能力；Discord/微信语音相关实现和真实验收状态以本节和实施记录为准，未完成部分不计入当前多平台上线范围。
 
 ## 5. 启动与健康检查
 

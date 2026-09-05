@@ -601,15 +601,19 @@ const TOOL_EXECUTORS = {
 
   companion_voice_reply: async (args = {}) => {
     const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
-    const chatType = String(context.chatType || '').trim().toLowerCase();
-    const platform = String(context.platform || 'qq').trim().toLowerCase();
-    if (chatType !== 'private' || platform !== 'qq') return '语音回复只支持 QQ 私聊。';
-    const userId = String(context.userId || '').trim();
-    if (!userId) throw new Error('companion_voice_reply requires private userId');
-    const result = await companionVoices.reply(userId, args.text);
-    return result.sent
-      ? '语音已发送，不要重复输出同一段文字。'
-      : `语音未发送，请直接用文字回复：${result.fallbackText}`;
+    const result = await companionVoices.reply({
+      text: args.text,
+      deliveryTarget: context.deliveryTarget || context.routeMeta?.deliveryTarget || context.routeMeta?.delivery_target,
+      replyToMessageId: context.replyToMessageId || context.routeMeta?.messageId || context.routeMeta?.message_id
+    });
+    if (result.reason === 'unknown' || result.status === 'unknown') {
+      return '语音发送状态不确定，请不要重复发送语音或文字。';
+    }
+    if (!result.handled) return `语音未发送，请直接用文字回复：${result.fallbackText}`;
+    if (result.textFallbackCount > 0) {
+      return `语音已按顺序处理，其中 ${result.textFallbackCount} 个片段已改用文字发送，不要重复输出同一段文字。`;
+    }
+    return '语音已发送，不要重复输出同一段文字。';
   },
 
   notebook_append_journal: async (args = {}) => {

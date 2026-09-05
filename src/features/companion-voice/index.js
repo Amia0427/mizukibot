@@ -1,9 +1,22 @@
 const { createCompanionVoiceClient } = require('./client');
-const { getCompanionVoiceService } = require('./runtime');
+const { getCompanionVoiceService, initializeCompanionVoiceService } = require('./runtime');
+const {
+  createCompanionVoiceProvider,
+  createExternalTtsProvider,
+  createGeneratedAudio,
+  createLocalTtsProvider,
+  isRetryableTtsError
+} = require('./provider');
 const { createCompanionVoiceService } = require('./service');
 
 module.exports = {
   createCompanionVoiceClient,
+  createCompanionVoiceProvider,
   createCompanionVoiceService,
-  getCompanionVoiceService
+  createExternalTtsProvider,
+  createGeneratedAudio,
+  createLocalTtsProvider,
+  getCompanionVoiceService,
+  initializeCompanionVoiceService,
+  isRetryableTtsError
 };
