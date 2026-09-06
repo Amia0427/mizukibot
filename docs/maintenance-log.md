@@ -2275,3 +2275,11 @@
 - 验收：政治 guard、消息出口、视觉渲染、小剧场定向测试以及 `npm run lint`、`npm run typecheck`、`git diff --check` 通过。
 - 边界：管理员私聊豁免保持不变；未修改 `prompts\admin.txt`，未扩大到其他平台独立发送适配器，未推送远端。
 - 小目标已完成：实现提交 `8f4ad687`；本次未纳入并行工作区改动。
+
+## 运行维护 2026-09-06 21:33 +08:00
+
+- 小目标：用最小参数日文 TTS 和瑞希 SVC 尽快打通本地推理与 QQ 按需语音链路。
+- 实现：`D:\tts-models` 使用 Windows 原生 Python sidecar，Piper `ja_JA-hi_fi_captain-medium` 在 CPU 生成源音频，瑞希 `mzk.pth`、ContentVec 和 RMVPE 在 CUDA 上完成 So-VITS-SVC 转换，再由 `imageio-ffmpeg` 内置 FFmpeg 输出 MP3；基础 TTS 与 SVC 可通过环境变量独立开关。
+- 验收：sidecar 6 项单元测试、`pip check`、健康检查、Piper→瑞希 SVC 真实串联、Node Provider 真实 HTTP 请求和当前 `.env` 完整语音服务调用通过；完整服务将两段日文依次处理为 `accepted + record`，没有文字回退。QQ 语音定向测试、`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。
+- 未完成：真实 QQ 私聊/群聊客户端收音、Node 20 部署环境复验、CosyVoice 高质量后端、SVC 微调训练、Discord 和微信语音正式验收。完整 `npm test` 仍有两个既有 prompt manifest/allowlist 失败和一个既有语音输入超时配置期望不一致，本轮未越界修改。
+- 小目标已完成：验收文档已在前一提交中落库；sidecar 保持独立目录，模型权重、生成音频、`.env` 和其他并行工作区改动均未纳入提交，未推送远端。
