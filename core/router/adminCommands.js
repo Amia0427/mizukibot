@@ -36,6 +36,8 @@ function parseAdminCommand(cleanText = '') {
   if (/^\/schedule_list(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/schedule_list/i, 'schedule_list');
   if (/^\/schedule_cancel(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/schedule_cancel/i, 'schedule_cancel');
   if (/^\/schedule_delete(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/schedule_delete/i, 'schedule_delete');
+  if (/^\/block(?:\s|$)/i.test(t)) return parseToggleCommand(t, /^\/block/i, 'block');
+  if (/^\/unblock(?:\s|$)/i.test(t)) return parseToggleCommand(t, /^\/unblock/i, 'unblock');
   if (/^\/memoryops(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/memoryops/i, 'memoryops', true);
   if (/^\/check(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/check/i, 'check', true);
   if (/^\/群总结(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/群总结/i, 'group_summary', true);
@@ -90,7 +92,7 @@ function parseAdminCommand(cleanText = '') {
   const parts = t.slice(ADMIN_PREFIX.length).trim().split(/\s+/);
   const cmd = (parts[0] || '').toLowerCase();
   const args = parts.slice(1);
-  const supported = new Set(['debug', 'status', 'reload', 'help', 'memoryops', 'check']);
+  const supported = new Set(['debug', 'status', 'reload', 'help', 'memoryops', 'check', 'block', 'unblock']);
 
   if (!supported.has(cmd)) return { cmd: 'unknown', args, raw: t };
   return { cmd, args, raw: t };

@@ -125,6 +125,7 @@ function createMessageRouteFlow(deps = {}) {
     askToolTaskLocally,
     runBackgroundToolTask,
     handleAdminCommand,
+    handleUserBlockAdminCommand = async () => ({ handled: true, replyText: '封禁命令暂时不可用。' }),
     handleMemoryOpsAdminCommand = async () => ({ handled: true, replyText: 'memoryops 这边现在没接上。' }),
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
@@ -826,7 +827,13 @@ function createMessageRouteFlow(deps = {}) {
       };
     }
 
-    if (cmd === 'meme') {
+    if (cmd === 'block' || cmd === 'unblock') {
+      const userBlockResult = await handleUserBlockAdminCommand({
+        command: route?.meta?.command || {},
+        userId: senderId
+      });
+      adminReply = String(userBlockResult?.replyText || '').trim() || '封禁命令已处理。';
+    } else if (cmd === 'meme') {
       const memeAdminResult = await handleAdminCommand({
         rawText: route?.meta?.command?.raw || route?.cleanText || rawText,
         groupId,
@@ -905,7 +912,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /check, /群总结 [条数], /create <prompt>, /debug runtime|hotspots|replydiag|replyprompt|replycache|replytrunc|provider, /status, /reload, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /check, /群总结 [条数], /create <prompt>, /debug runtime|hotspots|replydiag|replyprompt|replycache|replytrunc|provider, /status, /reload, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /block <QQ号> <时长>, /unblock <QQ号>, /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'check') {
       adminReply = formatModelSelfCheckReport(await runModelSelfCheck({
         adminUserId: senderId,

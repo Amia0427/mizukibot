@@ -20,6 +20,60 @@ function splitCommandPayload(payload = '') {
   return normalizeText(payload).split(/\s+/).filter(Boolean);
 }
 
+const BLOCK_DURATION_UNITS = Object.freeze({
+  s: 1000,
+  秒: 1000,
+  m: 60 * 1000,
+  分: 60 * 1000,
+  分钟: 60 * 1000,
+  h: 60 * 60 * 1000,
+  时: 60 * 60 * 1000,
+  小时: 60 * 60 * 1000,
+  d: 24 * 60 * 60 * 1000,
+  天: 24 * 60 * 60 * 1000,
+  w: 7 * 24 * 60 * 60 * 1000,
+  周: 7 * 24 * 60 * 60 * 1000
+});
+
+function parseBlockDuration(value = '') {
+  const text = normalizeText(value).toLowerCase();
+  if (['永久', '永封', 'forever', 'permanent'].includes(text)) {
+    return { durationMs: 0, label: '永久' };
+  }
+
+  const match = /^(\d+)(秒|s|分钟|分|m|小时|时|h|天|d|周|w)?$/i.exec(text);
+  if (!match) return null;
+
+  const amount = Number(match[1]);
+  const unit = match[2] || 'm';
+  const multiplier = BLOCK_DURATION_UNITS[unit] || BLOCK_DURATION_UNITS[unit.toLowerCase()];
+  const durationMs = amount * multiplier;
+  if (!Number.isSafeInteger(durationMs) || durationMs <= 0) return null;
+
+  const labels = {
+    s: '秒',
+    秒: '秒',
+    m: '分钟',
+    分: '分钟',
+    分钟: '分钟',
+    h: '小时',
+    时: '小时',
+    小时: '小时',
+    d: '天',
+    天: '天',
+    w: '周',
+    周: '周'
+  };
+  return {
+    durationMs,
+    label: `${amount} ${labels[unit] || labels[unit.toLowerCase()]}`
+  };
+}
+
+function isQqUserId(value = '') {
+  return /^\d+$/.test(normalizeText(value));
+}
+
 function parseMemoryOpsPayload(rawText = '') {
   const text = normalizeText(rawText);
   if (!/^\/memoryops(?:\s|$)/i.test(text)) return null;
@@ -47,6 +101,7 @@ function createMessageAdminCoordinator(deps = {}) {
     setGroupMute,
     scheduleGroupMessage,
     createScheduledCommand,
+    userBlockStore = null,
     runMemoryOpsFromArgv = null,
     formatMemoryOpsAdminReply = null
   } = deps;
@@ -215,18 +270,73 @@ function createMessageAdminCoordinator(deps = {}) {
     };
   }
 
+  async function handleUserBlockAdminCommand({ command = {}, userId = '' } = {}) {
+    const cmd = normalizeText(command?.cmd).toLowerCase();
+    if (!['block', 'unblock'].includes(cmd)) return null;
+    if (!isAdminUser(userId)) {
+      return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
+    }
+    if (!userBlockStore) {
+      return { handled: true, replyText: '封禁存储暂时不可用。' };
+    }
+
+    const args = Array.isArray(command?.args) ? command.args.map(normalizeText).filter(Boolean) : [];
+    const targetUserId = args[0] || '';
+    if (!isQqUserId(targetUserId)) {
+      return {
+        handled: true,
+        replyText: cmd === 'block'
+          ? '用法：/block <QQ号> <时长>（裸数字按分钟，支持 s/m/h/d 或 永久）'
+          : '用法：/unblock <QQ号>'
+      };
+    }
+
+    if (cmd === 'block') {
+      const duration = args.length === 2 ? parseBlockDuration(args[1]) : null;
+      if (!duration) {
+        return {
+          handled: true,
+          replyText: '用法：/block <QQ号> <时长>（裸数字按分钟，支持 s/m/h/d 或 永久）'
+        };
+      }
+      userBlockStore.blockUser({
+        userId: targetUserId,
+        durationMs: duration.durationMs,
+        blockedBy: userId
+      });
+      return {
+        handled: true,
+        replyText: `QQ ${targetUserId} 已封禁，时长：${duration.label}。`
+      };
+    }
+
+    if (args.length !== 1) {
+      return { handled: true, replyText: '用法：/unblock <QQ号>' };
+    }
+    const result = userBlockStore.unblockUser({ userId: targetUserId });
+    return {
+      handled: true,
+      replyText: result.removed
+        ? `QQ ${targetUserId} 已解封。`
+        : `QQ ${targetUserId} 当前没有生效的封禁记录。`
+    };
+  }
+
   return {
     handleInitiativeAdminCommand,
     handleMemoryOpsAdminCommand,
     handleQqScheduleAdminCommand,
     handleRestartAdminCommand,
     handleSessionSummaryCommand,
+    handleUserBlockAdminCommand,
     parseMemoryOpsPayload,
-    parseJsonTail
+    parseJsonTail,
+    parseBlockDuration
   };
 }
 
 module.exports = {
   createMessageAdminCoordinator,
+  parseBlockDuration,
   parseMemoryOpsPayload
 };

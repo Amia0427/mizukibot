@@ -1,5 +1,12 @@
 # MizukiBot
 
+## 管理员用户封禁指令 2026-09-06 19:20 +08:00
+
+- 管理员可发送 `/block <QQ号> <时长>` 封禁用户，裸数字按分钟解释，也支持 `s/m/h/d`、中文秒/分/小时/天/周和 `永久`；发送 `/unblock <QQ号>` 解封。
+- 指令沿用 `ADMIN_USER_IDS` 权限配置，非管理员不会执行封禁或解封；有效封禁用户的消息在入口处静默忽略，不进入连续消息、路由、模型和记忆链路。
+- 封禁状态持久化在 `DATA_DIR/user_blocks.sqlite`，重启 bot 后仍然生效；管理员账号始终保留管理权限。详细格式见[管理员用户封禁](docs/admin-user-blocking.md)。
+- 验收（2026-09-06 19:20 +08:00）：`userBlockStore`、`userBlockCommands`、`messageHandlerUserBlock` 及既有管理员路由回归通过；`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。全量 `npm test` 仍有既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js` 失败，本次未修改对应提示词治理和语音输入基线。
+
 ## Memory Embeddings 请求协议修复 2026-09-06 11:16 +08:00
 
 - 修复 `BAAI/bge-m3` Embeddings 请求经过共享 OpenAI-compatible HTTP 层时被误转换为 Chat Completions `messages` 的问题。

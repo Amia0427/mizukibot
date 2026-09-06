@@ -64,6 +64,7 @@ const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundT
 const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
 const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
 const { handleToolAuthorizationCommand } = require('./messageToolAuthorization');
+const userBlockStore = require('../utils/userBlockStore');
 const {
   appendInboundTimingLog,
   createInboundTimingLogger,
@@ -839,7 +840,8 @@ function createMessageHandler({
         clearGroupMute,
         setGroupMute,
         scheduleGroupMessage,
-        createScheduledCommand
+        createScheduledCommand,
+        userBlockStore
       });
     }
     return adminCoordinator;
@@ -884,6 +886,7 @@ function createMessageHandler({
   const handleMemoryOpsAdminCommand = (...args) => getAdminCoordinator().handleMemoryOpsAdminCommand(...args);
   const handleRestartAdminCommand = (...args) => getAdminCoordinator().handleRestartAdminCommand(...args);
   const handleQqScheduleAdminCommand = (...args) => getAdminCoordinator().handleQqScheduleAdminCommand(...args);
+  const handleUserBlockAdminCommand = (...args) => getAdminCoordinator().handleUserBlockAdminCommand(...args);
   const inboundConcurrency = inboundConcurrencyControllerOverride || createInboundConcurrencyController({
     globalLimit: config.INBOUND_GLOBAL_MAX_CONCURRENCY,
     generalLimit: config.INBOUND_GENERAL_MAX_CONCURRENCY,
@@ -1248,6 +1251,7 @@ function createMessageHandler({
     askToolTaskLocally,
     runBackgroundToolTask,
     handleAdminCommand,
+    handleUserBlockAdminCommand,
     handleMemoryOpsAdminCommand,
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
@@ -1532,6 +1536,28 @@ function createMessageHandler({
       config
     });
     if (shouldSkipSelfMessage(msg, config)) {
+      return;
+    }
+    const activeUserBlock = !isAdminUser(senderId)
+      ? userBlockStore.getActiveBlock(senderId)
+      : null;
+    if (activeUserBlock) {
+      appendTraceTiming('message_blocked', {
+        stage: 'message_blocked',
+        ...buildTraceBase(),
+        routePolicyKey: 'admin/block',
+        topRouteType: 'admin',
+        replyPath: 'user_blocked',
+        blockedUntil: Number(activeUserBlock.expiresAt || 0) || 0,
+        blockedBy: String(activeUserBlock.blockedBy || '').trim()
+      });
+      appendRequestCompleteTrace({
+        routePolicyKey: 'admin/block',
+        topRouteType: 'admin',
+        replyPath: 'user_blocked',
+        sent: false,
+        finalErrorCode: 'user_blocked'
+      });
       return;
     }
     recordPrivateProactiveActivity(senderId, chatType);

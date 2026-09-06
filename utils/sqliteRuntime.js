@@ -4,7 +4,8 @@ const SQLITE_MODULES = [
   { name: 'profileJournalDb', modulePath: './profileJournalDb' },
   { name: 'conversationVariables', modulePath: './conversationVariables' },
   { name: 'worldbookDb', modulePath: './worldbookDb' },
-  { name: 'localPromptRecall', modulePath: './localPromptRecall' }
+  { name: 'localPromptRecall', modulePath: './localPromptRecall' },
+  { name: 'userBlockStore', modulePath: './userBlockStore' }
 ];
 
 function closeLoadedSqliteConnections() {
