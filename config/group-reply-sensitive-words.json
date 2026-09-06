@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "politicalContextRequired": true,
+  "politicalContextRequired": false,
   "replacementText": "这句我先不发了，换个说法吧。",
   "vendorFiles": [
     "反动词库.txt",

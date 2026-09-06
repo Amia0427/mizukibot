@@ -16,19 +16,19 @@ function writeJson(filePath, value) {
 module.exports = (() => {
   const defaultConfig = loadGuardConfig();
   assert.strictEqual(defaultConfig.enabled, true);
-  assert.strictEqual(defaultConfig.politicalContextRequired, true);
+  assert.strictEqual(defaultConfig.politicalContextRequired, false);
   assert.deepStrictEqual(defaultConfig.vendorFiles, ['反动词库.txt', '政治类型.txt']);
 
   const defaultGuard = createGroupReplySensitiveGuard();
   const defaultPoliticalWords = loadVendorWords(undefined, defaultConfig.vendorFiles);
   assert.ok(defaultPoliticalWords.length > 0);
   assert.strictEqual(defaultGuard.enabled, true);
-  assert.strictEqual(defaultGuard.politicalContextRequired, true);
-  assert.strictEqual(defaultGuard.check('角色扮演里这个王国叫华国，今晚只是聊剧情设定。').blocked, false);
+  assert.strictEqual(defaultGuard.politicalContextRequired, false);
+  assert.strictEqual(defaultGuard.check('角色扮演里这个王国叫华国，今晚只是聊剧情设定。').blocked, true);
   assert.strictEqual(defaultGuard.check('角色扮演设定：这里提到8964，但只是剧情背景。').blocked, true);
   assert.strictEqual(defaultGuard.check('角色扮演设定：这里提到天安门事件，但只是剧情背景。').blocked, true);
   assert.strictEqual(defaultGuard.check('角色扮演设定：这里提到赵紫阳，但只是剧情背景。').blocked, true);
-  assert.strictEqual(defaultGuard.check('华国').blocked, false);
+  assert.strictEqual(defaultGuard.check('华国').blocked, true);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-sensitive-guard-'));
   const vendorDir = path.join(tempDir, 'vendor');

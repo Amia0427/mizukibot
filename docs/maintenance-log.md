@@ -2268,3 +2268,9 @@
 - 验收：`node tests\groupReplySensitiveGuard.test.js`、`node tests\messageReplyRuntimeFreshness.test.js`、`node tests\visualRenderModeration.test.js`、`node tests\smallTheaterModerationGate.test.js`、`node --check utils\groupReplySensitiveGuard.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。
 - 边界：管理员私聊豁免保持不变；未修改 `prompts\admin.txt`，未扩大到 Discord/Telegram/微信独立发送适配器，未推送远端。
 - 小目标已完成：实现提交 `08c9b010`；本次仅提交敏感词配置、统一 guard、回归测试和相关文档，未纳入并行工作区改动。
+## 运行维护 2026-09-06
+
+- 小目标：继续加强普通用户的通用政治敏感词防护，要求当前政治 vendor 词库命中时不区分现实政治、角色扮演或架空语境，统一阻断回复出口。
+- 最小修复：将 `config/group-reply-sensitive-words.json` 的 `politicalContextRequired` 设为 `false`；保留 `unconditionalWords` 的 8964/六四相关变体和领导人姓名补充，复用现有群聊、普通私聊、core/src 流式出口 guard。
+- 验收：政治 guard、消息出口、视觉渲染、小剧场定向测试以及 `npm run lint`、`npm run typecheck`、`git diff --check` 通过。
+- 边界：管理员私聊豁免保持不变；未修改 `prompts\admin.txt`，未扩大到其他平台独立发送适配器，未推送远端。
