@@ -2283,3 +2283,11 @@
 - 验收：sidecar 6 项单元测试、`pip check`、健康检查、Piper→瑞希 SVC 真实串联、Node Provider 真实 HTTP 请求和当前 `.env` 完整语音服务调用通过；完整服务将两段日文依次处理为 `accepted + record`，没有文字回退。QQ 语音定向测试、`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。
 - 未完成：真实 QQ 私聊/群聊客户端收音、Node 20 部署环境复验、CosyVoice 高质量后端、SVC 微调训练、Discord 和微信语音正式验收。完整 `npm test` 仍有两个既有 prompt manifest/allowlist 失败和一个既有语音输入超时配置期望不一致，本轮未越界修改。
 - 小目标已完成：验收文档已在前一提交中落库；sidecar 保持独立目录，模型权重、生成音频、`.env` 和其他并行工作区改动均未纳入提交，未推送远端。
+
+## 运行维护 2026-09-06 22:25 +08:00
+
+- 小目标：为 QQ 按需语音与瑞希本地音色能力编写可直接发布的更新公告和完整使用说明。
+- 文档：新增 `docs/qq-voice-update-announcement-2026-09-06.md`，包含 QQ 群公告短版、更新日志长版、普通用户触发示例、长文本与失败回退规则、管理员模型及主项目环境变量、启动顺序、HTTP/QQ 验收步骤、常见问题和当前能力边界。
+- 准确性边界：明确本地 Piper→瑞希 SVC→MP3 与 Node 服务调用已经验收，但真实 QQ 私聊和群聊客户端收音仍需管理员手动完成；未把 CosyVoice、SVC 微调训练、Discord 或微信语音描述为已上线。
+- 验收：公告文件存在、README 语音章节入口已写入、Markdown 差异检查通过；本轮不修改业务代码、模型权重、生成音频、`.env` 或其他并行开发内容。
+- 小目标已完成：公告正文已单独提交；本记录随后单独提交，README 入口保留在并行暂存区中，未提交或取消其他代理的改动，未推送远端。
