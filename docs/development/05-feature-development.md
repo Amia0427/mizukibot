@@ -24,13 +24,19 @@
 
 如果一个需求同时改变路由、工具和存储，先把它拆成三个可独立测试的行为，再由现有组合根连接。不要新增一个同时解析消息、调用模型、写文件和发送 QQ 回复的“服务类”。
 
-## 2.6 按需语音输出的当前实现边界（2026-09-05）
+## 2.6 按需语音输出的当前实现边界（2026-09-06 21:22 +08:00）
 
 本阶段先以 QQ 为可用目标，语音能力的稳定出站边界是 `src/platforms/qqAdapter.js`：私聊使用 `send_private_msg`，群聊使用 `send_group_msg`，消息段为 OneBot `record`，音频使用 MP3 Buffer 的 `base64://` 形式。`companion_voice_reply` 只接收文本，投递目标必须由当前入站消息上下文提供，不能接受模型传入的平台、用户或群 ID。
 
 Provider 放在 `src/features/companion-voice/provider.js`，通过 `COMPANION_VOICE_PROVIDER` 在外部 OpenAI-compatible TTS 与本地 HTTP TTS 中显式二选一；服务层负责分段、顺序、并发和文字回退。QQ 发送错误中，NapCat 连接前失败属于 `not_submitted`，响应无法判断时属于 `unknown`；后者禁止自动重发或文字补发。
 
-截至 2026-09-05，QQ 自动测试、lint、typecheck、密钥扫描和差异检查已通过，真实 TTS/QQ 客户端尚未在当前验收环境执行。完整 `npm test` 仍有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js`（`prompts/ADULT.txt` 未被 manifest/allowlist 引用）和 `voiceInputIngress.test.js`（既有 `VOICE_INPUT_*` 配置期望不一致）失败，本轮未扩大范围修复。Discord 附件、微信 outbox 文件发送和微信 `voice_item` 实验代码暂不视为完成能力，后续实现必须分别补平台定向测试和真实平台验收，不要把 QQ 的 `record` 结构直接复用到其他平台。
+本地模型 sidecar 独立放在 `D:\tts-models`，Node 主进程只持有 HTTP Provider 边界。当前最小实现使用 Piper 日文 ONNX 在 CPU 生成源 WAV，再使用瑞希 `mzk.pth`、ContentVec 和 RMVPE 在 CUDA 上完成 So-VITS-SVC 转换，最后通过 `imageio-ffmpeg` 内置 FFmpeg 输出 MP3；两个阶段分别由 `COMPANION_VOICE_LOCAL_TTS_ENABLED` 和 `COMPANION_VOICE_LOCAL_SVC_ENABLED` 控制，基础后端由 `LOCAL_TTS_BACKEND=piper|cosyvoice` 选择。
+
+旧版 So-VITS-SVC 与当前 torchaudio 的兼容处理只放在 sidecar 适配层：保留旧调用需要的 `set_audio_backend` 入口，并用 SoundFile 读取临时 WAV，未修改 vendor 源码、未降级已验证的 CUDA PyTorch。2026-09-06 实机验收完成了 Python 串联推理、HTTP `audio/mpeg` 响应和 Node Provider 真实调用；输出为 44.1 kHz MP3，已测峰值显存约 1.34 GB。完整语音服务使用当前 `.env` 将两段日文依次处理为 `accepted + record`，没有文字回退；QQ Provider、私聊/群聊 `record`、工具上下文和平台注册表定向测试通过。测试环境为 Node 24.14.1，而项目声明的 Node 20 本机未安装，因此 Node 20 仍需部署环境复验。
+
+`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。完整 `npm test` 的语音相关用例通过，但仍有 3 个既有失败：`agentPrompts.test.js`、`checkPromptsIntegration.test.js` 受 `prompts/ADULT.txt` 未被 manifest/allowlist 引用影响，`voiceInputIngress.test.js` 的既有超时配置期望不一致。
+
+真实 QQ 客户端收音、CosyVoice 后端、SVC 微调训练、Discord 附件、微信 outbox 文件发送和微信 `voice_item` 实验仍未完成。后续实现必须分别补平台定向测试和真实平台验收，不要把 QQ 的 `record` 结构直接复用到其他平台。
 
 ## 2. 项目级设计约束
 

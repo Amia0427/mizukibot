@@ -34,11 +34,23 @@ PLATFORM_GROUP_CONTEXT_MAX_MESSAGES=500
 
 `TG_PASSIVE_CHAT_IDS` 支持群 ID，也支持 `<chatId>:<topicId>` 精确开启某个 topic。`TG_ALLOWED_CHAT_IDS` 仅保留旧 Telegram 门面的兼容配置；当前主适配器的私聊向所有用户开放，仍受现有配额、并发、工具授权和安全策略约束。
 
-## 2.1 按需语音输出状态（2026-09-05）
+## 2.1 按需语音输出状态（2026-09-06 21:22 +08:00）
 
 当前正式可用范围只有 QQ 私聊和群聊：启用 `COMPANION_VOICE_ENABLED=true` 后，明确要求语音时由 `companion_voice_reply` 生成 MP3，并通过 NapCat OneBot `record` 发送。外部 TTS 和本地 HTTP TTS 通过 `COMPANION_VOICE_PROVIDER` 显式选择，不会自动切换；普通文字回复、主动任务和没有当前投递目标的调用不会启动语音编排。
 
-Discord 语音附件、微信私聊音频文件 outbox 和微信原生 `voice_item` 当前均未完成正式验收，部署时不要按“多渠道语音已上线”对外承诺。微信原生路径默认关闭，FFmpeg、微信媒体上传字段和真实客户端显示仍属于后续实验范围。
+本机最小服务位于 `D:\tts-models`，使用 Windows 原生 Python 运行，不使用容器。当前链路是 Piper `ja_JA-hi_fi_captain-medium` CPU 推理 → 瑞希 `mzk.pth` So-VITS-SVC CUDA 推理 → `imageio-ffmpeg` 内置 FFmpeg 输出 MP3；启动 `D:\tts-models\run.cmd` 后，主项目配置如下：
+
+```dotenv
+COMPANION_VOICE_ENABLED=true
+COMPANION_VOICE_PROVIDER=local
+COMPANION_VOICE_LOCAL_API_URL=http://127.0.0.1:6843/synthesize
+COMPANION_VOICE_NAME=mizuki
+COMPANION_VOICE_SPEED=1
+```
+
+2026-09-06 实机验收已确认 sidecar 健康检查为 `ready`、Python 串联输出 44.1 kHz MP3、峰值显存约 1.34 GB，Node 本地 Provider 的真实日文请求返回 56,886 字节 MP3；完整语音服务使用当前 `.env` 将两段日文依次处理为 `accepted + record`，没有文字回退。QQ 私聊/群聊 OneBot 结构和语音工具定向测试通过，但真实 QQ 客户端收音仍待人工确认。
+
+CosyVoice 高质量基础 TTS、SVC 微调训练、Discord 语音附件、微信私聊音频文件 outbox 和微信原生 `voice_item` 当前均未完成正式验收，部署时不要按“多渠道语音已上线”对外承诺。微信原生路径默认关闭，微信媒体上传字段和真实客户端显示仍属于后续实验范围。
 
 ## 3. 身份绑定
 

@@ -13,13 +13,13 @@
 - `MEMORY_EMBEDDING_API_BASE_URL` 继续使用完整的 `/v1/embeddings` 地址；Embedding 客户端会声明 `__preferredProtocol=embeddings`，请求体保留 `model` 与 `input`，不影响普通 Chat/Responses 请求归一化。
 - 验收：Embedding 协议、客户端回归测试通过；真实硅基流动 `.cn` 端点返回 HTTP 200 和 1024 维向量；未切换到当前密钥不兼容的 `.com` 地址。
 
-## 按需语音输出（QQ 第一阶段）2026-09-05
+## 按需语音输出（QQ 第一阶段）2026-09-06 21:22 +08:00
 
 - 当前可用范围：QQ 私聊和群聊。用户明确要求“语音”“朗读”或“说给我听”时，`companion_voice_reply` 才会生成 MP3，并通过 NapCat OneBot `record` 消息发送；普通回复不会自动语音化。
 - Provider 可在 `COMPANION_VOICE_PROVIDER=external|local` 中显式选择：`external` 使用 OpenAI-compatible `/audio/speech`，`local` 使用本地 HTTP TTS；两者不会自动互相切换。启用前配置 `COMPANION_VOICE_ENABLED=true`、对应 URL、音色和必要的 API Key。
 - 文本按句末标点切分，每段最多 300 字、单次最多 4 段；同一调用内按顺序发送，TTS 临时失败或 QQ 明确未提交时按片段文字回退，发送状态不确定时不自动重发。
-- 自动验收（2026-09-05）：QQ 语音 Provider、QQ 私聊/群聊 `record`、工具上下文和授权定向测试通过；`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。完整 `npm test` 仍有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js`（`prompts/ADULT.txt` 未被 manifest/allowlist 引用）和 `voiceInputIngress.test.js`（既有 `VOICE_INPUT_*` 配置期望不一致）失败，本轮未扩大范围修复；真实 TTS 服务和真实 QQ 客户端收音仍需在部署环境配置后手动验证。
-- 当前未完成：Discord 音频附件、微信私聊文件 outbox、微信原生 `voice_item` 实验及其真实客户端验收；这些路径不作为本阶段可用能力，详见[多平台部署说明](docs/multi-platform-deployment.md)和[实施记录](docs/superpowers/plans/2026-09-05-multichannel-on-demand-voice.md)。
+- 本地实机验收（2026-09-06）：`D:\tts-models` 已以 Windows 原生方式运行 Piper 日文 ONNX → 瑞希 So-VITS-SVC → MP3 sidecar；Node 本地 Provider 对 `http://127.0.0.1:6843/synthesize` 的真实日文请求返回 56,886 字节 MP3，完整语音服务使用当前 `.env` 将两段日文依次处理为 `accepted + record`，没有文字回退。SVC 使用 CUDA、ContentVec 和 RMVPE，串联输出为 44.1 kHz，已测峰值显存约 1.34 GB。
+- QQ Provider、私聊/群聊 `record`、工具上下文和授权定向测试已通过，`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。完整 `npm test` 仍有 3 个既有失败：`agentPrompts.test.js`、`checkPromptsIntegration.test.js` 受未纳入 manifest/allowlist 的 `prompts/ADULT.txt` 影响，`voiceInputIngress.test.js` 存在既有超时配置期望不一致；真实 QQ 客户端收音仍待人工确认。当前未完成：CosyVoice 高质量后端、SVC 微调训练、Discord 音频附件和微信语音的正式验收，详见[多平台部署说明](docs/multi-platform-deployment.md)、[多渠道实施记录](docs/superpowers/plans/2026-09-05-multichannel-on-demand-voice.md)和[本地模型实施记录](docs/superpowers/plans/2026-09-05-local-tts-svc-sidecar.md)。
 
 ## QQ 语音输入与歌词文本评价 2026-09-04 17:40 +08:00
 
