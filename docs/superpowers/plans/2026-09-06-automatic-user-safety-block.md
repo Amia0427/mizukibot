@@ -167,13 +167,13 @@ Run: `git diff -- README.md docs/admin-user-blocking.md docs/superpowers/plans/2
 
 Expected: 只暂存自动安全封禁目标文件，不覆盖或提交其他代理改动。
 
-- [ ] **Step 3: Commit implementation and initial documentation**
+- [x] **Step 3: Commit implementation and initial documentation**
 
 Run: `git add <automatic-safety implementation, tests, and initial documentation files>`
 
 Run: `git commit -m "feat: add automatic safety blocks"`
 
-- [ ] **Step 4: Commit verified acceptance record**
+- [x] **Step 4: Commit verified acceptance record**
 
 Run: `git add README.md docs/admin-user-blocking.md docs/superpowers/plans/2026-09-06-automatic-user-safety-block.md`
 
@@ -187,3 +187,6 @@ Run: `git commit -m "docs: record automatic safety block acceptance"`
 - 静态检查通过：`npm run lint`、`npm run typecheck`、`git diff --check`。
 - 全量 `npm test` 完成；仅有既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js`、`voiceInputIngress.test.js` 失败，原因分别为 prompt 清单中的 `ADULT.txt` 基线问题、同一 prompt 清单问题，以及语音输入现有 600 秒配置与旧 60 秒断言不一致。本目标未修改这些范围。
 - 独立边界复核通过：暴力/性骚扰上下文、来源边界、垃圾复合词、15 分钟事件去重、精确 TTL 和用户窗口回收均已覆盖。
+
+- 实现提交：`25f229be`（`feat: add automatic safety blocks`）。
+- 文档验收提交说明：`docs: record automatic safety block acceptance`。

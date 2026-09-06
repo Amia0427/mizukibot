@@ -50,3 +50,5 @@
 自动安全封禁验收（2026-09-06）：`inboundUserSafety`、`userBlockStore`、`userBlockCommands`、`messageHandlerUserBlock`、`messageHandlerAutomaticSafetyBlock`、`continuousMessagePreprocessor`、`continuousMessagePreparedEntry`、`groupReplySensitiveGuard`、`routerSafetyGuards` 和 `safetyRestrictionDetection` 定向测试通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过。额外边界复核确认否定、制止、举报、引用后独立威胁、正常垃圾复合词、15 分钟事件去重、精确过期和窗口回收均符合预期。
 
 全量 `npm test` 已运行完成，除本功能无关的既有基线失败外其余测试通过：`agentPrompts.test.js`（临时 prompt 资产 `ADULT.txt` 未被清单引用）、`checkPromptsIntegration.test.js`（同一 `ADULT.txt` 清单问题）和 `voiceInputIngress.test.js`（现有语音输入超时基线断言为 60 秒、当前配置为 600 秒）。本功能未修改这些范围。
+
+实现提交：`25f229be`（`feat: add automatic safety blocks`）。

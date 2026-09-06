@@ -6,7 +6,7 @@
 - 审核范围为私聊，以及群聊中 @、回复或点名机器人的当前消息、引用消息和转发消息文字；不审核图片，不新增模型调用或环境变量。
 - 政治内容、明确恶意请求、定向暴力威胁和定向性骚扰一次命中即封禁；普通辱骂或挑衅在 15 分钟内两条命中后封禁，窗口最多保留 5 条消息。
 - 自动封禁固定 15 分钟，并回复“您已被瑞希临时封禁，请十五分钟后再来”；管理员 `/block` 创建的手动封禁仍静默，`/unblock` 可解除两类封禁。
-- 验收（2026-09-06）：审核器、封禁存储、管理员豁免、入口顺序、连续消息复用及相关路由回归通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过。全量 `npm test` 仅保留既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js` 失败，本次未修改对应提示词治理和语音输入基线。详见[管理员用户封禁](docs/admin-user-blocking.md)和[自动安全封禁实施计划](docs/superpowers/plans/2026-09-06-automatic-user-safety-block.md)。
+- 验收（2026-09-06）：审核器、封禁存储、管理员豁免、入口顺序、连续消息复用及相关路由回归通过；`npm run lint`、`npm run typecheck`、`git diff --check` 通过。全量 `npm test` 仅保留既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js` 失败，本次未修改对应提示词治理和语音输入基线。实现提交：`25f229be`；详见[管理员用户封禁](docs/admin-user-blocking.md)和[自动安全封禁实施计划](docs/superpowers/plans/2026-09-06-automatic-user-safety-block.md)。
 
 ## 管理员用户封禁指令 2026-09-06 19:20 +08:00
 
@@ -28,6 +28,7 @@
 - 文本按句末标点切分，每段最多 300 字、单次最多 4 段；同一调用内按顺序发送，TTS 临时失败或 QQ 明确未提交时按片段文字回退，发送状态不确定时不自动重发。
 - 本地实机验收（2026-09-06）：`D:\tts-models` 已以 Windows 原生方式运行 Piper 日文 ONNX → 瑞希 So-VITS-SVC → MP3 sidecar；Node 本地 Provider 对 `http://127.0.0.1:6843/synthesize` 的真实日文请求返回 56,886 字节 MP3，完整语音服务使用当前 `.env` 将两段日文依次处理为 `accepted + record`，没有文字回退。SVC 使用 CUDA、ContentVec 和 RMVPE，串联输出为 44.1 kHz，已测峰值显存约 1.34 GB。
 - QQ Provider、私聊/群聊 `record`、工具上下文和授权定向测试已通过，`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。完整 `npm test` 仍有 3 个既有失败：`agentPrompts.test.js`、`checkPromptsIntegration.test.js` 受未纳入 manifest/allowlist 的 `prompts/ADULT.txt` 影响，`voiceInputIngress.test.js` 存在既有超时配置期望不一致；真实 QQ 客户端收音仍待人工确认。当前未完成：CosyVoice 高质量后端、SVC 微调训练、Discord 音频附件和微信语音的正式验收，详见[多平台部署说明](docs/multi-platform-deployment.md)、[多渠道实施记录](docs/superpowers/plans/2026-09-05-multichannel-on-demand-voice.md)和[本地模型实施记录](docs/superpowers/plans/2026-09-05-local-tts-svc-sidecar.md)。
+- 面向 QQ 用户的可发布文案、触发示例、管理员配置、启动验收和排障步骤见[QQ 按需语音更新公告及使用说明](docs/qq-voice-update-announcement-2026-09-06.md)。
 
 ## QQ 语音输入与歌词文本评价 2026-09-04 17:40 +08:00
 
