@@ -1,5 +1,11 @@
 # MizukiBot
 
+## Memory Embeddings 请求协议修复 2026-09-06 11:16 +08:00
+
+- 修复 `BAAI/bge-m3` Embeddings 请求经过共享 OpenAI-compatible HTTP 层时被误转换为 Chat Completions `messages` 的问题。
+- `MEMORY_EMBEDDING_API_BASE_URL` 继续使用完整的 `/v1/embeddings` 地址；Embedding 客户端会声明 `__preferredProtocol=embeddings`，请求体保留 `model` 与 `input`，不影响普通 Chat/Responses 请求归一化。
+- 验收：Embedding 协议、客户端回归测试通过；真实硅基流动 `.cn` 端点返回 HTTP 200 和 1024 维向量；未切换到当前密钥不兼容的 `.com` 地址。
+
 ## 按需语音输出（QQ 第一阶段）2026-09-05
 
 - 当前可用范围：QQ 私聊和群聊。用户明确要求“语音”“朗读”或“说给我听”时，`companion_voice_reply` 才会生成 MP3，并通过 NapCat OneBot `record` 消息发送；普通回复不会自动语音化。

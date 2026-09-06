@@ -1,12 +1,19 @@
 # Env Configuration
 
-更新时间：2026-09-04 17:40 +08:00
+更新时间：2026-09-06 11:16 +08:00
 
 ## 模型协议边界
 
 - Gemini Native 已永久禁用。Gemini 模型名和历史 `gemini_native`/`gemini`/`google_gemini` provider 别名统一按 `openai_compatible` 处理，最终请求使用 `/chat/completions`。
 - `OPENAI_MAIN_API_MODE=responses` 仍可被旧配置读取，但不再选择 Responses 协议；只有 Anthropic provider 使用 `/v1/messages`。旧 `generateContent`、`streamGenerateContent` 和 `/responses` URL 会在请求准备阶段归一化。
 - 2026-09-03：不可达的 Gemini Native 请求适配器和 `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED`、`GEMINI_SYSTEM_PROMPT_PATH`、`GEMINI_ROLEPLAY_GUIDELINES_*` 失效配置已删除；下方早期记录只描述历史行为。
+
+## Memory Embeddings
+
+- `MEMORY_EMBEDDING_MODEL` 配置 Embedding 模型，当前可使用 `BAAI/bge-m3`。
+- `MEMORY_EMBEDDING_API_BASE_URL` 必须指向 OpenAI-compatible Embeddings 端点，例如 `https://api.siliconflow.cn/v1/embeddings`；Embedding 请求体使用 `model` 和 `input`，不会按 Chat Completions 处理。
+- Embedding 客户端通过内部 `__preferredProtocol=embeddings` 告知共享 HTTP 层保留协议；该字段只用于本地请求准备，不会发送给上游。
+- 验收（2026-09-06 11:16 +08:00）：`BAAI/bge-m3` 真实请求返回 HTTP 200、批量向量维度 1024；`providerRequestNormalization` 和 `memoryEmbeddingClient` 回归测试通过。
 
 ## 管理员模型
 

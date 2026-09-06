@@ -67,6 +67,8 @@ function mergeAnthropicRequestHeaders(baseHeaders = null, overrideHeaders = null
 
 async function prepareRequest(url, body = {}) {
   const explicitProvider = normalizeText(body?.__provider || body?.__apiProvider);
+  const preferredProtocol = normalizeText(body?.__preferredProtocol).toLowerCase();
+  const isEmbeddingsRequest = preferredProtocol === 'embeddings';
   const provider = explicitProvider
     ? normalizeApiProvider(explicitProvider)
     : getApiProvider(url, body?.model || config.AI_MODEL, { preferUnifiedResponses: true });
@@ -113,8 +115,10 @@ async function prepareRequest(url, body = {}) {
       if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
       else delete requestBody.reasoning_effort;
     }
-    const requestUrl = ensureOpenAICompatibleChatCompletionsUrl(url, body?.model || config.AI_MODEL);
-    const finalRequestBody = requestBodyLooksLikeChatCompletion(requestBody)
+    const requestUrl = isEmbeddingsRequest
+      ? normalizeText(url)
+      : ensureOpenAICompatibleChatCompletionsUrl(url, body?.model || config.AI_MODEL);
+    const finalRequestBody = !isEmbeddingsRequest && requestBodyLooksLikeChatCompletion(requestBody)
       ? buildChatCompletionsRequestBody(requestBody)
       : requestBody;
     return {

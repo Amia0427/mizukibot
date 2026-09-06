@@ -455,6 +455,21 @@ module.exports = (async () => {
     assert.ok(Array.isArray(responsesEndpoint.requestBody.messages));
     assert.strictEqual(responsesEndpoint.requestBody.messages[0].content, 'responses must be normalized to chat completions');
 
+    const embeddingsEndpoint = await httpClient.prepareRequest(
+      'https://embedding.example/v1/embeddings',
+      {
+        model: 'BAAI/bge-m3',
+        input: ['embedding input'],
+        __preferredProtocol: 'embeddings'
+      }
+    );
+    assert.strictEqual(embeddingsEndpoint.provider, 'openai_compatible');
+    assert.strictEqual(embeddingsEndpoint.requestUrl, 'https://embedding.example/v1/embeddings');
+    assert.deepStrictEqual(embeddingsEndpoint.requestBody, {
+      model: 'BAAI/bge-m3',
+      input: ['embedding input']
+    });
+
     delete process.env.MODEL_HTTP_USER_AGENT;
     delete process.env.MAIN_REPLY_USER_AGENT;
     delete process.env.HTTP_USER_AGENT;

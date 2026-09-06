@@ -50,6 +50,7 @@ module.exports = (async () => {
   let calls = 0;
   httpClient.postWithRetry = async (_url, body) => {
     assert.strictEqual(body.__disableTlsImpersonation, true);
+    assert.strictEqual(body.__preferredProtocol, 'embeddings');
     calls += 1;
     const error = new Error('socket timeout');
     error.code = 'ETIMEDOUT';

@@ -1,3 +1,11 @@
+## 运行维护 2026-09-06 11:16 +08:00
+
+- 小目标：修复 `BAAI/bge-m3` Embedding 接口连续 HTTP 400 并触发持续降级的问题。
+- 根因：`memoryEmbeddingClient` 原本构造了正确的 `{ model, input }`，但共享 `prepareRequest()` 将所有带 `input` 的 OpenAI-compatible 请求识别为 Chat/Responses 请求，改写为 `{ model, messages, stream }`；硅基流动 `/v1/embeddings` 因参数不符合 Embeddings 协议返回 HTTP 400。
+- 修复：Embedding 客户端增加内部 `__preferredProtocol=embeddings`；共享 HTTP 层对该协议保留原始 Embeddings URL 和 `input` 请求体，其他 Chat/Responses 归一化逻辑保持不变。
+- 验收：`node scripts/run-tests.js tests/providerRequestNormalization.test.js tests/memoryEmbeddingClient.test.js` 通过；真实 `https://api.siliconflow.cn/v1/embeddings` 批量请求返回 HTTP 200、8 个 1024 维向量；项目客户端复现不再发送 `messages`。
+- 边界：未修改 `.env` 中的 `.cn` 服务地址和密钥，未切换到当前密钥返回 HTTP 401 的 `.com` 地址；未推送远端。
+
 ## 运行维护 2026-08-31 17:44 +08:00
 
 - 小目标：修复流式分段发送顺序混乱，保证同一流按增量顺序切段，并保证同群并发回复不互相插入。
