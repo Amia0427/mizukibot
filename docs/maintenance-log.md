@@ -2267,3 +2267,4 @@
 - 最小修复：新增 `unconditionalWords` 配置并在 `utils/groupReplySensitiveGuard.js` 中单独处理；命中该列表即替换，其他政治词继续沿用 `politicalContextRequired=true` 的现实政治语境门槛，避免把普通架空词一并拦截。群聊、普通用户私聊、core 流式和 src 流式继续复用同一出口 guard；视觉渲染配置同步补齐同一组显式变体。
 - 验收：`node tests\groupReplySensitiveGuard.test.js`、`node tests\messageReplyRuntimeFreshness.test.js`、`node tests\visualRenderModeration.test.js`、`node tests\smallTheaterModerationGate.test.js`、`node --check utils\groupReplySensitiveGuard.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。
 - 边界：管理员私聊豁免保持不变；未修改 `prompts\admin.txt`，未扩大到 Discord/Telegram/微信独立发送适配器，未推送远端。
+- 小目标已完成：实现提交 `08c9b010`；本次仅提交敏感词配置、统一 guard、回归测试和相关文档，未纳入并行工作区改动。
