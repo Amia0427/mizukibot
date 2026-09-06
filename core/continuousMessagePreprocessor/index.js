@@ -326,6 +326,27 @@ function normalizeMessageForDownstream(baseMsg = {}, merged = {}, effectiveBotQQ
   };
 }
 
+function clonePreparedEntry(entry = {}) {
+  return {
+    ...entry,
+    imageUrls: Array.isArray(entry.imageUrls) ? entry.imageUrls.slice() : [],
+    imageRefMap: entry.imageRefMap && typeof entry.imageRefMap === 'object'
+      ? { ...entry.imageRefMap }
+      : {},
+    replyContext: cloneReplyContext(entry.replyContext),
+    forwardIds: Array.isArray(entry.forwardIds) ? entry.forwardIds.slice() : [],
+    forwardImageUrls: Array.isArray(entry.forwardImageUrls) ? entry.forwardImageUrls.slice() : [],
+    forwardImageRefMap: entry.forwardImageRefMap && typeof entry.forwardImageRefMap === 'object'
+      ? { ...entry.forwardImageRefMap }
+      : {},
+    qqCardUrls: Array.isArray(entry.qqCardUrls) ? entry.qqCardUrls.slice() : [],
+    cardContexts: normalizeCardContexts(entry.cardContexts),
+    expansionState: entry.expansionState && typeof entry.expansionState === 'object'
+      ? { ...entry.expansionState }
+      : undefined
+  };
+}
+
 function buildMergedMessagePayload(entries = [], options = {}) {
   const texts = [];
   const attachmentPrompts = [];
@@ -385,6 +406,7 @@ function buildMergedMessagePayload(entries = [], options = {}) {
   }
 
   const normalizedCardContexts = normalizeCardContexts(cardContexts);
+  const entriesWithForward = entries.filter((entry) => Array.isArray(entry?.forwardIds) && entry.forwardIds.length > 0);
   return {
     sessionKey: options.sessionKey || '',
     text,
@@ -405,7 +427,15 @@ function buildMergedMessagePayload(entries = [], options = {}) {
     forwardImageRefMap,
     qqCardUrls: Array.from(new Set(qqCardUrls)),
     cardContexts: normalizedCardContexts,
-    cardOnly: normalizedCardContexts.length > 0 && entries.every((entry) => entry?.cardOnly === true)
+    cardOnly: normalizedCardContexts.length > 0 && entries.every((entry) => entry?.cardOnly === true),
+    expansionState: {
+      reply: replyContext ? 'resolved' : (replyMessageId ? 'pending' : 'skipped'),
+      forward: entriesWithForward.length > 0
+        && entriesWithForward.every((entry) => entry.expansionState?.forward === 'resolved')
+        ? 'resolved'
+        : (forwardIds.length > 0 ? 'pending' : 'skipped'),
+      card: normalizedCardContexts.length > 0 || qqCardUrls.length > 0 ? 'pending' : 'skipped'
+    }
   };
 }
 
@@ -490,6 +520,7 @@ async function enrichEntryFromReply(entry, options = {}) {
 
 async function enrichEntryFromForward(entry, options = {}) {
   if (!config.CONTINUOUS_MESSAGE_FORWARD_EXPANSION_ENABLED) return entry;
+  if (entry.expansionState?.forward === 'resolved') return entry;
   const ids = Array.isArray(entry.forwardIds) ? entry.forwardIds.filter(Boolean) : [];
   if (!ids.length) return entry;
   if (!canUseNapCatActionClient(options)) {
@@ -1064,11 +1095,13 @@ function createContinuousMessagePreprocessor(options = {}) {
       sessionKey,
       messageId: normalizeText(msg?.message_id)
     };
-    const entry = cheapParseMessageEntry(msg, {
-      ...sharedResolveOptions,
-      effectiveBotQQ,
-      ...imageMemoryContext
-    });
+    const entry = context.preparedEntry && typeof context.preparedEntry === 'object'
+      ? clonePreparedEntry(context.preparedEntry)
+      : cheapParseMessageEntry(msg, {
+          ...sharedResolveOptions,
+          effectiveBotQQ,
+          ...imageMemoryContext
+        });
     entry.freshnessSessionKey = freshnessSessionKey;
     entry.freshnessVersion = freshnessVersion;
     const bypass = isCommandBypass(msg, {

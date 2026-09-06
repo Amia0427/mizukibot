@@ -66,6 +66,12 @@ const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
 const { handleToolAuthorizationCommand } = require('./messageToolAuthorization');
 const userBlockStore = require('../utils/userBlockStore');
 const {
+  AUTOMATIC_BLOCK_DURATION_MS,
+  AUTOMATIC_BLOCK_NOTICE,
+  AUTOMATIC_BLOCK_SOURCE,
+  createInboundUserSafetyReviewer
+} = require('./inboundUserSafety');
+const {
   appendInboundTimingLog,
   createInboundTimingLogger,
   createMessageTelemetryCoordinator,
@@ -663,6 +669,7 @@ function createMessageHandler({
   triggerRemoteRestartOverride = null,
   smallTheaterRuntimeOverride = null,
   privateStatusBarRuntimeOverride = null,
+  inboundUserSafetyReviewerOverride = null,
   groupContextStore = null
 }) {
   const {
@@ -671,6 +678,10 @@ function createMessageHandler({
   } = require('./smallTheater');
   const { createPrivateStatusBarRuntime } = require('./privateStatusBar');
   const globalNapCatActionClient = actionClient;
+  const inboundUserSafetyReviewer = inboundUserSafetyReviewerOverride || createInboundUserSafetyReviewer({
+    actionClient: globalNapCatActionClient,
+    config
+  });
   const smallTheaterRuntime = smallTheaterRuntimeOverride || createSmallTheaterRuntime({
     config,
     actionClient: globalNapCatActionClient
@@ -1401,6 +1412,23 @@ function createMessageHandler({
     });
   };
 
+  function sendAutomaticBlockNotice({ chatType, groupId, senderId, triggerReason }) {
+    return sendGroupReply({
+      chatType,
+      groupId,
+      userId: senderId,
+      senderId,
+      replyText: AUTOMATIC_BLOCK_NOTICE,
+      atSender: !isPrivateChatType(chatType),
+      retries: 1,
+      waitMs: 300,
+      source: AUTOMATIC_BLOCK_SOURCE,
+      routePolicyKey: 'safety/automatic-block',
+      triggerReason,
+      topRouteType: 'safety'
+    });
+  }
+
   async function maybeSendReasoningForward(replyEnvelope = {}, context = {}) {
     const reasoningText = String(replyEnvelope?.reasoningText || '');
     if (!reasoningText.trim()) return false;
@@ -1538,27 +1566,118 @@ function createMessageHandler({
     if (shouldSkipSelfMessage(msg, config)) {
       return;
     }
-    const activeUserBlock = !isAdminUser(senderId)
-      ? userBlockStore.getActiveBlock(senderId)
-      : null;
-    if (activeUserBlock) {
-      appendTraceTiming('message_blocked', {
-        stage: 'message_blocked',
-        ...buildTraceBase(),
-        routePolicyKey: 'admin/block',
-        topRouteType: 'admin',
-        replyPath: 'user_blocked',
-        blockedUntil: Number(activeUserBlock.expiresAt || 0) || 0,
-        blockedBy: String(activeUserBlock.blockedBy || '').trim()
+    const effectiveBotQQ = resolveEffectiveBotQQ(msg, config);
+    const senderIsAdmin = isAdminUser(senderId);
+    let preparedEntry;
+    if (!senderIsAdmin) {
+      const activeUserBlock = userBlockStore.getActiveBlock(senderId);
+      if (activeUserBlock) {
+        const blockSource = String(activeUserBlock.blockSource || 'manual').trim() || 'manual';
+        const automaticBlock = blockSource === AUTOMATIC_BLOCK_SOURCE;
+        const routePolicyKey = automaticBlock ? 'safety/automatic-block' : 'admin/block';
+        const topRouteType = automaticBlock ? 'safety' : 'admin';
+        let shouldNotify = automaticBlock && isPrivateChatType(chatType);
+        if (automaticBlock && !shouldNotify) {
+          const blockedEntry = await inboundUserSafetyReviewer.prepareEntry(msg, {
+            actionClient: globalNapCatActionClient,
+            effectiveBotQQ
+          });
+          shouldNotify = await inboundUserSafetyReviewer.isBotConversation({
+            entry: blockedEntry,
+            chatType,
+            botQQ: effectiveBotQQ
+          });
+        }
+        const sent = shouldNotify
+          ? await sendAutomaticBlockNotice({
+              chatType,
+              groupId,
+              senderId,
+              triggerReason: 'active_automatic_safety_block'
+            })
+          : false;
+        appendTraceTiming('message_blocked', {
+          stage: 'message_blocked',
+          ...buildTraceBase(),
+          routePolicyKey,
+          topRouteType,
+          replyPath: 'user_blocked',
+          reasonCode: String(activeUserBlock.reasonCode || '').trim(),
+          severity: '',
+          windowSize: 0,
+          expiresAt: Number(activeUserBlock.expiresAt || 0) || 0,
+          source: blockSource
+        });
+        appendRequestCompleteTrace({
+          routePolicyKey,
+          topRouteType,
+          replyPath: 'user_blocked',
+          sent: Boolean(sent),
+          finalErrorCode: 'user_blocked'
+        });
+        return;
+      }
+
+      preparedEntry = await inboundUserSafetyReviewer.prepareEntry(msg, {
+        actionClient: globalNapCatActionClient,
+        effectiveBotQQ
       });
-      appendRequestCompleteTrace({
-        routePolicyKey: 'admin/block',
-        topRouteType: 'admin',
-        replyPath: 'user_blocked',
-        sent: false,
-        finalErrorCode: 'user_blocked'
-      });
-      return;
+      const botConversation = isPrivateChatType(chatType)
+        || await inboundUserSafetyReviewer.isBotConversation({
+          entry: preparedEntry,
+          chatType,
+          botQQ: effectiveBotQQ
+        });
+      if (botConversation) {
+        const reviewedAt = Date.now();
+        const review = await inboundUserSafetyReviewer.review({
+          userId: String(senderId || '').trim(),
+          entry: preparedEntry,
+          now: reviewedAt
+        });
+        if (review?.blocked === true) {
+          let finalBlock = userBlockStore.getActiveBlock(senderId);
+          if (!finalBlock) {
+            finalBlock = userBlockStore.blockUser({
+              userId: senderId,
+              durationMs: AUTOMATIC_BLOCK_DURATION_MS,
+              blockedBy: 'system',
+              blockSource: AUTOMATIC_BLOCK_SOURCE,
+              reasonCode: String(review.reasonCode || '').trim(),
+              now: reviewedAt
+            });
+          }
+          const blockSource = String(finalBlock.blockSource || 'manual').trim() || 'manual';
+          const sent = blockSource === AUTOMATIC_BLOCK_SOURCE
+            ? await sendAutomaticBlockNotice({
+                chatType,
+                groupId,
+                senderId,
+                triggerReason: 'automatic_safety_review'
+              })
+            : false;
+          appendTraceTiming('automatic_safety_block', {
+            stage: 'automatic_safety_block',
+            ...buildTraceBase(),
+            routePolicyKey: 'safety/automatic-block',
+            topRouteType: 'safety',
+            replyPath: 'automatic_safety_block',
+            reasonCode: String(review.reasonCode || '').trim(),
+            severity: String(review.severity || '').trim(),
+            windowSize: Math.max(0, Number(review.windowSize || 0) || 0),
+            expiresAt: Number(finalBlock.expiresAt || 0) || 0,
+            source: blockSource
+          });
+          appendRequestCompleteTrace({
+            routePolicyKey: 'safety/automatic-block',
+            topRouteType: 'safety',
+            replyPath: 'automatic_safety_block',
+            sent: Boolean(sent),
+            finalErrorCode: 'automatic_safety_block'
+          });
+          return;
+        }
+      }
     }
     recordPrivateProactiveActivity(senderId, chatType);
 
@@ -1619,7 +1738,7 @@ function createMessageHandler({
       chatType,
       groupId,
       senderId,
-      botQQ: resolveEffectiveBotQQ(msg, config)
+      botQQ: effectiveBotQQ
     });
     if (luckinHandled) {
       appendRequestCompleteTrace({
@@ -1630,7 +1749,7 @@ function createMessageHandler({
       });
       return;
     }
-    const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
+    const createCommandText = stripLeadingCqControlSegments(rawMessageText, effectiveBotQQ);
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
       const createAgentExecutor = getCreateAgentExecutorModule();
       const legacyCreateAllowed = createAgentExecutor.isCreateAgentUserAllowed(senderId);
@@ -1937,11 +2056,11 @@ function createMessageHandler({
       return;
     }
 
-    const effectiveBotQQ = resolveEffectiveBotQQ(msg, config);
     const preprocessed = await continuousMessagePreprocessor.handleMessage(msg, {
       actionClient: globalNapCatActionClient,
       effectiveBotQQ,
-      isAdminUser: isAdminUser(senderId),
+      isAdminUser: senderIsAdmin,
+      preparedEntry,
       freshnessSessionKey: rawInboundFreshnessSessionKey,
       freshnessVersion: rawInboundFreshnessVersion
     });

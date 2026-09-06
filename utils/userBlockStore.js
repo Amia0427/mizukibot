@@ -34,10 +34,20 @@ function initSchema(db) {
       expires_at INTEGER NOT NULL DEFAULT 0,
       blocked_by TEXT NOT NULL,
       blocked_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      block_source TEXT NOT NULL DEFAULT 'manual',
+      reason_code TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_user_blocks_expires_at ON user_blocks(expires_at);
   `);
+
+  const columns = new Set(db.pragma('table_info(user_blocks)').map((column) => column.name));
+  if (!columns.has('block_source')) {
+    db.exec("ALTER TABLE user_blocks ADD COLUMN block_source TEXT NOT NULL DEFAULT 'manual'");
+  }
+  if (!columns.has('reason_code')) {
+    db.exec("ALTER TABLE user_blocks ADD COLUMN reason_code TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 function getDb(options = {}) {
@@ -74,7 +84,9 @@ function normalizeRow(row) {
     expiresAt: Number(row.expires_at || 0) || 0,
     blockedBy: String(row.blocked_by || '').trim(),
     blockedAt: Number(row.blocked_at || 0) || 0,
-    updatedAt: Number(row.updated_at || 0) || 0
+    updatedAt: Number(row.updated_at || 0) || 0,
+    blockSource: String(row.block_source || 'manual').trim() || 'manual',
+    reasonCode: String(row.reason_code || '').trim()
   };
 }
 
@@ -86,7 +98,7 @@ function getActiveBlock(userId = '', options = {}) {
   if (!fs.existsSync(dbFilePath)) return null;
 
   const row = getDb(options).prepare(`
-    SELECT user_id, expires_at, blocked_by, blocked_at, updated_at
+    SELECT user_id, expires_at, blocked_by, blocked_at, updated_at, block_source, reason_code
     FROM user_blocks
     WHERE user_id = ?
   `).get(normalizedUserId);
@@ -95,9 +107,19 @@ function getActiveBlock(userId = '', options = {}) {
   return block;
 }
 
-function blockUser({ userId = '', durationMs = 0, blockedBy = '', now = Date.now(), dbFile: requestedDbFile = '' } = {}) {
+function blockUser({
+  userId = '',
+  durationMs = 0,
+  blockedBy = '',
+  blockSource = 'manual',
+  reasonCode = '',
+  now = Date.now(),
+  dbFile: requestedDbFile = ''
+} = {}) {
   const normalizedUserId = normalizeUserId(userId);
   const normalizedBlockedBy = normalizeUserId(blockedBy);
+  const normalizedBlockSource = normalizeUserId(blockSource) || 'manual';
+  const normalizedReasonCode = String(reasonCode || '').trim();
   const normalizedDurationMs = Number(durationMs);
   const currentTime = normalizeNow(now);
   if (!normalizedUserId) throw new TypeError('userId is required');
@@ -111,17 +133,29 @@ function blockUser({ userId = '', durationMs = 0, blockedBy = '', now = Date.now
 
   const db = getDb({ dbFile: requestedDbFile });
   db.prepare(`
-    INSERT INTO user_blocks(user_id, expires_at, blocked_by, blocked_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO user_blocks(
+      user_id, expires_at, blocked_by, blocked_at, updated_at, block_source, reason_code
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
       expires_at = excluded.expires_at,
       blocked_by = excluded.blocked_by,
       blocked_at = excluded.blocked_at,
-      updated_at = excluded.updated_at
-  `).run(normalizedUserId, expiresAt, normalizedBlockedBy, currentTime, currentTime);
+      updated_at = excluded.updated_at,
+      block_source = excluded.block_source,
+      reason_code = excluded.reason_code
+  `).run(
+    normalizedUserId,
+    expiresAt,
+    normalizedBlockedBy,
+    currentTime,
+    currentTime,
+    normalizedBlockSource,
+    normalizedReasonCode
+  );
 
   return normalizeRow(db.prepare(`
-    SELECT user_id, expires_at, blocked_by, blocked_at, updated_at
+    SELECT user_id, expires_at, blocked_by, blocked_at, updated_at, block_source, reason_code
     FROM user_blocks
     WHERE user_id = ?
   `).get(normalizedUserId));
