@@ -2274,3 +2274,4 @@
 - 最小修复：将 `config/group-reply-sensitive-words.json` 的 `politicalContextRequired` 设为 `false`；保留 `unconditionalWords` 的 8964/六四相关变体和领导人姓名补充，复用现有群聊、普通私聊、core/src 流式出口 guard。
 - 验收：政治 guard、消息出口、视觉渲染、小剧场定向测试以及 `npm run lint`、`npm run typecheck`、`git diff --check` 通过。
 - 边界：管理员私聊豁免保持不变；未修改 `prompts\admin.txt`，未扩大到其他平台独立发送适配器，未推送远端。
+- 小目标已完成：实现提交 `8f4ad687`；本次未纳入并行工作区改动。

@@ -51,4 +51,4 @@
 - [x] **Step 1: 运行政治 guard、消息出口、视觉渲染和小剧场定向测试。
 - [x] **Step 2: 运行 `npm run lint`、`npm run typecheck` 和 `git diff --check`。
 - [x] **Step 3: 检查暂存区，确认不包含 `prompts/admin.txt` 或其他并行改动。
-- [ ] **Step 4: 提交当前小目标，不推送远端。
+- [x] **Step 4: 提交当前小目标，不推送远端。
