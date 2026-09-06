@@ -144,6 +144,7 @@ function loadGuardConfig(configPath = DEFAULT_CONFIG_PATH) {
       ? raw.vendorFiles.map((item) => String(item || '').trim()).filter(Boolean)
       : [],
     extraWords: uniqueWords(Array.isArray(raw.extraWords) ? raw.extraWords : []),
+    unconditionalWords: uniqueWords(Array.isArray(raw.unconditionalWords) ? raw.unconditionalWords : []),
     allowWords: uniqueWords(Array.isArray(raw.allowWords) ? raw.allowWords : []),
     politicalContextWords: uniqueWords(Array.isArray(raw.politicalContextWords)
       ? raw.politicalContextWords
@@ -158,7 +159,8 @@ function createGroupReplySensitiveGuard(options = {}) {
   const config = loadGuardConfig(options.configPath || DEFAULT_CONFIG_PATH);
   const vendorWords = loadVendorWords(options.vendorDir || DEFAULT_VENDOR_DIR, config.vendorFiles);
   const allowWords = new Set(config.allowWords);
-  const words = uniqueWords([...vendorWords, ...config.extraWords])
+  const unconditionalWords = new Set(config.unconditionalWords.filter((word) => !allowWords.has(word)));
+  const words = uniqueWords([...vendorWords, ...config.extraWords, ...config.unconditionalWords])
     .filter((word) => !allowWords.has(word));
 
   function check(text = '') {
@@ -172,8 +174,10 @@ function createGroupReplySensitiveGuard(options = {}) {
       if (normalizedText.includes(word)) matchedWords.push(word);
     }
 
+    const hasUnconditionalMatch = matchedWords.some((word) => unconditionalWords.has(word));
     const blocked = matchedWords.length > 0 && (
-      !config.politicalContextRequired
+      hasUnconditionalMatch
+      || !config.politicalContextRequired
       || hasPoliticalSensitiveContext(normalizedText, matchedWords, config)
     );
 

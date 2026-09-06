@@ -2261,3 +2261,9 @@
 - 再次逐模型复测（2026-09-05 17:01 +08:00）：`nano-banana-pro` 返回“Nano Banana Pro 维护中（站长已拉闸）”；`nano-banana-2` 返回“Nano Banana 2 维护中（站长已拉闸）”；`flux-2-pro` 返回“Flux 2 Pro 维护中（站长已拉闸）”；`flux-2-klein-4b` 返回“Flux 2 Klein 维护中（站长已拉闸）”；`grok-imagine` 返回“Grok Imagine 维护中（站长已拉闸）”；`gpt-image-2` 返回“GPT Image 2 维护中（站长已拉闸）”。6 个请求均为 `HTTP 503`，没有可用模型。
 - 请求验收：使用项目当前完整 Images 请求体（`1024x1024`、`high`、`vivid`、`auto`、PNG、`output_compression=0`、`response_format=b64_json`）直连 `/images/generations`；`GET /models` 仍返回空列表。项目错误映射对该 `503` 响应返回“生图供应商暂时异常”，“生图请求参数无效”仅对应 `HTTP 400`。
 - 边界：未修改业务代码、`.env` 或模型配置；未输出密钥和图片 Base64，未推送远端。
+## 运行维护 2026-09-06
+
+- 小目标：增强普通用户出口对 8964/六四相关变体和领导人姓名的无语境拦截，降低模型在架空或绕写语境下直接发出相关内容的风险。
+- 最小修复：新增 `unconditionalWords` 配置并在 `utils/groupReplySensitiveGuard.js` 中单独处理；命中该列表即替换，其他政治词继续沿用 `politicalContextRequired=true` 的现实政治语境门槛，避免把普通架空词一并拦截。群聊、普通用户私聊、core 流式和 src 流式继续复用同一出口 guard；视觉渲染配置同步补齐同一组显式变体。
+- 验收：`node tests\groupReplySensitiveGuard.test.js`、`node tests\messageReplyRuntimeFreshness.test.js`、`node tests\visualRenderModeration.test.js`、`node tests\smallTheaterModerationGate.test.js`、`node --check utils\groupReplySensitiveGuard.js`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过。
+- 边界：管理员私聊豁免保持不变；未修改 `prompts\admin.txt`，未扩大到 Discord/Telegram/微信独立发送适配器，未推送远端。

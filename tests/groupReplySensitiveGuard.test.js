@@ -25,8 +25,9 @@ module.exports = (() => {
   assert.strictEqual(defaultGuard.enabled, true);
   assert.strictEqual(defaultGuard.politicalContextRequired, true);
   assert.strictEqual(defaultGuard.check('角色扮演里这个王国叫华国，今晚只是聊剧情设定。').blocked, false);
-  assert.strictEqual(defaultGuard.check('现实政治里讨论中国人权议题').blocked, true);
-  assert.strictEqual(defaultGuard.check('角色扮演设定：现实政治里讨论中国人权议题').blocked, true);
+  assert.strictEqual(defaultGuard.check('角色扮演设定：这里提到8964，但只是剧情背景。').blocked, true);
+  assert.strictEqual(defaultGuard.check('角色扮演设定：这里提到天安门事件，但只是剧情背景。').blocked, true);
+  assert.strictEqual(defaultGuard.check('角色扮演设定：这里提到赵紫阳，但只是剧情背景。').blocked, true);
   assert.strictEqual(defaultGuard.check('华国').blocked, false);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-sensitive-guard-'));
@@ -38,23 +39,35 @@ module.exports = (() => {
   const configPath = path.join(tempDir, 'config.json');
   writeJson(configPath, {
     enabled: true,
-    politicalContextRequired: false,
+    politicalContextRequired: true,
     replacementText: '替代回复',
     vendorFiles: ['words.txt'],
     extraWords: ['extra-block', '显式单字'],
+    unconditionalWords: ['vendor-block'],
     allowWords: ['allowed-block']
   });
 
   const guard = createGroupReplySensitiveGuard({ configPath, vendorDir });
   assert.strictEqual(guard.check('hello vendor-block world').blocked, true);
-  assert.strictEqual(guard.check('这里有逗号词二').blocked, true);
-  assert.strictEqual(guard.check('hello extra-block world').blocked, true);
+  assert.strictEqual(guard.check('这里有逗号词二').blocked, false);
+  assert.strictEqual(guard.check('hello extra-block world').blocked, false);
   assert.strictEqual(guard.check('allowed-block').blocked, false);
   assert.strictEqual(guard.check('ignored-block').blocked, false);
   assert.strictEqual(guard.check('单').blocked, false);
-  assert.strictEqual(guard.check('显式单字').blocked, true);
+  assert.strictEqual(guard.check('显式单字').blocked, false);
   assert.strictEqual(guard.check('').blocked, false);
   assert.strictEqual(guard.replacementText, '替代回复');
+
+  writeJson(configPath, {
+    enabled: true,
+    politicalContextRequired: false,
+    vendorFiles: ['words.txt'],
+    extraWords: ['extra-block'],
+    allowWords: []
+  });
+  const contextFreeGuard = createGroupReplySensitiveGuard({ configPath, vendorDir });
+  assert.strictEqual(contextFreeGuard.check('这里有逗号词二').blocked, true);
+  assert.strictEqual(contextFreeGuard.check('hello extra-block world').blocked, true);
 
   writeJson(configPath, {
     enabled: false,
