@@ -113,7 +113,7 @@ Expected: PASS。
 Run: `npm run lint`; `npm run typecheck`; `git diff --check`
 Expected: all exit 0。
 
-- [ ] **Step 4: 检查差异并提交**
+- [x] **Step 4: 检查差异并提交**
 
 全量回归记录：`npm test` 退出码为 1，失败仅为当前基线中的 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js`；本任务新增测试及其余测试通过。
 
@@ -124,3 +124,7 @@ Expected: 只包含本任务新增/修改文件和明确的文档验收记录，
 git add utils/userBlockStore.js utils/sqliteRuntime.js core/router/adminCommands.js core/messageAdminCommands.js core/messageRouteFlow/index.js core/messageHandler.runtime.js tests/userBlockStore.test.js tests/userBlockCommands.test.js tests/messageHandlerUserBlock.test.js README.md docs/env-configuration.md docs/superpowers/plans/2026-09-06-admin-user-blocking.md
 git commit -m "feat: add admin user block commands"
 ```
+
+## 完成记录
+
+2026-09-06 19:27 +08:00：实现提交 `92a7ed03` 已完成。功能定向测试、管理员路由回归、lint、typecheck、暂存区差异检查和提交钩子密钥扫描通过；全量 `npm test` 仍只保留既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js` 失败，本任务未修改这些基线范围。

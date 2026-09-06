@@ -31,4 +31,6 @@
 
 ## 验收
 
-2026-09-06 19:20 +08:00：封禁存储、命令权限与时长解析、入口静默拦截及既有管理员路由回归测试通过；lint、typecheck 和差异检查通过。全量 `npm test` 的既有失败为 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js`，分别涉及提示词治理清单和语音输入配置基线，本功能未修改这些范围。
+2026-09-06 19:27 +08:00：封禁存储、命令权限与时长解析、入口静默拦截及既有管理员路由回归测试通过；lint、typecheck 和差异检查通过。全量 `npm test` 的既有失败为 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js`，分别涉及提示词治理清单和语音输入配置基线，本功能未修改这些范围。
+
+实现提交：`92a7ed03`（`feat: add admin user block commands`）。
