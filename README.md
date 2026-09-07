@@ -30,6 +30,7 @@
 - 2026-09-07 12:52 +08:00：已把 `MZK_SVC_AUTO_PREDICT_F0=true` 接入 sidecar 并在单实例 CUDA 服务上验证，`/health` 显示开关已生效，同一句日文返回 HTTP 200、48,109 字节 MP3。基频仅小幅变化，未解决 Piper 源音色问题；原因是 `mzk_release` 属于 So-VITS-SVC 音频转换模型，不是瑞希文本 TTS。当前链路可用，但不能承诺稳定的瑞希角色朗读音色；需要专用瑞希 TTS/VC 或瑞希语音数据微调。
 - QQ Provider、私聊/群聊 `record`、工具上下文和授权定向测试已通过，`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。完整 `npm test` 仍有 3 个既有失败：`agentPrompts.test.js`、`checkPromptsIntegration.test.js` 受未纳入 manifest/allowlist 的 `prompts/ADULT.txt` 影响，`voiceInputIngress.test.js` 存在既有超时配置期望不一致；真实 QQ 客户端收音仍待人工确认。当前未完成：CosyVoice 高质量后端、SVC 微调训练、Discord 音频附件和微信语音的正式验收，详见[多平台部署说明](docs/multi-platform-deployment.md)、[多渠道实施记录](docs/superpowers/plans/2026-09-05-multichannel-on-demand-voice.md)和[本地模型实施记录](docs/superpowers/plans/2026-09-05-local-tts-svc-sidecar.md)。
 - 2026-09-07 修复明确语音请求路由：`请用语音说……`、`朗读……`、`说给我听……` 等表达现在会把 `companion_voice_reply` 放入 QQ 私聊/群聊的当前工具集合；普通聊天仍不会自动触发语音。路由入口回归已通过，真实 QQ 客户端收音仍需重新手动验收。
+- 2026-09-07：语音服务复用现有政治敏感词 guard，在 TTS 前同时审查当前用户原始输入和待合成的完整输出文本；命中时不调用 TTS、不发送音频、不发送原文回退，工具只返回固定安全提示。审查对象是文本，不对已生成音频做 ASR 反向转写审查；定向敏感词、语音兼容和工具集成测试通过。
 - 面向 QQ 用户的可发布文案、触发示例、管理员配置、启动验收和排障步骤见[QQ 按需语音更新公告及使用说明](docs/qq-voice-update-announcement-2026-09-06.md)。
 
 ## QQ 语音输入与歌词文本评价 2026-09-04 17:40 +08:00
@@ -890,6 +891,8 @@ Docker 部署说明见 [`deploy/docker/README.md`](deploy/docker/README.md)；�
 更新 2026-06-26 01:52 +08:00：本地 WSL/Docker 链路已用国内镜像源完成真实 smoke：DaoCloud 拉取基础镜像，Dockerfile 依赖安装默认走 `registry.npmmirror.com`，临时端口 `49105/49106` 下 `docker-compose build`、`docker-compose up -d`、Web security status 200、NapCat reverse 鉴权请求 204 和容器内 Node 语法检查均通过；当前探针必须携带兼容 token 或签名头，空对象 POST 不再是有效探针。
 
 更新 2026-06-26 02:30 +08:00：复查 Git、忽略规则和 `mizukibot:local` 镜像，未发现真实 `.env`、密钥文件、本地 MCP 配置、私有 prompt 或运行数据进入仓库/镜像；新增初学者容器化部署文档。
+
+更新 2026-09-07 13:00 +08:00：Docker Compose 新增 `PRIVATE_PROMPTS_DIR`，支持在部署时将本地私有 prompt 上传到 Docker 主机的独立目录，再以只读方式挂载到两个容器；该目录不进入镜像构建上下文、Git 或公开制品。详见 [`deploy/private-prompts.md`](deploy/private-prompts.md)。
 
 ### NPM 发布
 

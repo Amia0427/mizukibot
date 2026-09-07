@@ -98,6 +98,8 @@ const companionVoices = createLazyModuleProxy(
   () => getCompanionVoiceService()
 );
 
+const COMPANION_VOICE_SENSITIVE_MESSAGE = '语音未发送：内容触发敏感词审查，请换一种说法。';
+
 let cachedMemoryCliRunner = undefined;
 
 function getMemoryCliRunner() {
@@ -603,9 +605,15 @@ const TOOL_EXECUTORS = {
     const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
     const result = await companionVoices.reply({
       text: args.text,
+      userInputText: context.originalUserText
+        || context.routeMeta?.originalUserText
+        || context.question,
       deliveryTarget: context.deliveryTarget || context.routeMeta?.deliveryTarget || context.routeMeta?.delivery_target,
       replyToMessageId: context.replyToMessageId || context.routeMeta?.messageId || context.routeMeta?.message_id
     });
+    if (result.reason === 'sensitive_input' || result.reason === 'sensitive_output') {
+      return COMPANION_VOICE_SENSITIVE_MESSAGE;
+    }
     if (result.reason === 'unknown' || result.status === 'unknown') {
       return '语音发送状态不确定，请不要重复发送语音或文字。';
     }

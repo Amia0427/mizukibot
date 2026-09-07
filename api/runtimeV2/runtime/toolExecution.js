@@ -354,6 +354,12 @@ function createToolExecutionHelpers(deps = {}) {
     return {
       userId: String(request.userId || '').trim(),
       question: String(request.question || '').trim(),
+      originalUserText: String(
+        request.originalUserText
+        || routeMeta.originalUserText
+        || request.question
+        || ''
+      ).trim(),
       rawText: String(routeMeta.rawText || request.question || '').trim(),
       cleanText: String(routeMeta.cleanText || request.question || '').trim(),
       chatType: String(routeMeta.chatType || routeMeta.chat_type || (routeMeta.groupId || routeMeta.group_id ? 'group' : 'private')).trim(),

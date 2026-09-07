@@ -30,6 +30,8 @@
 
 2026-09-07 修复了明确语音请求的路由入口：`core/router/index.js` 会在用户使用“用语音回复/朗读/说给我听”等明确表达时生成 `allowedTools: ['companion_voice_reply']` 的工具路由；普通聊天仍保持 `toolIntent: none`，不会因为 TTS 已配置就自动语音化。
 
+2026-09-07 增加语音文本敏感词审查：`src/features/companion-voice/service.js` 注入现有 `getGroupReplySensitiveGuard()`，在 TTS 前先审查当前入站的 `originalUserText`，再审查完整待合成文本，避免敏感词跨分段漏检。命中时不调用 Provider、平台音频发送或文字回退；`companion_voice_reply` 只返回固定安全提示，不暴露原文或命中词。用户输入来自 Runtime 上下文，工具参数不能覆盖；旧 QQ 兼容入口至少审查待发送文本。审查边界是 TTS 前的文本，不包含对生成音频的 ASR 反向识别。
+
 Provider 放在 `src/features/companion-voice/provider.js`，通过 `COMPANION_VOICE_PROVIDER` 在外部 OpenAI-compatible TTS 与本地 HTTP TTS 中显式二选一；服务层负责分段、顺序、并发和文字回退。QQ 发送错误中，NapCat 连接前失败属于 `not_submitted`，响应无法判断时属于 `unknown`；后者禁止自动重发或文字补发。
 
 本地模型 sidecar 独立放在 `D:\tts-models`，Node 主进程只持有 HTTP Provider 边界。当前最小实现使用 Piper 日文 ONNX 在 CPU 生成源 WAV，再使用瑞希 `mzk.pth`、ContentVec 和 RMVPE 在 CUDA 上完成 So-VITS-SVC 转换，最后通过 `imageio-ffmpeg` 内置 FFmpeg 输出 MP3；两个阶段分别由 `COMPANION_VOICE_LOCAL_TTS_ENABLED` 和 `COMPANION_VOICE_LOCAL_SVC_ENABLED` 控制，基础后端由 `LOCAL_TTS_BACKEND=piper|cosyvoice` 选择。SVC 的 `MZK_SVC_AUTO_PREDICT_F0=true` 已接入配置，适合文本朗读源音频；它只改变音高预测，不会把音频转换模型变成文本直出角色 TTS。

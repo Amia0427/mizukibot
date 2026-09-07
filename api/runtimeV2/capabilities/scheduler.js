@@ -433,6 +433,11 @@ function buildToolContext(state, overrides = {}, helpers = {}) {
   return {
     userId: normalizeText(request.userId),
     question: normalizeText(request.question),
+    originalUserText: normalizeText(
+      request.originalUserText
+      || routeMeta.originalUserText
+      || request.question
+    ),
     rawText: normalizeText(routeMeta.rawText || request.question),
     cleanText: normalizeText(routeMeta.cleanText || request.question),
     chatType: normalizeText(routeMeta.chatType || routeMeta.chat_type || (routeMeta.groupId || routeMeta.group_id ? 'group' : 'private')),

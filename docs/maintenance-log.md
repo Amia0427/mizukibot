@@ -1,3 +1,10 @@
+## 运行维护 2026-09-07
+
+- 小目标：为按需语音输出增加敏感词审查，同时覆盖当前用户输入和准备发送的语音文本。
+- 修复：语音服务复用现有 `groupReplySensitiveGuard`；Runtime 工具上下文传入不可由模型覆盖的 `originalUserText`；完整输出文本在分段前审查，旧 QQ 兼容入口审查待发送文本。命中后不调用 Provider、不发送音频、不发送文字回退，工具只返回固定安全提示，不记录或返回匹配词和敏感原文。
+- 边界：本轮审查的是 TTS 前文本，不对生成的音频二进制做 ASR 反向转写；未新增敏感词库、未修改 `prompts/admin.txt`、未修改本地 TTS/SVC 模型和 `.env`。
+- 验收：`companionVoiceModeration.test.js`、现有语音服务/集成/多渠道/路由测试和 `groupReplySensitiveGuard.test.js` 通过；`npm run lint -- --quiet`（917 个文件）、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。
+
 ## 运行维护 2026-09-06 11:16 +08:00
 
 - 小目标：修复 `BAAI/bge-m3` Embedding 接口连续 HTTP 400 并触发持续降级的问题。

@@ -1,6 +1,7 @@
 const config = require('../../../config');
 const { createDeliveryTarget } = require('../../platforms/contracts');
 const { sendPrivateVoiceMessage } = require('../../../api/qqActionService');
+const { getGroupReplySensitiveGuard } = require('../../../utils/groupReplySensitiveGuard');
 const { createCompanionVoiceProvider, createGeneratedAudio } = require('./provider');
 
 function normalizeText(value) {
@@ -61,8 +62,32 @@ function normalizeSendResult(result, fallbackMode = 'attachment') {
     : { status: 'accepted', mode: fallbackMode };
 }
 
+function buildSensitiveResult(reason) {
+  return {
+    handled: true,
+    sent: false,
+    fallbackText: '',
+    reason,
+    status: 'blocked'
+  };
+}
+
+function buildLegacySensitiveResult(reason) {
+  return {
+    sent: false,
+    fallbackText: '',
+    reason,
+    status: 'blocked'
+  };
+}
+
+function isSensitiveText(sensitiveGuard, text) {
+  return Boolean(text && sensitiveGuard.check(text).blocked);
+}
+
 function createCompanionVoiceService(options = {}) {
   const runtimeConfig = options.config || config;
+  const sensitiveGuard = options.sensitiveGuard || getGroupReplySensitiveGuard();
   const provider = options.provider || (options.client ? {
     configured: true,
     synthesize: async (input) => createGeneratedAudio(
@@ -91,6 +116,7 @@ function createCompanionVoiceService(options = {}) {
     const fallbackText = normalizeText(text);
     if (!targetUserId) throw new Error('companion voice requires private userId');
     if (!fallbackText) throw new Error('voice text is required');
+    if (isSensitiveText(sensitiveGuard, fallbackText)) return buildLegacySensitiveResult('sensitive_output');
     if (runtimeConfig.COMPANION_VOICE_ENABLED !== true) {
       return { sent: false, fallbackText, reason: 'disabled' };
     }
@@ -133,9 +159,12 @@ function createCompanionVoiceService(options = {}) {
 
   async function replyForTarget(input = {}) {
     const fallbackText = normalizeText(input.text);
+    const userInputText = normalizeText(input.userInputText);
     const target = input.deliveryTarget || null;
     const replyToMessageId = normalizeText(input.replyToMessageId);
     if (!fallbackText) throw new Error('voice text is required');
+    if (isSensitiveText(sensitiveGuard, userInputText)) return buildSensitiveResult('sensitive_input');
+    if (isSensitiveText(sensitiveGuard, fallbackText)) return buildSensitiveResult('sensitive_output');
     if (runtimeConfig.COMPANION_VOICE_ENABLED !== true) {
       return { handled: false, sent: false, fallbackText, reason: 'disabled' };
     }
