@@ -1,0 +1,38 @@
+{
+  "happy": {
+    "animation": "happy",
+    "fallback": "assets/live2d/fallback/happy.gif"
+  },
+  "affectionate": {
+    "animation": "affectionate",
+    "fallback": "assets/live2d/fallback/affectionate.gif"
+  },
+  "playful": {
+    "animation": "playful",
+    "fallback": "assets/live2d/fallback/playful.gif"
+  },
+  "shy": {
+    "animation": "shy",
+    "fallback": "assets/live2d/fallback/shy.gif"
+  },
+  "sad": {
+    "animation": "sad",
+    "fallback": "assets/live2d/fallback/sad.gif"
+  },
+  "angry": {
+    "animation": "angry",
+    "fallback": "assets/live2d/fallback/angry.gif"
+  },
+  "surprised": {
+    "animation": "surprised",
+    "fallback": "assets/live2d/fallback/surprised.gif"
+  },
+  "tired": {
+    "animation": "tired",
+    "fallback": "assets/live2d/fallback/tired.gif"
+  },
+  "comforting": {
+    "animation": "comforting",
+    "fallback": "assets/live2d/fallback/comforting.gif"
+  }
+}

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live2D Renderer</title>
+</head>
+<body>
+  <canvas id="live2d-canvas" width="512" height="512"></canvas>
+  <script>
+    window.live2dRenderer = {
+      canvas: document.getElementById('live2d-canvas'),
+      render: async function () {
+        throw new Error('Live2D renderer adapter is not configured');
+      }
+    };
+  </script>
+</body>
+</html>

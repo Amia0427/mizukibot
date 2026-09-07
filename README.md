@@ -1,5 +1,17 @@
 # MizukiBot
 
+## 记忆运行态验收 2026-09-08 00:04 +08:00
+
+- Memory V3、LangGraph V2 和 post-reply worker 已完成真实运行态复核：主 bot/worker 均为单实例运行，队列无待处理或失败任务，SQLite checkpoint/event 正常落盘，LanceDB 与 SQLite 当前 ready 数据 `6242/6242` 对齐。
+- 当前 `node scripts/diagnose-runtime-status.js --json` 返回 `overallStatus=ok`、`signals=[]`；仍有 765 条 profile embedding 按既有 watchdog 小批量补齐，journal embedding 已无待处理项。详细记录见 [运行维护日志](docs/maintenance-log.md)。
+
+## 回复后情绪 Live2D 动态表情 2026-09-08 00:06 +08:00
+
+- 状态栏独立模型现在在同一次调用中同时返回 `emotion`、`intensity` 和 `confidence`；私聊状态栏与 Live2D 视觉后处理共用这一次调用，不复用 meme manager 的情绪选择模型。
+- QQ 私聊正常 `direct_chat` 回复成功后按“主回复 -> 状态栏 PNG -> 动态表情”顺序处理；QQ 群聊不发送私聊状态栏 PNG，只在满足高强度、高置信度门槛时追加一张动态表情。命令、工具、拒绝、安全限制、限流、发送失败和 freshness 过期回合不会触发。
+- Live2D 运行时由 Node 调度可插拔渲染 worker；渲染失败时读取 `assets/live2d/emotions.json` 对应 GIF，资源仍未配置时静默跳过。当前仓库没有提交真实 Live2D 模型或 GIF，因此本轮只能验收协议、调度、mock renderer 和回退接口，不能宣称真实 Live2D 动画已完成。
+- 配置和资源目录见 [QQ 私聊状态栏](docs/private-status-bar.md) 与 [环境变量说明](docs/env-configuration.md)。验收时间：2026-09-08 00:06 +08:00。
+
 ## 普通用户自动安全封禁 2026-09-06
 
 - 计划仅对普通用户启用本地规则审核；管理员完全豁免，不参与审核、自动封禁或封禁拦截。

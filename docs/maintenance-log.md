@@ -1,3 +1,11 @@
+## 运行维护 2026-09-08 00:04 +08:00
+
+- 小目标：复核并修复 Memory V3 的真实运行态，确认记忆事件、投影、SQLite checkpoint 和 LanceDB 是否持续落盘并正常运行。
+- 修复：主进程诊断只匹配项目根目录的 `index.js`，不再把 `node_modules/@memtensor/memos-api-mcp/build/index.js` 误判为第二个主 bot；两个历史 SQLite `running/route` checkpoint 通过原子 `saveTransition()` 收口为 `aborted/stale_recovery`，保留原 state 和全部事件并追加 `checkpoint_stale_recovered`；LanceDB 执行正式 reconcile/compact，同步 100 条 profile embedding，并归档 6 个历史 post-reply failed job，未删除原始记录。
+- 运行验收：2026-09-08 00:00 +08:00，主 bot PID `52528`、post-reply worker PID `26076` 均为 running 且各仅 1 个匹配进程；队列 `queued=0/processing=0/failed=0`；LangGraph V2 `activeCheckpoints=0/staleRunningCheckpoints=0`，SQLite `healthy` 且两库 `quick_check=ok`；Memory V3 投影 `projectionStale=false`；LanceDB 与 SQLite 对齐 `6242/6242`，`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`；`diag:runtime` 最终 `overallStatus=ok`、`signals=[]`。
+- 后续：仍有 765 条 profile embedding 待后台小批量处理，journal embedding 已 `pending=0/failed=0`；这不影响当前 SQLite/LanceDB 已就绪数据的正常落盘和召回，继续由现有 watchdog/backfill 逐批消化。
+- 验收命令：`node tests/runtimeStatusDiagnostics.test.js`、`node scripts/repair-memory-vector-index.js --apply --compact`、`node scripts/backfill-memory-v3-embeddings.js --resume --source memory --limit 100 --max-batches 1 --sync-after`、`node scripts/diagnose-runtime-status.js --json`、`node scripts/diagnose-memory-ops.js storage-overlap --json`、`node scripts/check-sqlite-integrity.js data/profile_journal.sqlite data/langgraph_v2.sqlite` 均通过。
+
 ## 运行维护 2026-09-07
 
 - 小目标：为按需语音输出增加敏感词审查，同时覆盖当前用户输入和准备发送的语音文本。
@@ -2321,3 +2329,9 @@
 - 实现：Compose 新增 `PRIVATE_PROMPTS_DIR`，将 `admin.txt` 和 `persona/` 以只读方式挂载到两个容器；`.gitignore`、`.dockerignore` 和 Linux 迁移打包脚本同步排除独立私有目录及项目内旧私有 prompt 路径。
 - 验收：Compose YAML 和私有挂载断言、Docker 安全配置测试、全量密钥扫描、开发文档链接检查及 `npm run lint` 通过；当前机器缺少可用 Docker Compose 插件和 Docker daemon，真实镜像构建/容器启动待具备 Docker 运行环境后复验。
 - 小目标已完成：实现提交 `9c5a69d8`；更新 Docker 部署文档、初学者指南、私有 prompt 说明和 README，未修改 `prompts/admin.txt` 或其他并行工作区改动，未推送远端。
+# 运行维护 2026-09-08 00:06 +08:00
+
+- 小目标：在回复后追加情绪 Live2D 动态表情，并复用现有状态栏独立模型调用。
+- 实现：状态栏模型新增 `emotion`、`intensity`、`confidence` 严格字段；新增共享 `replyVisual` 运行时、情绪门槛/冷却、情绪资源清单、Node Live2D worker 适配器和 GIF 回退；QQ 私聊保留状态栏 PNG，QQ 群聊只追加动态表情；普通与完成流式回复共用入口并复用 freshness guard。
+- 边界：不调用 meme manager 的情绪选择模型，不新增模型调用；真实 Live2D 模型、浏览器渲染适配器和 GIF 文件尚未提供，本轮只验收 mock renderer、协议、调度和回退接口，未宣称真实动画已发送。
+- 验收（2026-09-08 00:06 +08:00）：`privateStatusBarModel.test.js`、`privateStatusBarRuntime.test.js`、`live2dEmotionGate.test.js`、`live2dCatalog.test.js`、`live2dRenderer.test.js`、`replyVisualRuntime.test.js`、`messageHandlerLive2dFollowup.test.js`、目标文件 `node --check`、`npm run lint`、`npm run typecheck` 和 `git diff --check` 通过；完整 `npm test` 仅保留既有 `agentPrompts.test.js`、`checkPromptsIntegration.test.js` 和 `voiceInputIngress.test.js` 失败，分别对应私有提示词清单和既有语音输入超时基线。

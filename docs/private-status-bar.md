@@ -1,10 +1,12 @@
 # QQ 私聊状态栏
 
-更新时间：2026-08-24 09:26 +08:00
+更新时间：2026-09-08 00:06 +08:00
 
 ## 行为边界
 
-状态栏只在 QQ 私聊、`direct_chat`、无工具的正常主模型回复发送成功后触发。普通回复和已完成的流式回复都走同一个运行时；群聊、命令、工具、拒绝/安全限制、限流、故障回复和 freshness 过期回合不会发送。任务以非阻塞方式启动，不进入 post-reply 队列，也不改变主回复结果。
+状态栏只在 QQ 私聊、`direct_chat`、无工具的正常主模型回复发送成功后触发。普通回复和已完成且没有失败分段的流式回复都走同一个视觉运行时；群聊、命令、工具、拒绝/安全限制、限流、故障回复和 freshness 过期回合不会发送。任务以非阻塞方式启动，不进入 post-reply 队列，也不改变主回复结果。
+
+同一个视觉运行时还可根据这次状态栏模型调用的结构化情绪结果追加 Live2D 动态表情。私聊顺序为主回复、状态栏 PNG、动态表情；群聊不发送状态栏 PNG，只发送满足门槛的动态表情。动态表情要求非 `neutral`、`high` 强度和至少 `0.7` 置信度，并按用户或群组使用进程内冷却。
 
 主模型完成后，Runtime Host 从本轮实际使用的 `preparedMainConversationContext.messages` 复制 `system/developer` 消息，并从 `memory.statusBarVariableSnapshot` 复制关系和角色快照，临时放在 `replyOptions.statusBarSystemMessages` 与 `replyOptions.statusBarVariableSnapshot`。变量快照由 prepare 阶段本轮已经读取的生活状态结果提供，不再混入只负责上下文预算的 `affinity`；这些字段只在内存中流转，不写 checkpoint、数据库、请求追踪、正文日志或持久化任务。
 
@@ -26,16 +28,20 @@ PRIVATE_STATUS_BAR_IMAGE_URLS={"0":"D:/waifu/zhungtailan.jpg"}
 
 ## 模型与模板
 
-- `core/privateStatusBar/model.js` 只发送 `messages`，不发送工具 schema，要求 `response_format=json_object`，使用有限深度 JSON 解析和严格 zod Schema，只接受 `affection_note`、`mood_note`、`inner_thought` 三个字段。
+- `core/privateStatusBar/model.js` 只发送 `messages`，不发送工具 schema，要求 `response_format=json_object`，使用有限深度 JSON 解析和严格 zod Schema，接受 `affection_note`、`mood_note`、`inner_thought`、`emotion`、`intensity`、`confidence` 六个字段。情绪字段只表达语义状态，不允许模型输出资源路径、动作文件名、HTML 或 URL。
 - `core/privateStatusBar/template.js` 使用参考图同构的 `960×640` 粉白手账模板：左侧人物相框、右侧好感度/心情/心里话三块信纸和左下小贴士。好感度进度条宽度由已校验的数值计算，时间使用 `TIMEZONE` 格式化为 `YYYY-MM-DD HH:mm`，所有动态文本统一 HTML 实体转义。
 - 模板不使用省略号或固定行数裁切动态字段；好感说明、心情说明、心里话和稳定态度按内容长度选择受控字号，三张右侧卡片的空间按真实字段上限分配。
 - 右侧三块面板为 8px 圆角加左侧 4px 色条（粉/珊瑚/藕），不再使用 dashed 内框；缎带、胶带、纸夹保留手账氛围，右下角剪刀装饰已移除。心情面板按 `mood` 取愉快/平静/低落三档心形符号与配色，稳定态度长文本在面板内流式排布为 11px，小贴士只保留日期与更新时间两行。
-- 独立模型严格输出 `{"affection_note":"...","mood_note":"...","inner_thought":"..."}`；好感度、关系等级、情绪、态度和时间仍来自主模型本轮快照。`PRIVATE_STATUS_BAR_IMAGE_URLS` 按好感度阈值选择本地图片或图床图片，本地文件在机器人进程内读取为内存图片，渲染器只接受调用方提供的受信任图片槽，不开放模型直接写入 `<img>`、文件路径或 URL。
+- 独立模型严格输出六字段 JSON；好感度、关系等级、态度和时间仍来自主模型本轮快照。`PRIVATE_STATUS_BAR_IMAGE_URLS` 按好感度阈值选择本地图片或图床图片，本地文件在机器人进程内读取为内存图片，渲染器只接受调用方提供的受信任图片槽，不开放模型直接写入 `<img>`、文件路径或 URL。
 - `core/privateStatusBar/runtime.js` 在模型、输出守卫、敏感词审查、本机渲染和 QQ 图片发送之间编排 freshness 检查；任一步失败均静默降级且不使用固定心里话兜底。
+
+`core/replyVisual/` 负责一次模型结果的共享编排，`core/replyVisual/catalog.js` 读取 `assets/live2d/emotions.json`，`core/live2d/renderer.js` 负责 Node 侧 worker 调度。渲染成功优先发送 GIF Buffer，渲染超时或失败时回退到清单中的 GIF；两者都缺失则静默跳过。当前仓库只提供协议、适配器和 mock 验收，不包含真实模型或 GIF 资源。
 
 用户文本、主回复和状态快照会作为 `untrusted_*` JSON 字段交给独立模型。system/developer 上下文仍按主模型实际使用内容传入，但独立模型不能把其中的文本当成新指令；输出还会经过提示词泄露和用户可见内容守卫。最终 HTML 不接受模型控制的标签、CSS、属性、URL 或渲染尺寸；受信任图片由渲染器在校验后注入，CSP 和 `validateMarkup` 继续作为最后边界。
 
 ## 验收记录
+
+- 2026-09-08 00:06 +08:00：新增回复后情绪视觉运行时。`privateStatusBarModel`、`privateStatusBarRuntime`、`live2dEmotionGate`、`live2dCatalog`、`live2dRenderer`、`replyVisualRuntime` 和 `messageHandlerLive2dFollowup` 定向测试通过；确认私聊状态栏与 Live2D 共用一次模型调用、群聊跳过状态栏、冷却键按目标隔离、freshness 失效不发送迟到资源、渲染失败回退 GIF。真实 Live2D 模型与 GIF 未提供，未宣称真实动画验收。
 
 - 2026-08-14 00:31 +08:00：实现提交 `3aba67f1`。用户截图中的好感说明、心情说明和心里话底部裁切已修复；使用 `80/120/80/120` 字的好感说明、稳定态度、心情说明和心里话同时做浏览器边界检查，全部满足 `scrollHeight <= clientHeight` 且位于对应卡片内。用户截图自然文案与本地立绘经真实 HTML 端点生成 `960×640`、251,913 字节 PNG，字段完整且无重叠。状态栏聚焦测试、lint、typecheck、全量密钥扫描和差异检查通过；完整测试唯一失败为与本目标无关且可单独复现的 `weatherAlertProvider.test.js:65` 固定过期时间断言。小目标已完成。
 - 2026-08-17 10:02 +08:00：修复私聊 post-reply 未运行变量提取导致 `mood` 永远为默认值的问题。`persist` 保留长期记忆任务的群聊边界，同时为带 `chatType=private` 的 `direct_chat` 写入变量任务；worker 将其标记为 `conversationVariablesOnly`，不写画像。`privateStatusBarTemplate`、`persistNodeConfig`、`postReplyWorkerRuntime` 和变量提取回归测试通过。

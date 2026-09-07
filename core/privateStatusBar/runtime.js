@@ -75,30 +75,31 @@ function createPrivateStatusBarRuntime(options = {}) {
   ));
   const now = options.now || (() => new Date());
 
-  async function handle(input = {}) {
-    const ineligibilityReason = runtimeConfig.PRIVATE_STATUS_BAR_ENABLED === true
-      ? getPrivateStatusBarIneligibilityReason(input)
-      : 'disabled';
-    if (ineligibilityReason) {
-      return { ok: false, code: 'ineligible', reason: ineligibilityReason };
-    }
+  async function requestModel(input = {}) {
+    const thoughtResult = await requestInnerThought({
+      systemMessages: input.replyOptions.statusBarSystemMessages,
+      userText: input.userText,
+      mainReply: input.replyText,
+      statusSnapshot: input.replyOptions.statusBarVariableSnapshot,
+      signal: input.signal
+    });
+    const text = protectStatusBarText(thoughtResult);
+    if (!text) return { ok: false, code: 'unsafe_inner_thought' };
+    return {
+      ok: true,
+      code: 'analyzed',
+      analysis: thoughtResult,
+      text
+    };
+  }
+
+  async function sendWithModelResult(input = {}, modelResult = {}) {
     const shouldSend = typeof input.shouldSend === 'function' ? input.shouldSend : () => true;
-    if (!shouldSend()) return { ok: false, code: 'stale_before_model' };
-    let stage = 'model';
+    const text = modelResult.text || protectStatusBarText(modelResult.analysis || modelResult);
+    if (!text) return { ok: false, code: 'unsafe_inner_thought' };
+    let stage = 'portrait';
     try {
-      const thoughtResult = await requestInnerThought({
-        systemMessages: input.replyOptions.statusBarSystemMessages,
-        userText: input.userText,
-        mainReply: input.replyText,
-        statusSnapshot: input.replyOptions.statusBarVariableSnapshot,
-        signal: input.signal
-      });
-      const text = protectStatusBarText(thoughtResult);
-      if (!text) {
-        return { ok: false, code: 'unsafe_inner_thought' };
-      }
       if (!shouldSend()) return { ok: false, code: 'stale_before_render' };
-      stage = 'portrait';
       const snapshot = input.replyOptions.statusBarVariableSnapshot;
       const portraitSource = await resolvePortraitImageSource(selectPortraitImage(
         runtimeConfig.PRIVATE_STATUS_BAR_IMAGE_URLS,
@@ -142,7 +143,26 @@ function createPrivateStatusBarRuntime(options = {}) {
     }
   }
 
-  return { handle };
+  async function handle(input = {}) {
+    const ineligibilityReason = runtimeConfig.PRIVATE_STATUS_BAR_ENABLED === true
+      ? getPrivateStatusBarIneligibilityReason(input)
+      : 'disabled';
+    if (ineligibilityReason) {
+      return { ok: false, code: 'ineligible', reason: ineligibilityReason };
+    }
+    const shouldSend = typeof input.shouldSend === 'function' ? input.shouldSend : () => true;
+    if (!shouldSend()) return { ok: false, code: 'stale_before_model' };
+    let stage = 'model';
+    try {
+      const modelResult = await requestModel(input);
+      if (!modelResult.ok) return modelResult;
+      return await sendWithModelResult(input, modelResult);
+    } catch (_) {
+      return { ok: false, code: 'failed', stage };
+    }
+  }
+
+  return { handle, requestModel, sendWithModelResult };
 }
 
 module.exports = {

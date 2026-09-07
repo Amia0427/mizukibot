@@ -29,13 +29,13 @@ Runtime V2 的模型请求协议固定为两条：Anthropic provider 使用 `/v1
 
 ## QQ 私聊状态栏旁路
 
-QQ 私聊 `direct_chat` 的无工具主回复在文字发送成功后，由 [`../../core/privateStatusBar/runtime.js`](../../core/privateStatusBar/runtime.js) 非阻塞补发固定 PNG。状态栏不是 post-reply 任务：主回复的 Runtime Host 只把本轮实际使用的 system/developer 消息和 `memory.statusBarVariableSnapshot` 通过 `replyOptions` 临时交给状态栏运行时，不写 checkpoint、数据库、请求追踪或正文日志。`affinity` 只负责上下文预算，不应承载会话变量。
+QQ 私聊 `direct_chat` 的无工具主回复在文字发送成功后，由 [`../../core/replyVisual/runtime.js`](../../core/replyVisual/runtime.js) 非阻塞编排状态栏 PNG 和可选 Live2D 动态表情。状态栏与动态表情共享一次状态栏独立模型调用：主回复的 Runtime Host 把本轮实际使用的 system/developer 消息、`memory.statusBarVariableSnapshot`、用户文本和主回复通过 `replyOptions` 临时交给视觉运行时，不写 checkpoint、数据库、请求追踪或正文日志。`affinity` 只负责上下文预算，不应承载会话变量。
 
-普通发送分支和完成的流式发送分支都调用同一个 freshness guard；新消息到达后，旧回合在独立模型、渲染和发送前都会被丢弃。Runtime Host 根据 `execution.toolCalls/toolResults` 记录本轮是否真实使用工具，不能用路由暴露的工具列表代替；拒绝、限流和故障标记仍由状态栏运行时复核。
+普通发送分支和完成且无失败分段的流式发送分支都调用同一个 freshness guard；新消息到达后，旧回合在独立模型、渲染和发送前都会被丢弃。Runtime Host 根据 `execution.toolCalls/toolResults` 记录本轮是否真实使用工具，不能用路由暴露的工具列表代替；拒绝、限流和故障标记仍由视觉运行时复核。群聊只允许动态表情，不进入私聊状态栏 PNG 分支。
 
 状态变量更新与长期记忆任务分开：正常私聊 `direct_chat` 在持久化阶段追加 `conversationVariablesOnly` 的 post-reply core 任务，只调用关系/角色增量提取并写入 SQLite，不触发用户画像和自我改进。状态栏使用下一轮 prepare 阶段读取的快照，因此不要把状态栏显示值改为读取旧的 `affinity` 预算对象。
 
-状态栏独立模型只接受严格 `{"affection_note":"...","mood_note":"...","inner_thought":"..."}`，不接收工具；固定模板负责所有标签、CSS、属性和尺寸，动态值只进入实体转义后的文本节点。左侧图片按好感度从 `PRIVATE_STATUS_BAR_IMAGE_URLS` 阈值表选择，由渲染器在 markup 校验后注入，模型不能控制 URL。模型失败、输出守卫、敏感词审查、渲染或 QQ 发送失败均静默降级，不应添加用户可见兜底。
+状态栏独立模型只接受严格六字段 JSON，不接收工具；固定模板负责所有标签、CSS、属性和尺寸，动态值只进入实体转义后的文本节点。情绪门槛由 `core/replyVisual/emotionGate.js` 决定，资源映射由 `core/replyVisual/catalog.js` 决定，模型不能控制 URL、文件路径或动作资源。模型失败、输出守卫、敏感词审查、Live2D/GIF 渲染或 QQ 发送失败均静默降级，不应添加用户可见兜底。
 
 2026-08-14 00:31 +08:00 验收：实现提交 `3aba67f1` 移除动态文字行数裁切，并按真实上限重新分配卡片空间。80 字好感说明、120 字稳定态度、80 字心情说明和 120 字心里话同时达到上限时，浏览器测得所有文本均位于卡片边界内；真实 HTML 端点生成 `960×640` PNG，用户截图自然文案完整显示。聚焦测试、lint、typecheck、密钥和差异检查通过，完整测试仅保留既有天气过期夹具失败，小目标已完成。
 

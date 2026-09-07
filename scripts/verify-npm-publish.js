@@ -32,6 +32,7 @@ const allowedExactPaths = new Set([
 
 const allowedPrefixes = [
   'api/',
+  'assets/live2d/',
   'config/',
   'core/',
   'prompts/persona_modules/',

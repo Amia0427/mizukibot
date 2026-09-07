@@ -63,6 +63,11 @@
 - `PRIVATE_STATUS_BAR_MAX_TOKENS=25000`：独立模型输出预算，需覆盖模型思考后返回 JSON 的长度。
 - `PRIVATE_STATUS_BAR_IMAGE_URLS`：JSON 阈值映射，可填本地图片或图床，例如 `{"0":"D:/waifu/zhungtailan.jpg"}`；程序选择不高于当前好感度的最高阈值。本地图片支持 JPEG、PNG、WebP，使用正斜杠路径可避免 JSON 反斜杠转义问题。
 - 状态栏还依赖 `VISUAL_RENDER_ENABLED=true` 与本机 HTML 渲染端点。触发范围固定为 QQ 私聊 `direct_chat` 无工具正常回复，群聊、命令、工具、拒绝、限流、故障和过期回合不发送。
+- `LIVE2D_EMOTION_ENABLED=false`：是否启用 QQ 私聊和群聊的回复后动态表情；它与状态栏共用一次状态栏独立模型调用。
+- `LIVE2D_EMOTION_MIN_CONFIDENCE=0.7`、`LIVE2D_EMOTION_COOLDOWN_MS=120000`：动态表情最低置信度和冷却时间。只有非 `neutral`、`intensity=high` 且置信度达标时发送；私聊按用户、群聊按群组隔离冷却。
+- `LIVE2D_EMOTION_MANIFEST=assets/live2d/emotions.json`、`LIVE2D_MODEL_DIR=assets/live2d`：情绪到动画 key 和 GIF 回退文件的程序配置。模型不能控制文件路径、动作名或 URL。
+- `LIVE2D_RENDER_ENABLED=false`、`LIVE2D_RENDER_TIMEOUT_MS=10000`、`LIVE2D_BROWSER_EXECUTABLE_PATH`、`LIVE2D_RENDER_WORKER_MODULE`：运行时渲染 worker 配置。渲染失败会回退清单中的 GIF；未提供模型、worker 或 GIF 时静默跳过。
+- 本轮验收（2026-09-08 00:06 +08:00）覆盖模型 schema、情绪门槛、冷却、资源清单、mock renderer、渲染失败回退和消息处理入口；仓库没有真实 Live2D 模型与 GIF 资产，未宣称真实动画发送验收。
 - 2026-08-12 16:30 +08:00：状态栏模板改为 `960×640` 手账卡并增加好感度阈值图片配置；正式模型 ID `deepseek-ai/DeepSeek-V4-Flash` 在 `PRIVATE_STATUS_BAR_MAX_TOKENS=25000` 下真实生成成功，旧免费别名会返回 429。完整链路已向用户 `1960901788` 发送消息 `2130555069` 并回读确认单一图片段。
 
 ## 主回复输出预算

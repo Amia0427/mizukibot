@@ -9,7 +9,7 @@
 `package.json` 使用 `files` 白名单。当前 npm 包只包含：
 
 - 运行源码：`api/`、`config/`、`core/`、`src/`、`utils/`、`web/`
-- 运行资产：`prompts/GEMINI.txt`、`prompts/SYSTEM.txt`、`prompts/defaut.txt`、`prompts/prompt-manifest.json`、`prompts/persona_modules/`、`prompts/persona_worldbook/`、`prompts/runtime/`
+- 运行资产：`assets/live2d/`、`prompts/GEMINI.txt`、`prompts/SYSTEM.txt`、`prompts/defaut.txt`、`prompts/prompt-manifest.json`、`prompts/persona_modules/`、`prompts/persona_worldbook/`、`prompts/runtime/`
 - 运维入口：`scripts/`、`restart-bot.cmd`
 - 配置模板：`.env.example`、`.env.skills.example`
 - 部署说明：`Dockerfile`、`docker-compose.yml`、`.dockerignore`、`deploy/`

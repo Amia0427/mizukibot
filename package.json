@@ -6,6 +6,7 @@
   "type": "commonjs",
   "files": [
     "api/",
+    "assets/",
     "config/",
     "core/",
     "deploy/README.md",

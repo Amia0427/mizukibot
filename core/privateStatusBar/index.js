@@ -2,6 +2,8 @@ const {
   buildStatusBarInstructions,
   buildStatusBarMessages,
   createPrivateStatusBarModelClient,
+  emotionIntensitySchema,
+  emotionSchema,
   ensureModelRequestUrl,
   innerThoughtSchema,
   statusBarTextSchema,

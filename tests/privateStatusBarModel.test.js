@@ -48,7 +48,7 @@ module.exports = (async () => {
   }, {
     async postWithRetry(url, body, retries, apiKey) {
       calls.push({ url, body, retries, apiKey });
-      return responseFor('{"affection_note":"和你相处的时候很开心","mood_note":"现在的心情很平静","inner_thought":"今天也想和你多聊一会儿"}');
+      return responseFor('{"affection_note":"和你相处的时候很开心","mood_note":"现在的心情很平静","inner_thought":"今天也想和你多聊一会儿","emotion":"affectionate","intensity":"high","confidence":0.91}');
     }
   });
   const result = await client({
@@ -60,7 +60,10 @@ module.exports = (async () => {
   assert.deepStrictEqual(result, {
     affection_note: '和你相处的时候很开心',
     mood_note: '现在的心情很平静',
-    inner_thought: '今天也想和你多聊一会儿'
+    inner_thought: '今天也想和你多聊一会儿',
+    emotion: 'affectionate',
+    intensity: 'high',
+    confidence: 0.91
   });
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].url, 'http://127.0.0.1:9000/v1/chat/completions');
@@ -85,7 +88,7 @@ module.exports = (async () => {
     PRIVATE_STATUS_BAR_MODEL: 'model'
   }, {
     async postWithRetry() {
-      return responseFor('{"affection_note":"ok","mood_note":"ok","inner_thought":"ok","extra":"reject"}');
+      return responseFor('{"affection_note":"ok","mood_note":"ok","inner_thought":"ok","emotion":"neutral","intensity":"low","confidence":0.9,"extra":"reject"}');
     }
   });
   await assert.rejects(() => malformed({}), /invalid schema/);
@@ -110,11 +113,50 @@ module.exports = (async () => {
       return responseFor(JSON.stringify({
         affection_note: 'ok',
         mood_note: 'ok',
-        inner_thought: '太'.repeat(121)
+        inner_thought: '太'.repeat(121),
+        emotion: 'neutral',
+        intensity: 'low',
+        confidence: 0.9
       }));
     }
   });
   await assert.rejects(() => tooLong({}), /invalid schema/);
+
+  const invalidEmotion = createPrivateStatusBarModelClient({
+    PRIVATE_STATUS_BAR_API_BASE_URL: 'http://127.0.0.1:9000',
+    PRIVATE_STATUS_BAR_API_KEY: 'key',
+    PRIVATE_STATUS_BAR_MODEL: 'model'
+  }, {
+    async postWithRetry() {
+      return responseFor(JSON.stringify({
+        affection_note: 'ok',
+        mood_note: 'ok',
+        inner_thought: 'ok',
+        emotion: 'excited',
+        intensity: 'high',
+        confidence: 0.9
+      }));
+    }
+  });
+  await assert.rejects(() => invalidEmotion({}), /invalid schema/);
+
+  const invalidConfidence = createPrivateStatusBarModelClient({
+    PRIVATE_STATUS_BAR_API_BASE_URL: 'http://127.0.0.1:9000',
+    PRIVATE_STATUS_BAR_API_KEY: 'key',
+    PRIVATE_STATUS_BAR_MODEL: 'model'
+  }, {
+    async postWithRetry() {
+      return responseFor(JSON.stringify({
+        affection_note: 'ok',
+        mood_note: 'ok',
+        inner_thought: 'ok',
+        emotion: 'happy',
+        intensity: 'high',
+        confidence: 1.1
+      }));
+    }
+  });
+  await assert.rejects(() => invalidConfidence({}), /invalid schema/);
 
   console.log('privateStatusBarModel.test.js passed');
 })();

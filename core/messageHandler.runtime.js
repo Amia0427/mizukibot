@@ -669,6 +669,7 @@ function createMessageHandler({
   triggerRemoteRestartOverride = null,
   smallTheaterRuntimeOverride = null,
   privateStatusBarRuntimeOverride = null,
+  replyVisualRuntimeOverride = null,
   inboundUserSafetyReviewerOverride = null,
   groupContextStore = null
 }) {
@@ -677,6 +678,7 @@ function createMessageHandler({
     matchesSmallTheaterCommand
   } = require('./smallTheater');
   const { createPrivateStatusBarRuntime } = require('./privateStatusBar');
+  const { createReplyVisualRuntime } = require('./replyVisual');
   const globalNapCatActionClient = actionClient;
   const inboundUserSafetyReviewer = inboundUserSafetyReviewerOverride || createInboundUserSafetyReviewer({
     actionClient: globalNapCatActionClient,
@@ -689,6 +691,11 @@ function createMessageHandler({
   const privateStatusBarRuntime = privateStatusBarRuntimeOverride || createPrivateStatusBarRuntime({
     config,
     actionClient: globalNapCatActionClient
+  });
+  const replyVisualRuntime = replyVisualRuntimeOverride || createReplyVisualRuntime({
+    config,
+    actionClient: globalNapCatActionClient,
+    privateStatusBarRuntime
   });
   const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
   const logInboundTiming = createInboundTimingLogger(inboundTimingLogFile, config.ENABLE_DEBUG_LOG);
@@ -1022,42 +1029,58 @@ function createMessageHandler({
     return luckinCommandService;
   }
 
-  function schedulePrivateStatusBar({
+  function scheduleReplyVisual({
     replyEnvelope,
     replyOptions,
     routeExecutionPlan,
     chatType,
+    groupId,
+    platform,
     senderId,
     userText,
     replyText,
-    mainReplySent
+    mainReplySent,
+    shouldSend
   } = {}) {
-    if (!privateStatusBarRuntime || typeof privateStatusBarRuntime.handle !== 'function') return;
-    void privateStatusBarRuntime.handle({
+    if (!replyVisualRuntime || typeof replyVisualRuntime.handle !== 'function') return;
+    void replyVisualRuntime.handle({
       replyEnvelope,
       replyOptions,
       routeExecutionPlan,
       topRouteType: routeExecutionPlan?.topRouteType,
       chatType,
+      groupId,
+      platform,
       userId: senderId,
       userText,
       replyText,
       mainReplySent,
-      usedTools: replyOptions?.statusBarUsedTools === true
+      usedTools: replyOptions?.statusBarUsedTools === true,
+      shouldSend
     }).then((result) => {
-      console.log('[private-status-bar] completed', {
+      console.log('[reply-visual] completed', {
         userId: String(senderId || '').trim(),
+        groupId: String(groupId || '').trim(),
+        chatType: String(chatType || '').trim(),
         ok: result?.ok === true,
         code: String(result?.code || 'unknown'),
         reason: String(result?.reason || ''),
-        stage: String(result?.stage || '')
+        stage: String(result?.stage || ''),
+        emotion: String(result?.emotion || ''),
+        intensity: String(result?.intensity || ''),
+        cooldownHit: result?.cooldownHit === true
       });
     }).catch(() => {
-      console.warn('[private-status-bar] completed', {
+      console.warn('[reply-visual] completed', {
         userId: String(senderId || '').trim(),
+        groupId: String(groupId || '').trim(),
+        chatType: String(chatType || '').trim(),
         ok: false,
         code: 'unhandled_error',
-        stage: ''
+        stage: '',
+        emotion: '',
+        intensity: '',
+        cooldownHit: false
       });
     });
   }
@@ -2119,6 +2142,16 @@ function createMessageHandler({
       continuousMeta.freshnessSessionKey = String(continuousMeta.freshnessSessionKey || rawInboundFreshnessSessionKey || '').trim();
       continuousMeta.flushVersion = Number(continuousMeta.flushVersion || rawInboundFreshnessVersion || 0) || 0;
     }
+    const replyVisualFreshnessSessionKey = String(
+      continuousMeta?.freshnessSessionKey || rawInboundFreshnessSessionKey || ''
+    ).trim();
+    const replyVisualFreshnessVersion = Number(
+      continuousMeta?.flushVersion || rawInboundFreshnessVersion || 0
+    ) || 0;
+    const shouldSendReplyVisual = () => {
+      if (!replyVisualFreshnessSessionKey || replyVisualFreshnessVersion <= 0) return true;
+      return Number(sessionActivityVersionByKey.get(replyVisualFreshnessSessionKey) || 0) === replyVisualFreshnessVersion;
+    };
     const rawText = effectiveMsg.raw_message || '';
     const slashCommandTextForConcurrency = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
     const adminFastCommandForConcurrency = isAdminUser(senderId)
@@ -3765,15 +3798,18 @@ function createMessageHandler({
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       if (sent) {
-        schedulePrivateStatusBar({
+        scheduleReplyVisual({
           replyEnvelope,
           replyOptions,
           routeExecutionPlan,
           chatType,
+          groupId: isPrivateChatType(chatType) ? '' : groupId,
+          platform: String(effectiveMsg?.platform || msg?.platform || 'qq').trim().toLowerCase() || 'qq',
           senderId,
           userText: runtimeQuestionText || cleanText,
           replyText: persistedReplyText || reply,
-          mainReplySent: true
+          mainReplySent: true,
+          shouldSend: shouldSendReplyVisual
         });
         maybeRunDeferredPersist(replyEnvelope);
         markDirectSessionPresenceReplied({ groupId, senderId, sessionKey });
@@ -3855,16 +3891,20 @@ function createMessageHandler({
       if (
         replyOptions?.streamCompleted === true
         && Number(replyOptions?.streamSendStats?.sentSegments || 0) > 0
+        && Number(replyOptions?.streamSendStats?.failedChunks || 0) === 0
       ) {
-        schedulePrivateStatusBar({
+        scheduleReplyVisual({
           replyEnvelope,
           replyOptions,
           routeExecutionPlan,
           chatType,
+          groupId: isPrivateChatType(chatType) ? '' : groupId,
+          platform: String(effectiveMsg?.platform || msg?.platform || 'qq').trim().toLowerCase() || 'qq',
           senderId,
           userText: runtimeQuestionText || cleanText,
           replyText: persistedReplyText || reply,
-          mainReplySent: true
+          mainReplySent: true,
+          shouldSend: shouldSendReplyVisual
         });
       }
       if (
