@@ -1,5 +1,7 @@
 # Private Prompt Deployment
 
+更新 2026-09-07 13:00 +08:00：Docker Compose 支持通过 `PRIVATE_PROMPTS_DIR` 从 Docker 主机注入私有 prompt；该目录只读挂载到容器，不进入镜像构建上下文、Git 或公开制品。
+
 更新 2026-06-23 09:05 +08:00：`prompts/persona/` 和 `prompts/admin.txt` 已从仓库和 `master` 历史移除。部署者需要在自己的运行环境里创建这些本地文件。
 
 ## 需要本地提供的文件
@@ -52,28 +54,48 @@ prompts/persona/09_liveness_authentic.txt
 
 ## 部署步骤
 
-1. 从仓库拉取代码后，先确认 `.gitignore` 已包含：
+1. 从仓库拉取代码后，创建一个只存放私有 prompt 的目录。推荐使用项目目录下的 `private-prompts/`，该目录已被 `.gitignore` 和 `.dockerignore` 排除：
 
 ```text
-prompts/admin.txt
-prompts/persona/
-```
-
-2. 创建目录和本地文件：
-
-```bash
-mkdir -p prompts/persona
+private-prompts/admin.txt
+private-prompts/persona/
 ```
 
 Windows PowerShell：
 
 ```powershell
-New-Item -ItemType Directory -Force prompts\persona | Out-Null
+New-Item -ItemType Directory -Force private-prompts\persona | Out-Null
 ```
 
-3. 按上面的清单写入本地 prompt 文件。
+Linux/macOS：
 
-4. 如果你希望把私有 prompt 放在项目外，设置 `PROMPTS_DIR` 指向外部目录。外部目录仍需要包含 `prompt-manifest.json`、`SYSTEM.txt`、`defaut.txt`、`GEMINI.txt`、`runtime/`、`persona_modules/`、`persona_worldbook/` 以及本文件列出的私有 prompt。
+```bash
+mkdir -p private-prompts/persona
+```
+
+2. 按上面的清单写入或上传本地 prompt 文件。远程 Docker 主机可使用：
+
+```bash
+scp -r ./private-prompts deploy-user@docker-host:/opt/mizukibot/
+```
+
+不要把真实 prompt 放进公开 Git 仓库、镜像仓库、构建归档或日志。
+
+3. 在 Docker 主机的 `.env` 中设置：
+
+```env
+PRIVATE_PROMPTS_DIR=./private-prompts
+```
+
+也可以使用 Docker 主机上的绝对路径，例如：
+
+```env
+PRIVATE_PROMPTS_DIR=/opt/mizukibot/private-prompts
+```
+
+Compose 会把该目录下的 `admin.txt` 和 `persona/` 只读挂载到容器内的标准路径。公共 prompt 仍来自镜像，私有 prompt 不需要复制进项目的 `prompts/` 目录。
+
+4. 如果希望继续沿用项目内 `prompts/admin.txt` 和 `prompts/persona/`，可以不设置 `PRIVATE_PROMPTS_DIR`；Compose 会回退到 `./prompts`。使用外部目录时只需要提供本文件列出的 `admin.txt` 和 `persona/`，不需要复制 `prompt-manifest.json`、`SYSTEM.txt` 或其他公共 prompt。
 
 5. 运行检查：
 

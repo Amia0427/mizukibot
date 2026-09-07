@@ -5,6 +5,9 @@ const yaml = require('js-yaml');
 
 const root = path.join(__dirname, '..');
 const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+const dockerignore = fs.readFileSync(path.join(root, '.dockerignore'), 'utf8');
+const gitignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
+const migrationPackScript = fs.readFileSync(path.join(root, 'scripts', 'pack-linux-migration.sh'), 'utf8');
 const compose = yaml.load(fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8'));
 
 function parseDockerfileInstructions(source) {
@@ -81,6 +84,15 @@ assert.strictEqual(mainService.environment.MIZUKIBOT_ENV_FILE, '/app/runtime.env
 assert.ok(mainService.volumes.includes('./.env:/app/runtime.env:ro'));
 assert.ok(!Object.hasOwn(workerService.environment, 'MIZUKIBOT_ENV_FILE'));
 assert.ok(workerService.volumes.every((volume) => !volume.includes('/app/runtime.env')));
+for (const service of [mainService, workerService]) {
+  assert.ok(service.volumes.includes('${PRIVATE_PROMPTS_DIR:-./prompts}/persona:/app/prompts/persona:ro'));
+  assert.ok(service.volumes.includes('${PRIVATE_PROMPTS_DIR:-./prompts}/admin.txt:/app/prompts/admin.txt:ro'));
+}
+assert.ok(dockerignore.split(/\r?\n/).includes('private-prompts'));
+assert.ok(dockerignore.split(/\r?\n/).includes('private-prompts/**'));
+assert.ok(gitignore.split(/\r?\n/).includes('private-prompts/'));
+assert.ok(migrationPackScript.includes('rm -f "$STAGE_DIR/prompts/admin.txt"'));
+assert.ok(migrationPackScript.includes('rm -rf "$STAGE_DIR/prompts/persona"'));
 assert.strictEqual(
   workerService.environment.MIZUKIBOT_POST_REPLY_WORKER_PID_FILE,
   '/app/data/runtime/post-reply-worker/worker.pid'

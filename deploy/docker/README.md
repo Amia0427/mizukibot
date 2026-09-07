@@ -1,5 +1,7 @@
 # Docker Deployment Guide (MizukiBot)
 
+更新 2026-09-07 13:00 +08:00：Compose 支持通过 `PRIVATE_PROMPTS_DIR` 从 Docker 主机注入私有 prompt。该目录只读挂载到容器标准路径，不进入镜像构建上下文、Git 或公开制品。
+
 更新 2026-06-23 00:00 +08:00：新增 Docker/Compose 部署入口。验收：目标单测、Node 语法检查、Compose YAML 解析和 Dockerfile 文本检查通过；当前本机缺少 Docker CLI，镜像构建需在安装 Docker 的环境复跑。
 
 更新 2026-06-25 13:00 +08:00：`amia/dev` 的 Docker 构建改为显式复制运行白名单，并通过 `.dockerignore` 排除 `.env`、密钥文件、运行数据、本地 MCP 配置和私有 prompt。`prompts/persona/` 与 `prompts/admin.txt` 只在 Compose 运行时只读挂载，不进入镜像。
@@ -49,11 +51,23 @@ WEB_TOKEN=your_strong_token
 DATA_DIR=/app/data
 ```
 
-容器启动前还需要在宿主机准备本地私有 prompt：
+容器启动前还需要在 Docker 主机准备私有 prompt。推荐先把它们上传到独立目录：
 
 ```text
-prompts/admin.txt
-prompts/persona/
+private-prompts/admin.txt
+private-prompts/persona/
+```
+
+在 `.env` 中设置：
+
+```env
+PRIVATE_PROMPTS_DIR=./private-prompts
+```
+
+也可以设置为 Docker 主机上的绝对路径。远程部署时，在 Docker 主机执行类似：
+
+```bash
+scp -r ./private-prompts deploy-user@docker-host:/opt/mizukibot/
 ```
 
 这些文件会被 Compose 只读挂载到容器内，不会打进镜像。详细清单见 [`../private-prompts.md`](../private-prompts.md)。

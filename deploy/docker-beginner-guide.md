@@ -1,5 +1,7 @@
 # Docker Beginner Deployment Guide
 
+更新 2026-09-07 13:00 +08:00：Docker Compose 支持从 Docker 主机的 `PRIVATE_PROMPTS_DIR` 只读注入私有 prompt；上传目录不会进入镜像或 Git。
+
 更新 2026-06-26 02:30 +08:00：这份文档给第一次用 Docker 部署 MizukiBot 的人看，只覆盖现有 `Dockerfile` 和 `docker-compose.yml` 的最小启动路径。
 
 更新 2026-07-12 20:39 +08:00：Compose 已改为非 root、只读根文件系统和受限资源运行。持久业务数据只使用 `mizukibot-data`；容器控制台日志由 Docker `local` 驱动轮转。主服务会可写挂载宿主 `.env` 以支持 Web 设置保存，Linux 部署必须先确认该文件对容器内 UID/GID `1000:1000` 可写。
@@ -86,30 +88,44 @@ stat -c '%u:%g %a %n' .env
 
 Linux 上如果 NapCat 跑在宿主机，`host.docker.internal` 可能不可用。先用宿主机网关地址替换 `NAPCAT_HTTP_API_BASE_URL`，例如 `http://172.17.0.1:3000`；不同机器网关可能不同。
 
-## 第四步：准备私有 prompt
+## 第四步：上传私有 prompt
 
-Compose 会把这两个路径只读挂进容器：
-
-```text
-prompts/admin.txt
-prompts/persona/
-```
-
-至少准备这些文件：
+推荐在项目目录下的 `private-prompts/` 准备私有目录，该目录已被 `.gitignore` 和 `.dockerignore` 排除：
 
 ```text
-prompts/admin.txt
-prompts/persona/01_identity.txt
-prompts/persona/02_style.txt
-prompts/persona/03_boundaries.txt
-prompts/persona/04_behavior.txt
-prompts/persona/05_examples.index.json
-prompts/persona/05_voice_samples.txt
-prompts/persona/06_state_modulation.txt
-prompts/persona/09_liveness_authentic.txt
+private-prompts/admin.txt
+private-prompts/persona/
 ```
 
-最小可用的 `prompts/persona/05_examples.index.json`：
+至少上传这些文件：
+
+```text
+private-prompts/admin.txt
+private-prompts/persona/01_identity.txt
+private-prompts/persona/02_style.txt
+private-prompts/persona/03_boundaries.txt
+private-prompts/persona/04_behavior.txt
+private-prompts/persona/05_examples.index.json
+private-prompts/persona/05_voice_samples.txt
+private-prompts/persona/06_state_modulation.txt
+private-prompts/persona/09_liveness_authentic.txt
+```
+
+远程 Docker 主机可以从本地上传：
+
+```bash
+scp -r ./private-prompts deploy-user@docker-host:/opt/mizukibot/
+```
+
+在 Docker 主机的 `.env` 中设置：
+
+```env
+PRIVATE_PROMPTS_DIR=./private-prompts
+```
+
+如果使用项目外的目录，改成 Docker 主机上的绝对路径。Compose 会将该目录只读挂载到容器的 `/app/prompts/admin.txt` 和 `/app/prompts/persona/`。
+
+最小可用的 `private-prompts/persona/05_examples.index.json`：
 
 ```json
 {
@@ -228,7 +244,7 @@ docker compose up -d
 
 ### 缺少私有 prompt
 
-日志里出现 `Missing persona prompt files` 时，回到第四步补齐 `prompts/persona/` 文件。
+日志里出现 `Missing persona prompt files` 时，确认 `PRIVATE_PROMPTS_DIR` 指向 Docker 主机上的私有目录，并补齐 `private-prompts/persona/` 文件。
 
 ### Web 面板 401
 
@@ -264,6 +280,7 @@ docker compose down -v
 secrets/
 prompts/admin.txt
 prompts/persona/
+private-prompts/
 data/
 artifacts/
 logs/

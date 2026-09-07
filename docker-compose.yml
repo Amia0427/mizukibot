@@ -48,8 +48,8 @@ services:
     volumes:
       - mizukibot-data:/app/data
       - ./.env:/app/runtime.env:ro
-      - ./prompts/persona:/app/prompts/persona:ro
-      - ./prompts/admin.txt:/app/prompts/admin.txt:ro
+      - "${PRIVATE_PROMPTS_DIR:-./prompts}/persona:/app/prompts/persona:ro"
+      - "${PRIVATE_PROMPTS_DIR:-./prompts}/admin.txt:/app/prompts/admin.txt:ro"
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
 
@@ -101,8 +101,8 @@ services:
       start_period: 20s
     volumes:
       - mizukibot-data:/app/data
-      - ./prompts/persona:/app/prompts/persona:ro
-      - ./prompts/admin.txt:/app/prompts/admin.txt:ro
+      - "${PRIVATE_PROMPTS_DIR:-./prompts}/persona:/app/prompts/persona:ro"
+      - "${PRIVATE_PROMPTS_DIR:-./prompts}/admin.txt:/app/prompts/admin.txt:ro"
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
 

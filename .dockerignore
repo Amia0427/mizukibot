@@ -47,6 +47,8 @@ secrets
 prompts/admin.txt
 prompts/persona
 prompts/persona/**
+private-prompts
+private-prompts/**
 prompts/*.bak
 prompts/*.zip
 *.key

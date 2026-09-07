@@ -39,6 +39,8 @@ copy_item .gitignore
 
 rm -rf "$STAGE_DIR/node_modules" "$STAGE_DIR/logs"
 rm -f "$STAGE_DIR/.env"
+rm -f "$STAGE_DIR/prompts/admin.txt"
+rm -rf "$STAGE_DIR/prompts/persona"
 
 tar -czf "$ARCHIVE_PATH" -C "$OUT_DIR" "$PACK_NAME"
 

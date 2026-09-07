@@ -63,6 +63,7 @@ prompts/*.zip
 prompts/admin.txt
 prompts/persona/
 prompts/persona/*.zip
+private-prompts/
 
 # Local Windows ops artifacts
 ops/windows/
