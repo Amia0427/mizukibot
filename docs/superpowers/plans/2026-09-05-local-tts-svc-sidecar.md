@@ -16,6 +16,7 @@
 - [x] 增加 `LOCAL_TTS_BACKEND=piper|cosyvoice`，并用 `COMPANION_VOICE_LOCAL_TTS_ENABLED`、`COMPANION_VOICE_LOCAL_SVC_ENABLED` 分别控制基础 TTS 和 SVC。
 - [x] 下载并加载 Piper `ja_JA-hi_fi_captain-medium`、瑞希 `mzk.pth`、ContentVec 和 RMVPE。
 - [x] 完成 Piper → 瑞希 SVC → MP3 真实串联，输出 44.1 kHz，已测峰值显存约 1.34 GB。
+- [x] 2026-09-07 接入 `MZK_SVC_AUTO_PREDICT_F0`，并在单实例 CUDA sidecar 中验证文本朗读路径。
 - [x] 完成 `/health`、`/synthesize` 和 Node 本地 Provider 真实 HTTP 验收；Node 请求返回 56,886 字节 `audio/mpeg`，完整服务使用当前 `.env` 将两段日文依次处理为 `accepted + record`，没有文字回退。
 - [x] QQ Provider、私聊/群聊 `record`、工具上下文和平台注册表定向测试通过。
 - [x] `lint`、`typecheck`、全仓密钥扫描和差异检查通过。
@@ -26,6 +27,12 @@
 - [ ] 正式验收 Discord 和微信语音路径。
 
 以下原始分阶段计划保留为 CosyVoice 和后续平台工作的路线记录，不作为当前 Piper 最小上线链路的完成条件。
+
+## 补充验收结论（2026-09-07 12:52 +08:00）
+
+- 当前 `mzk_release` 已确认是 So-VITS-SVC 音频转换模型，不是文本到瑞希角色语音的 TTS 模型。Piper 日文源音频经过 SVC 后可以正常输出 MP3，但源音频的音高、节奏和部分音色特征仍会保留。
+- `MZK_SVC_AUTO_PREDICT_F0=true` 适合文本朗读源音频，真实 `/health` 显示已生效，HTTP 合成返回 200；A/B 音频指标只显示基频小幅变化，不能作为“瑞希音色已修复”的依据。
+- 因此“稳定文本到瑞希角色朗读音色”仍标记为未完成，后续需要专用瑞希 TTS/VC 模型或使用合规瑞希语音数据进行微调；本轮不修改 QQ `record` 发送链路。
 
 ## 文件边界
 

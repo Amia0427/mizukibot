@@ -28,15 +28,17 @@
 
 本阶段先以 QQ 为可用目标，语音能力的稳定出站边界是 `src/platforms/qqAdapter.js`：私聊使用 `send_private_msg`，群聊使用 `send_group_msg`，消息段为 OneBot `record`，音频使用 MP3 Buffer 的 `base64://` 形式。`companion_voice_reply` 只接收文本，投递目标必须由当前入站消息上下文提供，不能接受模型传入的平台、用户或群 ID。
 
+2026-09-07 修复了明确语音请求的路由入口：`core/router/index.js` 会在用户使用“用语音回复/朗读/说给我听”等明确表达时生成 `allowedTools: ['companion_voice_reply']` 的工具路由；普通聊天仍保持 `toolIntent: none`，不会因为 TTS 已配置就自动语音化。
+
 Provider 放在 `src/features/companion-voice/provider.js`，通过 `COMPANION_VOICE_PROVIDER` 在外部 OpenAI-compatible TTS 与本地 HTTP TTS 中显式二选一；服务层负责分段、顺序、并发和文字回退。QQ 发送错误中，NapCat 连接前失败属于 `not_submitted`，响应无法判断时属于 `unknown`；后者禁止自动重发或文字补发。
 
-本地模型 sidecar 独立放在 `D:\tts-models`，Node 主进程只持有 HTTP Provider 边界。当前最小实现使用 Piper 日文 ONNX 在 CPU 生成源 WAV，再使用瑞希 `mzk.pth`、ContentVec 和 RMVPE 在 CUDA 上完成 So-VITS-SVC 转换，最后通过 `imageio-ffmpeg` 内置 FFmpeg 输出 MP3；两个阶段分别由 `COMPANION_VOICE_LOCAL_TTS_ENABLED` 和 `COMPANION_VOICE_LOCAL_SVC_ENABLED` 控制，基础后端由 `LOCAL_TTS_BACKEND=piper|cosyvoice` 选择。
+本地模型 sidecar 独立放在 `D:\tts-models`，Node 主进程只持有 HTTP Provider 边界。当前最小实现使用 Piper 日文 ONNX 在 CPU 生成源 WAV，再使用瑞希 `mzk.pth`、ContentVec 和 RMVPE 在 CUDA 上完成 So-VITS-SVC 转换，最后通过 `imageio-ffmpeg` 内置 FFmpeg 输出 MP3；两个阶段分别由 `COMPANION_VOICE_LOCAL_TTS_ENABLED` 和 `COMPANION_VOICE_LOCAL_SVC_ENABLED` 控制，基础后端由 `LOCAL_TTS_BACKEND=piper|cosyvoice` 选择。SVC 的 `MZK_SVC_AUTO_PREDICT_F0=true` 已接入配置，适合文本朗读源音频；它只改变音高预测，不会把音频转换模型变成文本直出角色 TTS。
 
 旧版 So-VITS-SVC 与当前 torchaudio 的兼容处理只放在 sidecar 适配层：保留旧调用需要的 `set_audio_backend` 入口，并用 SoundFile 读取临时 WAV，未修改 vendor 源码、未降级已验证的 CUDA PyTorch。2026-09-06 实机验收完成了 Python 串联推理、HTTP `audio/mpeg` 响应和 Node Provider 真实调用；输出为 44.1 kHz MP3，已测峰值显存约 1.34 GB。完整语音服务使用当前 `.env` 将两段日文依次处理为 `accepted + record`，没有文字回退；QQ Provider、私聊/群聊 `record`、工具上下文和平台注册表定向测试通过。测试环境为 Node 24.14.1，而项目声明的 Node 20 本机未安装，因此 Node 20 仍需部署环境复验。
 
 `npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。完整 `npm test` 的语音相关用例通过，但仍有 3 个既有失败：`agentPrompts.test.js`、`checkPromptsIntegration.test.js` 受 `prompts/ADULT.txt` 未被 manifest/allowlist 引用影响，`voiceInputIngress.test.js` 的既有超时配置期望不一致。
 
-真实 QQ 客户端收音、CosyVoice 后端、SVC 微调训练、Discord 附件、微信 outbox 文件发送和微信 `voice_item` 实验仍未完成。后续实现必须分别补平台定向测试和真实平台验收，不要把 QQ 的 `record` 结构直接复用到其他平台。
+真实 QQ 客户端收音、CosyVoice 后端、SVC 微调训练、Discord 附件、微信 outbox 文件发送和微信 `voice_item` 实验仍未完成。当前已确认 `Strelexia/ProjectSekaiVITSModel` 的 `mzk_release` 是 So-VITS-SVC 音频转换模型，不是瑞希文本 TTS；Piper + SVC 可以完成转换，但不能保证稳定的瑞希日文角色朗读音色。后续若要解决音色根因，应使用专用瑞希 TTS/VC 模型或用瑞希语音数据重新训练/微调，并分别补平台定向测试和真实平台验收。不要把 QQ 的 `record` 结构直接复用到其他平台。
 
 ## 2. 项目级设计约束
 

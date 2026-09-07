@@ -2291,3 +2291,19 @@
 - 准确性边界：明确本地 Piper→瑞希 SVC→MP3 与 Node 服务调用已经验收，但真实 QQ 私聊和群聊客户端收音仍需管理员手动完成；未把 CosyVoice、SVC 微调训练、Discord 或微信语音描述为已上线。
 - 验收：公告文件存在、README 语音章节入口已写入、Markdown 差异检查通过；本轮不修改业务代码、模型权重、生成音频、`.env` 或其他并行开发内容。
 - 小目标已完成：公告正文已单独提交；本记录随后单独提交，README 入口保留在并行暂存区中，未提交或取消其他代理的改动，未推送远端。
+
+## 运行维护 2026-09-07
+
+- 小目标：修复 QQ 明确语音请求始终只返回文字的问题。
+- 根因：`companion_voice_reply` 虽已注册到工具 schema 和 Companion 工具预设，但本地路由没有识别“请用语音说/朗读/说给我听”等请求，最终生成 `toolIntent=none`、`allowedTools=[]`，模型看不到语音工具。
+- 修复：在 `core/router/index.js` 增加明确语音请求本地规则，QQ 私聊和群聊均路由到 `companion_voice_reply`；普通聊天规则不变，TTS Provider、QQ `record` payload、投递目标和授权策略不变。
+- 验收：`tests/companionVoiceRoute.test.js`、`tests/companionVoice.test.js`、`tests/companionVoiceIntegration.test.js`、`tests/companionVoiceMultichannel.test.js` 通过；路由探针确认私聊/群聊均为 `allowTools=true` 且只包含 `companion_voice_reply`。主 Bot 重启后运行态正常，真实 QQ 客户端收音待用户重新发送明确语音请求确认。
+- 边界：未修改 `.env`、`D:\tts-models`、模型权重、其他平台实现或并行代理改动，未推送远端。
+
+## 运行维护 2026-09-07 12:52
+
+- 小目标：排查 QQ 已能发送但音色不像瑞希的问题。
+- 根因：`D:\tts-models` 的 `mzk_release` 是 So-VITS-SVC 音频转换模型，原有 sidecar 将 `auto_predict_f0` 硬编码为 `false`；这会保留 Piper 源音频的音高和韵律，但即使开启自动 F0，也不能将文本 TTS 变成稳定的瑞希角色朗读音色。
+- 修复：新增 `MZK_SVC_AUTO_PREDICT_F0` 配置，接入 `app/config.py`、`app/pipeline.py`、`.env.example` 和配置测试；本机 `D:\tts-models\.env` 已设为 `true`，sidecar 单实例重启后 `/health` 返回 `svcAutoPredictF0=true`。
+- 验收：sidecar 配置单元测试 7 项通过，Python 编译检查通过；真实 HTTP 日文合成返回 200 和 48,109 字节 MP3，SVC 仍走 CUDA，未启动第二个模型进程。A/B 指标显示仅基频分布小幅变化，因此没有把自动 F0 宣传为音色修复。
+- 未完成：专用瑞希 TTS/VC 模型选择、瑞希语音数据微调和稳定文本到角色音色的真实试听验收仍未完成；QQ 发送链路、OneBot `record`、授权和当前投递目标本轮未改。

@@ -27,7 +27,9 @@
 - Provider 可在 `COMPANION_VOICE_PROVIDER=external|local` 中显式选择：`external` 使用 OpenAI-compatible `/audio/speech`，`local` 使用本地 HTTP TTS；两者不会自动互相切换。启用前配置 `COMPANION_VOICE_ENABLED=true`、对应 URL、音色和必要的 API Key。
 - 文本按句末标点切分，每段最多 300 字、单次最多 4 段；同一调用内按顺序发送，TTS 临时失败或 QQ 明确未提交时按片段文字回退，发送状态不确定时不自动重发。
 - 本地实机验收（2026-09-06）：`D:\tts-models` 已以 Windows 原生方式运行 Piper 日文 ONNX → 瑞希 So-VITS-SVC → MP3 sidecar；Node 本地 Provider 对 `http://127.0.0.1:6843/synthesize` 的真实日文请求返回 56,886 字节 MP3，完整语音服务使用当前 `.env` 将两段日文依次处理为 `accepted + record`，没有文字回退。SVC 使用 CUDA、ContentVec 和 RMVPE，串联输出为 44.1 kHz，已测峰值显存约 1.34 GB。
+- 2026-09-07 12:52 +08:00：已把 `MZK_SVC_AUTO_PREDICT_F0=true` 接入 sidecar 并在单实例 CUDA 服务上验证，`/health` 显示开关已生效，同一句日文返回 HTTP 200、48,109 字节 MP3。基频仅小幅变化，未解决 Piper 源音色问题；原因是 `mzk_release` 属于 So-VITS-SVC 音频转换模型，不是瑞希文本 TTS。当前链路可用，但不能承诺稳定的瑞希角色朗读音色；需要专用瑞希 TTS/VC 或瑞希语音数据微调。
 - QQ Provider、私聊/群聊 `record`、工具上下文和授权定向测试已通过，`npm run lint`、`npm run typecheck`、`npm run check:secrets:all` 和 `git diff --check` 通过。完整 `npm test` 仍有 3 个既有失败：`agentPrompts.test.js`、`checkPromptsIntegration.test.js` 受未纳入 manifest/allowlist 的 `prompts/ADULT.txt` 影响，`voiceInputIngress.test.js` 存在既有超时配置期望不一致；真实 QQ 客户端收音仍待人工确认。当前未完成：CosyVoice 高质量后端、SVC 微调训练、Discord 音频附件和微信语音的正式验收，详见[多平台部署说明](docs/multi-platform-deployment.md)、[多渠道实施记录](docs/superpowers/plans/2026-09-05-multichannel-on-demand-voice.md)和[本地模型实施记录](docs/superpowers/plans/2026-09-05-local-tts-svc-sidecar.md)。
+- 2026-09-07 修复明确语音请求路由：`请用语音说……`、`朗读……`、`说给我听……` 等表达现在会把 `companion_voice_reply` 放入 QQ 私聊/群聊的当前工具集合；普通聊天仍不会自动触发语音。路由入口回归已通过，真实 QQ 客户端收音仍需重新手动验收。
 - 面向 QQ 用户的可发布文案、触发示例、管理员配置、启动验收和排障步骤见[QQ 按需语音更新公告及使用说明](docs/qq-voice-update-announcement-2026-09-06.md)。
 
 ## QQ 语音输入与歌词文本评价 2026-09-04 17:40 +08:00
@@ -107,7 +109,7 @@
 
 ## QQ 私聊按需语音 2026-08-25 11:40 +08:00
 
-- 新增 `companion_voice_reply` 工具，仅在 QQ 私聊用户明确要求语音、朗读或“说给我听”时调用；普通回复、群聊和主动私聊仍保持文字，不自动转语音。
+- 新增 `companion_voice_reply` 工具，仅在 QQ 私聊或群聊用户明确要求语音、朗读或“说给我听”时调用；普通回复和主动任务仍保持文字，不自动转语音。
 - 功能默认关闭。启用后通过独立 OpenAI-compatible `/audio/speech` 端点生成不超过 300 字的 MP3，再用现有 NapCat OneBot `record` 消息段直接发送，不创建临时音频文件。
 - TTS 生成或 QQ 发送失败时不重试语音，主回复会直接使用同一段文字回退；工具按外部发送副作用执行显式确认。
 

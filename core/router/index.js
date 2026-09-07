@@ -479,6 +479,47 @@ function matchTerminalLocalRoute({ rawText = '', cleanText = '', imageUrl = null
   return null;
 }
 
+function hasExplicitVoiceRequest(text = '') {
+  const input = String(text || '').trim();
+  if (!input) return false;
+  return /(?:用语音(?:回复|说|回答|朗读|发)|语音(?:回复|说|回答|发送|发给我)|发(?:一条|个)?语音|朗读(?:一下|这段|出来)?|读(?:一下|给我听|出来)|说给我听|用声音(?:说|回答|回复)|音声で(?:答えて|話して|言って|返して|送って)|読み上げて|声で(?:答えて|話して|返して)|音声を送って|read\s+(?:this|it|that)\s+(?:aloud|out\s+loud)|say\s+(?:this|it|that)(?:\s+(?:aloud|out\s+loud))?|reply\s+(?:with|in)\s+(?:a\s+)?(?:voice|audio)|send\s+(?:me\s+)?(?:a\s+)?(?:voice\s+message|audio\s+message)|text[- ]to[- ]speech)/i.test(input);
+}
+
+function matchVoiceLocalRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null }) {
+  if (imageUrl) return null;
+  const voiceRequestText = String(currentTurnText || cleanText || '').trim();
+  if (!hasExplicitVoiceRequest(voiceRequestText)) return null;
+  return makeRoute({
+    confidence: 0.99,
+    cleanText,
+    rawText,
+    imageUrl,
+    topRouteType: 'direct_chat',
+    intent: {
+      risk: 'medium',
+      toolNeed: ['network'],
+      executionMode: 'staged',
+      needsPlanning: false,
+      needsMemory: false
+    },
+    facets: {
+      modality: 'text',
+      sourceScope: 'none',
+      domain: 'general',
+      outputKind: 'action',
+      freshness: 'unknown'
+    },
+    meta: {
+      reason: 'explicit-voice-request',
+      localRuleId: 'explicit-voice-request',
+      allowedTools: ['companion_voice_reply'],
+      chatMode: 'text_chat',
+      toolIntent: 'force_tools',
+      responseIntent: 'action_guidance'
+    }
+  });
+}
+
 function matchActionLocalRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null, userId = '' }) {
   const actionIntentText = String(currentTurnText || cleanText || '').trim();
   if (!imageUrl && isWeatherAlertManagementText(actionIntentText)) {
@@ -1069,6 +1110,7 @@ function matchEnvironmentDataLocalRoute({ rawText = '', cleanText = '', currentT
 const LOCAL_ROUTE_RULE_GROUPS = Object.freeze([
   matchTerminalLocalRoute,
   matchEnvironmentDataLocalRoute,
+  matchVoiceLocalRoute,
   matchActionLocalRoute,
   matchDirectLocalRoute
 ]);

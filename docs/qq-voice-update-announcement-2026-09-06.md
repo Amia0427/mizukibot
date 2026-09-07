@@ -125,6 +125,7 @@ MZK_SVC_SPEAKER=mzk
 MZK_SVC_DEVICE=cuda
 MZK_SVC_F0_PREDICTOR=rmvpe
 MZK_SVC_TRANSPOSE=0
+MZK_SVC_AUTO_PREDICT_F0=true
 
 VOICE_FFMPEG_PATH=auto
 VOICE_SIDECAR_MAX_TEXT_CHARS=300
@@ -235,6 +236,7 @@ curl.exe -X POST http://127.0.0.1:6843/synthesize ^
 - 将容易误读的人名或汉字换成假名。
 - 先关闭 SVC 试听 Piper 原音：如果原音已经误读，问题不在音色模型。
 - 当前 Piper 是优先上线的小模型，后续 CosyVoice 才是更高质量基础语音方向。
+- 2026-09-07 12:52 +08:00 复核：已开启 SVC 的自动 F0 预测并完成真实 HTTP 合成，但该开关只改善音高预测，不能解决源 TTS 音色残留。当前 `mzk_release` 是音频转换模型，不是文本直出瑞希的 TTS；稳定的瑞希日文角色朗读音色、专用 TTS/VC 模型和自有数据微调仍未完成。
 
 ### 音色相似但情绪不足
 
