@@ -2314,3 +2314,10 @@
 - 修复：新增 `MZK_SVC_AUTO_PREDICT_F0` 配置，接入 `app/config.py`、`app/pipeline.py`、`.env.example` 和配置测试；本机 `D:\tts-models\.env` 已设为 `true`，sidecar 单实例重启后 `/health` 返回 `svcAutoPredictF0=true`。
 - 验收：sidecar 配置单元测试 7 项通过，Python 编译检查通过；真实 HTTP 日文合成返回 200 和 48,109 字节 MP3，SVC 仍走 CUDA，未启动第二个模型进程。A/B 指标显示仅基频分布小幅变化，因此没有把自动 F0 宣传为音色修复。
 - 未完成：专用瑞希 TTS/VC 模型选择、瑞希语音数据微调和稳定文本到角色音色的真实试听验收仍未完成；QQ 发送链路、OneBot `record`、授权和当前投递目标本轮未改。
+
+## 运行维护 2026-09-07 13:00 +08:00
+
+- 小目标：支持 Docker 部署时从 Docker 主机上传并注入私有 prompt，同时避免私有内容进入镜像、Git、迁移归档或公开制品。
+- 实现：Compose 新增 `PRIVATE_PROMPTS_DIR`，将 `admin.txt` 和 `persona/` 以只读方式挂载到两个容器；`.gitignore`、`.dockerignore` 和 Linux 迁移打包脚本同步排除独立私有目录及项目内旧私有 prompt 路径。
+- 验收：Compose YAML 和私有挂载断言、Docker 安全配置测试、全量密钥扫描、开发文档链接检查及 `npm run lint` 通过；当前机器缺少可用 Docker Compose 插件和 Docker daemon，真实镜像构建/容器启动待具备 Docker 运行环境后复验。
+- 小目标已完成：实现提交 `9c5a69d8`；更新 Docker 部署文档、初学者指南、私有 prompt 说明和 README，未修改 `prompts/admin.txt` 或其他并行工作区改动，未推送远端。
