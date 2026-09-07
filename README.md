@@ -1,6 +1,6 @@
 # MizukiBot
 
-## 记忆运行态验收 2026-09-08 00:04 +08:00
+## 记忆运行态验收 2026-09-07 16:00 UTC
 
 - Memory V3、LangGraph V2 和 post-reply worker 已完成真实运行态复核：主 bot/worker 均为单实例运行，队列无待处理或失败任务，SQLite checkpoint/event 正常落盘，LanceDB 与 SQLite 当前 ready 数据 `6242/6242` 对齐。
 - 当前 `node scripts/diagnose-runtime-status.js --json` 返回 `overallStatus=ok`、`signals=[]`；仍有 765 条 profile embedding 按既有 watchdog 小批量补齐，journal embedding 已无待处理项。详细记录见 [运行维护日志](docs/maintenance-log.md)。

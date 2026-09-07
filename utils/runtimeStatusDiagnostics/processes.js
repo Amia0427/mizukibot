@@ -186,7 +186,12 @@ function processMatchesProjectRoot(proc = {}, projectRoot = '') {
 
 function processMatchesMain(proc = {}, projectRoot = '') {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  return /(^|[\s/"'])index\.js(["']?)(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc, projectRoot);
+  if (!cmd) return false;
+  const root = getDiagnosticProjectRoot(projectRoot);
+  const expectedPath = `${root}/index.js`;
+  return extractKnownProjectScriptTokens(cmd).some((token) => (
+    token === 'index.js' || token === expectedPath
+  ));
 }
 
 function isNodeProcess(proc = {}) {

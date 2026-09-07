@@ -167,10 +167,14 @@ module.exports = (() => {
       { pid: 111, ppid: 1, name: 'node.exe', commandLine: 'node index.js' },
       { pid: 221, ppid: 1, name: 'cmd.exe', commandLine: 'cmd.exe /d /s /c ""C:\\Program Files\\nodejs\\node.exe" "scripts/post-reply-worker.js""' },
       { pid: 222, ppid: 1, name: 'node.exe', commandLine: '"C:\\Program Files\\nodejs\\node.exe" scripts/post-reply-worker.js' },
+      { pid: 444, ppid: 1, name: 'node.exe', commandLine: 'node node_modules/@memtensor/memos-api-mcp/build/index.js' },
       { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/other-worker.js' }
     ];
     const alive = new Set([111, 221, 222, 333]);
     const { buildRuntimeStatusDiagnostic, buildRuntimeStatusText } = require('../utils/runtimeStatusDiagnostics');
+    const { processMatchesMain } = require('../utils/runtimeStatusDiagnostics/processes');
+    assert.strictEqual(processMatchesMain({ commandLine: `node "${path.join(tempDir, 'index.js')}"` }, tempDir), true);
+    assert.strictEqual(processMatchesMain({ commandLine: 'node node_modules/@memtensor/memos-api-mcp/build/index.js' }, tempDir), false);
     const report = buildRuntimeStatusDiagnostic({
       projectRoot: tempDir,
       now: () => now,
@@ -186,6 +190,7 @@ module.exports = (() => {
     assert.ok(Array.isArray(report.signals));
 
     assert.strictEqual(report.summary.mainProcess.status, 'running');
+    assert.strictEqual(report.summary.mainProcess.processCount, 1);
     assert.strictEqual(report.summary.postReplyWorker.status, 'running');
     assert.strictEqual(report.summary.postReplyWorker.pidFileMatch, true);
     assert.strictEqual(report.summary.postReplyWorker.processCount, 1);

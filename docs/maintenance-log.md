@@ -1,8 +1,8 @@
-## 运行维护 2026-09-08 00:04 +08:00
+## 运行维护 2026-09-07 16:00 UTC
 
 - 小目标：复核并修复 Memory V3 的真实运行态，确认记忆事件、投影、SQLite checkpoint 和 LanceDB 是否持续落盘并正常运行。
 - 修复：主进程诊断只匹配项目根目录的 `index.js`，不再把 `node_modules/@memtensor/memos-api-mcp/build/index.js` 误判为第二个主 bot；两个历史 SQLite `running/route` checkpoint 通过原子 `saveTransition()` 收口为 `aborted/stale_recovery`，保留原 state 和全部事件并追加 `checkpoint_stale_recovered`；LanceDB 执行正式 reconcile/compact，同步 100 条 profile embedding，并归档 6 个历史 post-reply failed job，未删除原始记录。
-- 运行验收：2026-09-08 00:00 +08:00，主 bot PID `52528`、post-reply worker PID `26076` 均为 running 且各仅 1 个匹配进程；队列 `queued=0/processing=0/failed=0`；LangGraph V2 `activeCheckpoints=0/staleRunningCheckpoints=0`，SQLite `healthy` 且两库 `quick_check=ok`；Memory V3 投影 `projectionStale=false`；LanceDB 与 SQLite 对齐 `6242/6242`，`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`；`diag:runtime` 最终 `overallStatus=ok`、`signals=[]`。
+- 运行验收：2026-09-07 16:00 UTC，主 bot PID `52528`、post-reply worker PID `26076` 均为 running 且各仅 1 个匹配进程；队列 `queued=0/processing=0/failed=0`；LangGraph V2 `activeCheckpoints=0/staleRunningCheckpoints=0`，SQLite `healthy` 且两库 `quick_check=ok`；Memory V3 投影 `projectionStale=false`；LanceDB 与 SQLite 对齐 `6242/6242`，`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`；`diag:runtime` 最终 `overallStatus=ok`、`signals=[]`。
 - 后续：仍有 765 条 profile embedding 待后台小批量处理，journal embedding 已 `pending=0/failed=0`；这不影响当前 SQLite/LanceDB 已就绪数据的正常落盘和召回，继续由现有 watchdog/backfill 逐批消化。
 - 验收命令：`node tests/runtimeStatusDiagnostics.test.js`、`node scripts/repair-memory-vector-index.js --apply --compact`、`node scripts/backfill-memory-v3-embeddings.js --resume --source memory --limit 100 --max-batches 1 --sync-after`、`node scripts/diagnose-runtime-status.js --json`、`node scripts/diagnose-memory-ops.js storage-overlap --json`、`node scripts/check-sqlite-integrity.js data/profile_journal.sqlite data/langgraph_v2.sqlite` 均通过。
 
